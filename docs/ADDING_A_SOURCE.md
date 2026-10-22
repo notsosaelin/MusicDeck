@@ -128,11 +128,13 @@ class ExampleService(MusicService):
 | `prepare_config(config, previous)` | if the dialog has fields | Normalise what the dialog sent before saving. Called synchronously. Turn passwords into something non-reversible here, or in `authenticate`. |
 | `authenticate(config, previous, runtime_dir)` | if signing in uses the dialog's fields | Async; exchange a typed password for a token, drop the password, keep the token when editing without retyping. Raise `ServiceError` to show a message in the dialog. |
 | `sign_in(options, runtime_dir)` | if sign-in happens on a web page or with a code | Return a `SignIn` (see below). |
+| `account(config)` | if it has accounts | A stable key for the signed-in account (user id, or server + user). Lets people add several accounts and stops the same one being added twice. |
+| `remove()` | if it keeps files | Delete what it stored in `runtime_dir` when the user removes the source. |
 | `start()` / `stop()` | yes | Create / close HTTP sessions, helper processes. Called when the source is created, edited or removed. |
 | `test()` | recommended | A short status shown after saving ("Signed in as …"). Raise `ServiceError` if it doesn't work. |
 | `home()` | yes | List of Sections for the Library tab. Put a `models.section("Library", [...list collections])` last if you have fixed lists like "Favourite tracks". |
 | `open(kind, id)` | yes | A Page for a Collection the user selected. `kind` is whatever you put in the Collection. |
-| `search(query)` | yes | A Page. Set `tracks_first=True` if songs are the best matches. |
+| `search(query)` | yes | A Page. Set `tracks_first=True` if songs are the best matches. A Page can also carry an `action` (header button, e.g. Steam's `steam://install/<appid>`) and a `notice`. |
 | `stream(track_id)` | yes | A `StreamSource`; see below. |
 | `art(art_id)` | if you return art ids | A `StreamSource` for the image. |
 | `star`, `scrobble`, `lyrics`, `radio`, `user_playlists`, `add_to_playlist`, `save_queue`, `load_queue` | per `features` | See `base.py` for signatures and meaning. |
@@ -164,7 +166,9 @@ Rules that keep playback reliable:
   a secret under another name, add the name there.
 - To persist a config change at runtime (a rotated refresh token, a favourite station), call
   `self.save_config(self.config)`. The plugin sets this attribute on every instance.
-- Files belong in `self.runtime_dir` (`~/homebrew/data/MusicDeck`); prefix them with your type.
+- Files belong in `self.runtime_dir` (`~/homebrew/data/MusicDeck`); name them with your type and
+  `self.instance_id` (or the account), never one shared file per type: people can add the same
+  service twice. Delete them in `remove()`.
 
 ### Signing in on the web or with a code
 
@@ -270,6 +274,8 @@ return, search, play (seek, skip, let a track end), favourite, and check the deb
 - [ ] `features` lists exactly what's implemented
 - [ ] Every user-facing failure is a `ServiceError` with a short, plain message
 - [ ] Secrets are in `SECRET_KEYS`; no passwords stored; no credentials in URLs the UI sees
+- [ ] Two sources of this type can coexist: files per instance/account, `account()` if it signs in,
+  `remove()` cleans up
 - [ ] Signed URLs have `expires`
 - [ ] No top-level import of `xml`, `html`, `webbrowser`, `getpass`
 - [ ] Offline tests added; `python tests/test_backend.py` passes; `npx tsc --noEmit` passes

@@ -12,6 +12,7 @@ import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
 import { player } from "./player";
 import { setSleepTimer, sleepTimer } from "./sleep";
+import { syncSteam, watchRunningGame } from "./steam";
 import { installQamPatch } from "./qam";
 import { pluginState, refreshState } from "./store";
 
@@ -33,6 +34,7 @@ export default definePlugin(() => {
       player.setVolume(state.volume);
       player.setEq(state.eq);
       player.setPlayback(state.playback);
+      syncSteam();
       // Pick up where we left off (here, or on another device via the server's saved queue)
       if (state.playback.resume) {
         const session = await api.loadSession();
@@ -41,6 +43,7 @@ export default definePlugin(() => {
     })
     .catch((e) => console.error("[MusicDeck] Failed to load state", e));
 
+  const unwatchGames = watchRunningGame();
   const unpatchQam = installQamPatch(
     <MusicPanel />,
     // Native tabs pass a pre-styled element; a bare string renders unstyled
@@ -61,6 +64,7 @@ export default definePlugin(() => {
     switchSource,
     setSleepTimer,
     sleepTimer,
+    syncSteam,
     // open dialogs for on-device layout checks: a source's edit dialog, or the add dialog for a type
     sourceDialog: (idOrType: string) => {
       const state = pluginState.get();
@@ -80,6 +84,7 @@ export default definePlugin(() => {
     icon: <FaMusic />,
     onDismount() {
       unpatchQam?.();
+      unwatchGames();
       setSleepTimer(null);
       player.destroy();
       // a reload can mount the new instance before this one unmounts; only remove our own handle

@@ -1,6 +1,15 @@
-import { DialogButton, Field, Focusable, PanelSection, PanelSectionRow, Spinner, TextField } from "@decky/ui";
+import {
+  DialogButton,
+  Field,
+  Focusable,
+  Navigation,
+  PanelSection,
+  PanelSectionRow,
+  Spinner,
+  TextField,
+} from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useState } from "react";
-import { FaPlay, FaPlus, FaRandom, FaSearch } from "react-icons/fa";
+import { FaDownload, FaExternalLinkAlt, FaPlay, FaPlus, FaRandom, FaSearch } from "react-icons/fa";
 import {
   Collection,
   CollectionKind,
@@ -243,10 +252,13 @@ const PageBody: FC<{ instanceId: string; stack: StackName; page: Page; playlistI
   );
   return (
     <>
+      {page.notice && <Message>{page.notice}</Message>}
       {/* search results lead with songs and videos; artist pages lead with releases */}
       {page.tracks_first ? trackSections : collectionSections}
       {page.tracks_first ? collectionSections : trackSections}
-      {!page.tracks.length && !page.collections.length && !page.extra?.length && <Message>Empty</Message>}
+      {!page.tracks.length && !page.collections.length && !page.extra?.length && !page.notice && (
+        <Message>Empty</Message>
+      )}
     </>
   );
 };
@@ -269,6 +281,16 @@ const Header: FC<{
     {children}
   </PanelSection>
 );
+
+/** A page's header button: steam:// URLs are Steam's own actions (its install dialog shows in the
+ * main window, so the menu closes); anything else opens in Steam's browser. */
+const runAction = (url: string) => {
+  Navigation.CloseSideMenus();
+  // (@decky/ui's typings mistake SteamClient.URL for the DOM's URL class)
+  if (url.startsWith("steam://"))
+    (window.SteamClient.URL as unknown as { ExecuteSteamURL(url: string): void }).ExecuteSteamURL(url);
+  else Navigation.NavigateToExternalWeb(url);
+};
 
 const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Collection }> = ({
   instanceId,
@@ -304,6 +326,13 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
                 <FaPlus />
               </IconButton>
             )}
+          </ButtonRow>
+        )}
+        {page?.action && (
+          <ButtonRow>
+            <IconButton onClick={() => runAction(page.action!.url)}>
+              {page.action.url.startsWith("steam://") ? <FaDownload /> : <FaExternalLinkAlt />} {page.action.label}
+            </IconButton>
           </ButtonRow>
         )}
       </Header>

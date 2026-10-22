@@ -26,6 +26,7 @@ import {
   FaServer,
   FaSoundcloud,
   FaSpotify,
+  FaSteam,
   FaYoutube,
 } from "react-icons/fa";
 import { SiJellyfin, SiTidal } from "react-icons/si";
@@ -40,6 +41,7 @@ import { ServiceModal } from "./ServiceModal";
 
 const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,
+  steam: <FaSteam />,
   subsonic: <FaServer />,
   jellyfin: <SiJellyfin />,
   soundcloud: <FaSoundcloud />,
@@ -67,6 +69,10 @@ const describeStatus = (s: ServiceInfo) => {
   if (s.type === "qobuz") {
     const q: Record<number, string> = { 5: "MP3 320", 6: "FLAC CD", 7: "FLAC 24/96", 27: "FLAC 24/192" };
     return `${s.config.email ?? ""} · ${q[s.config.quality ?? 6] ?? ""}`;
+  }
+  if (s.type === "steam") {
+    if (s.status.scanning) return `Scanning… ${s.status.found} files`;
+    return `${s.status.installed ?? 0} installed · ${s.status.owned ?? 0} owned`;
   }
   if (s.type === "jellyfin")
     return [s.config.username, s.config.url?.replace(/^https?:\/\//, "")].filter(Boolean).join(" · ");
@@ -111,7 +117,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
       <Menu label={service.name}>
         {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
         <MenuItem onSelected={edit}>Edit…</MenuItem>
-        {service.type === "local" ? (
+        {service.type === "local" || service.type === "steam" ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
             Rescan library
           </MenuItem>

@@ -141,6 +141,7 @@ Details worth knowing:
 | `sources.ts` | Switching or deleting the live source (stops playback, clears the queue). |
 | `signIn.ts` | The browser sign-in flow shared by Qobuz, Spotify and TIDAL; `browseThenReturn` for opening a page and coming back. |
 | `sleep.ts` | Sleep timer. |
+| `steam.ts` | What only Steam's UI knows, for the Steam soundtracks source: owned soundtracks, their games and art, the running game. |
 | `eq.ts`, `log.ts`, `notify.tsx` | EQ bands and presets; batched debug logging to the backend; Steam toasts. |
 | `components/MusicPanel.tsx` | The QAM panel: now playing card plus five views (Library, Search, Lyrics, Queue, EQ). |
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
@@ -179,6 +180,8 @@ classDiagram
     tracks: Track[]
     extra: [title, tracks][]
     tracks_first: bool
+    action: label + url | None
+    notice: str | None
   }
   class Section {
     title: str
@@ -198,6 +201,9 @@ classDiagram
   which the server answers without asking a service.
 - `kind: "list"` collections are service-defined lists ("Favourite tracks", "Genres"); `open()`
   receives the kind and id and returns a Page.
+- A Page can carry an **action** (a header button: `steam://` URLs run in Steam, like installing a
+  soundtrack; other URLs open in Steam's browser) and a **notice** (a sentence explaining why
+  there's nothing to play yet).
 
 ## Storage
 
@@ -207,14 +213,27 @@ classDiagram
 | | `playlists.json`, `playlist-art/` | MusicDeck playlists and their custom pictures |
 | `~/homebrew/data/MusicDeck/` | `session.json` | The queue, for "Resume where you left off" |
 | | `local-<id>.json`, `local-<id>-favourites.json`, `art-cache/` | Local library index, favourites, extracted cover art |
+| | `steam-<id>.json`, `steam-<id>-owned.json`, `steam-<id>-favourites.json` | Installed soundtracks index, owned soundtracks (from Steam's UI), favourites |
 | | `qobuz-app.json`, `soundcloud-client.json` | Public app credentials scraped from the services' web players (refreshed when rejected) |
-| | `spotify/` | librespot's reusable credentials and cache |
+| | `spotify/accounts/<username>/` | librespot's reusable credentials, one folder per account |
 | | `yt-dlp-cache/`, `ytdlp-update/` | yt-dlp's cache and self-updated copies |
 | | `listenbrainz-pending.json` | Listens waiting to be sent |
 | `~/homebrew/logs/MusicDeck/` | `musicdeck-debug.log` | Only when "Debug log" is on |
 
 The frontend never receives secrets: `Plugin._public_service` removes every key named in
 `SECRET_KEYS` and reports `has_credentials` instead.
+
+Files named after an instance (`<type>-<id>…`, an account's folder) belong to that source and are
+deleted when it is removed (`MusicService.remove`, called by `Plugin.remove_service`).
+
+### Several accounts
+
+Sources are instances, so a type can be configured any number of times; each instance has its own
+config, files and running state. `MusicService.account(config)` names the account an instance is
+signed in to, and `Plugin.save_service` refuses a second instance of a type for the same account.
+Anything a service stores on disk for an account must be keyed by instance or account, never shared
+across a type (shared files are fine for public data, such as the app credentials Qobuz and
+SoundCloud scrape from their web players).
 
 ## Security model
 

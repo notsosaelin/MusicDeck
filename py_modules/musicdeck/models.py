@@ -7,7 +7,11 @@ Track:      {"id", "title", "artist", "album", "duration", "art",
             live: present (True) only for endless streams such as radio stations: no length, no seeking
 Collection: {"id", "kind", "title", "subtitle", "art"}   kind: album | artist | playlist | folder
 Page:       {"title", "subtitle", "art", "collections": [Collection], "tracks": [Track],
-             "extra": [{"title", "tracks": [Track]}]}   extra = more titled track lists (e.g. "Videos")
+             "extra": [{"title", "tracks": [Track]}], "action", "notice"}
+            extra = more titled track lists (e.g. "Videos")
+            action = {"label", "url"}: a button in the page header; steam:// URLs run in Steam
+                     (e.g. "Install" for a soundtrack), others open in Steam's browser. Or None.
+            notice = a sentence shown above the content (why there's nothing to play yet), or None
 Section:    {"title", "items": [Collection], "tracks": [Track]}   a home row of collections and/or tracks
 
 "art" is an opaque art id resolved by the service through the stream server (/art/...), or None.
@@ -44,11 +48,13 @@ def collection(id: str, kind: str, title: str, subtitle: str = "",
 def page(title: str, subtitle: str = "", art: Optional[str] = None,
          collections: Optional[list[dict[str, Any]]] = None,
          tracks: Optional[list[dict[str, Any]]] = None,
-         extra: Optional[list[dict[str, Any]]] = None, tracks_first: bool = False) -> dict[str, Any]:
+         extra: Optional[list[dict[str, Any]]] = None, tracks_first: bool = False,
+         action: Optional[dict[str, str]] = None, notice: Optional[str] = None) -> dict[str, Any]:
     # tracks_first: show songs/videos above albums/artists/playlists (search results)
     return {"title": title, "subtitle": subtitle, "art": art,
             "collections": collections or [], "tracks": tracks or [],
-            "extra": [e for e in extra or [] if e["tracks"]], "tracks_first": tracks_first}
+            "extra": [e for e in extra or [] if e["tracks"]], "tracks_first": tracks_first,
+            "action": action, "notice": notice}
 
 
 def section(title: str, items: list[dict[str, Any]], tracks: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:

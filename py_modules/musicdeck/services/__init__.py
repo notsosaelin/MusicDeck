@@ -6,12 +6,14 @@ from .qobuz import QobuzService
 from .radio import RadioService
 from .soundcloud import SoundCloudService
 from .spotify import SpotifyService
+from .steam import SteamService
 from .subsonic import SubsonicService
 from .tidal import TidalService
 from .youtube import YouTubeService
 
 SERVICE_TYPES: dict[str, type[MusicService]] = {
     LocalService.type: LocalService,
+    SteamService.type: SteamService,
     SubsonicService.type: SubsonicService,
     JellyfinService.type: JellyfinService,
     SoundCloudService.type: SoundCloudService,

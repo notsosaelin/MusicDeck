@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import time
 from typing import Any, Optional
 
@@ -79,10 +80,17 @@ def _number(value: str) -> int:
         return 0
 
 
+# "01 Intro.flac", "03 - Battle.wav": the track number of a file without tags
+NUMBERED_NAME = re.compile(r"^(\d{1,3})(?:\s*[-._]\s*|\s+)(.+)$")
+
+
 def read_tags(path: str) -> dict[str, Any]:
     stem = os.path.splitext(os.path.basename(path))[0]
-    info: dict[str, Any] = {"title": stem, "artist": "", "albumartist": "", "album": "",
-                            "track": 0, "disc": 0, "year": "", "genre": "", "duration": 0.0, "rg": None}
+    numbered = NUMBERED_NAME.match(stem)
+    name = numbered.group(2) if numbered else stem
+    info: dict[str, Any] = {"title": name, "artist": "", "albumartist": "", "album": "",
+                            "track": int(numbered.group(1)) if numbered else 0, "disc": 0, "year": "", "genre": "",
+                            "duration": 0.0, "rg": None}
     if mutagen is None:
         return info
     try:
@@ -92,11 +100,11 @@ def read_tags(path: str) -> dict[str, Any]:
     if audio is None:
         return info
     tags = audio.tags or {}
-    info["title"] = _first(tags, "title") or stem
+    info["title"] = _first(tags, "title") or name
     info["artist"] = _first(tags, "artist")
     info["albumartist"] = _first(tags, "albumartist")
     info["album"] = _first(tags, "album")
-    info["track"] = _number(_first(tags, "tracknumber"))
+    info["track"] = _number(_first(tags, "tracknumber")) or info["track"]
     info["disc"] = _number(_first(tags, "discnumber"))
     info["year"] = _first(tags, "date")[:4]
     info["genre"] = _first(tags, "genre")
@@ -229,6 +237,13 @@ class LocalService(MusicService):
     async def stop(self) -> None:
         if self.scan_task:
             self.scan_task.cancel()
+
+    def remove(self) -> None:
+        for path in (self.index_path, self.favourites_path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     async def test(self) -> str:
         if not self.roots:

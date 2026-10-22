@@ -1,7 +1,7 @@
 {
   "name": "musicdeck",
   "version": "0.1.0",
-  "description": "Turns the Soundtracks tab of the Quick Access Menu into a music player for local files, media servers, streaming services and internet radio",
+  "description": "Turns the Soundtracks tab of the Quick Access Menu into a music player for local files, Steam soundtracks, media servers, streaming services and internet radio",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
@@ -15,7 +15,8 @@
     "music",
     "navidrome",
     "jellyfin",
-    "radio"
+    "radio",
+    "soundtracks"
   ],
   "license": "GPL-3.0-or-later",
   "devDependencies": {

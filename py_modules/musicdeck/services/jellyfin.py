@@ -77,6 +77,10 @@ class JellyfinService(MusicService):
     display_name = "Jellyfin"
     features = frozenset({"star", "scrobble", "lyrics", "radio", "playlists"})
 
+    @classmethod
+    def account(cls, config: dict[str, Any]) -> Optional[str]:
+        return f"{config['url']}|{config['user_id']}" if config.get("url") and config.get("user_id") else None
+
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.session: Optional[aiohttp.ClientSession] = None

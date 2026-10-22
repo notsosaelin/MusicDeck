@@ -5,9 +5,13 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 ## Features
 
-- **Ten sources:** local files, Navidrome/Subsonic, Jellyfin, SoundCloud, YouTube Music (plus regular
-  YouTube), Bandcamp, internet radio, Qobuz, TIDAL and Spotify. One source is live at a time, chosen in the
-  plugin's Decky page.
+- **Eleven sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, SoundCloud, YouTube
+  Music (plus regular YouTube), Bandcamp, internet radio, Qobuz, TIDAL and Spotify. One source is live at a
+  time, chosen in the plugin's Decky page.
+- **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
+  game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
+- **Several accounts:** add a service more than once (two Spotify accounts, a second Navidrome user) and
+  switch between them like any other source.
 - **Native Quick Access tab:** now playing, Library, Search, Lyrics, Queue and Equalizer, built from Steam's
   own components and controller conventions.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
@@ -26,6 +30,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | Source | Account | What you get |
 | --- | --- | --- |
 | Local files | — | Recursive scan, tags and artwork, `.lrc`/embedded lyrics, ReplayGain, `.m3u` playlists, favourites, radio |
+| Steam soundtracks | Your Steam account | Every soundtrack you own, from every Steam library (SD cards too); the running game's soundtrack first; install the rest with Steam's own dialog; one copy when a soundtrack ships MP3 and FLAC; composers, favourites, lyrics, radio |
 | Navidrome / Subsonic | Your server | Favourites, play reports, lyrics, similar-song radio, queue sync across devices, add to server playlists, ReplayGain |
 | Jellyfin | Your server | Sign in with Quick Connect (no typing), favourites, play reports, lyrics, Instant Mix radio, add to playlists, original-quality audio |
 | SoundCloud | None | Search, curated selections, artists, playlists and albums, related-track radio |
@@ -60,6 +65,10 @@ track's or playlist's options (including the sleep timer for the playing track),
 Re-selecting Library or Search returns to its start.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
+
+Any service can be added more than once, one account each; MusicDeck refuses the same account twice.
+For a second account of a service that signs in on its website, sign out on that website in Steam's
+browser first (Spotify's page also offers "Not you?").
 
 ## Install
 

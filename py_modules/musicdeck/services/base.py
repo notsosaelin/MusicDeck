@@ -92,6 +92,13 @@ class MusicService:
         return config
 
     @classmethod
+    def account(cls, config: dict[str, Any]) -> Optional[str]:
+        """Who this source is signed in as, as a stable key (a user id, or server + user), or None
+        for sources without accounts. Several sources of one type are fine (two Spotify accounts,
+        two Navidrome users); the same account twice is refused when saving."""
+        return None
+
+    @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> Optional[SignIn]:
         """A new sign-in attempt for services that sign in outside the settings form (see SignIn),
         or None for the rest. `options` come from the dialog (e.g. a server address)."""
@@ -109,6 +116,9 @@ class MusicService:
 
     async def stop(self) -> None:
         """Release sessions, cancel background work."""
+
+    def remove(self) -> None:
+        """The user removed this source (after stop()): delete the files it kept in runtime_dir."""
 
     async def test(self) -> str:
         """Check the config works (credentials, reachability). Returns a short status message

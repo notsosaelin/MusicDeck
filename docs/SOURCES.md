@@ -7,6 +7,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Source | Type id | Account | Sign-in | Audio | Features |
 | --- | --- | --- | --- | --- | --- |
 | Local files | `local` | — | — | Original files | favourites, lyrics, radio |
+| Steam soundtracks | `steam` | Steam's own | — | Original files | favourites, lyrics, radio |
 | Navidrome / Subsonic | `subsonic` | Server | Password → salted token | Original files (`format=raw`) | favourites, play reports, lyrics, radio, queue sync, playlists |
 | Jellyfin | `jellyfin` | Server | Quick Connect or password → access token | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
 | SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | radio |
@@ -19,6 +20,13 @@ How each source works, what it stores, and where it can break. Each section matc
 
 "Favourites" means the heart and a favourites list, kept on the service where it has one and on
 the Deck otherwise. Every source can also use MusicDeck playlists and ListenBrainz.
+
+**Several accounts.** Every source type can be added more than once. Sources with accounts say who
+they are signed in as through `account(config)` (Spotify username, Qobuz/TIDAL user id, server +
+user for Navidrome and Jellyfin); saving refuses a second source for an account already added. A
+new source with no name gets "Spotify", then "Spotify 2", and so on. Per-account files are kept
+apart (Spotify's playback credentials live in `spotify/accounts/<username>/`) and deleted with the
+source (`MusicService.remove`).
 
 ---
 
@@ -34,6 +42,43 @@ the Deck otherwise. Every source can also use MusicDeck playlists and ListenBrai
 - **Favourites**: `local-<id>-favourites.json` on the Deck. **Radio**: same artist and same genre
   first, then the rest of the library, shuffled.
 - **Security**: `open("folder", path)` refuses paths outside the configured folders.
+
+## Steam soundtracks (`steam.py`, `src/steam.ts`)
+
+- **What's installed** comes from Steam's own records: `steamapps/libraryfolders.vdf` lists every
+  library (internal, SD card, other drives; the native, `~/.steam` and Flatpak Steam folders are all
+  looked for), and each library's `appmanifest_<appid>.acf` says what is installed where
+  (`parse_vdf` reads Steam's text KeyValues format). Soundtrack apps install to
+  `steamapps/music/<installdir>`; `StateFlags` bit 4 means fully installed, so a soundtrack that
+  is still downloading shows as "Installing…".
+- **Older soundtracks are DLC** of their game: their depot is listed under the game's
+  `InstalledDepots` with a `dlcappid`, and the files land inside the game's folder. Only folders
+  there named like `Soundtrack`, `OST` or `Music` (three levels deep at most) are scanned, so the
+  game's sound effects never show up as music.
+- **What's owned** is only known to Steam's UI. `src/steam.ts` reads soundtrack apps (app type
+  `0x2000`) from `collectionStore`, their game (`optional_parent_app_id`), Steam's album art
+  (`appStore.GetAlbumCoverURLsForApp`) and the running game (`SteamUIStore.MainRunningAppID`), and
+  sends them to `Plugin.steam_library` at start-up, when a source is saved, and whenever a game
+  starts or stops (`GameSessions.RegisterForAppLifetimeNotifications`). The backend keeps the last
+  copy in `steam-<id>-owned.json`. Cover URLs are only fetched from Steam's image hosts.
+- **Home**: "From <game>" (the running game's soundtracks), "Recently installed", "Installed",
+  Library (favourites, composers, all tracks), then "Not installed".
+- **Installing**: a not-installed soundtrack opens as a Page with an `Install` action,
+  `steam://install/<appid>`, which the frontend runs with `SteamClient.URL.ExecuteSteamURL`:
+  Steam's own install dialog (drive choice, size) appears. Steam changing its library folders'
+  modification times triggers a rescan on the next visit (`_check_for_changes`), so the
+  soundtrack is playable when the download ends, without a manual rescan.
+- **One album per soundtrack**: tracks are grouped by app, not by tags, and named as Steam names
+  the soundtrack. Soundtracks often ship the album in several formats (`MP3/`, `FLAC/`, `WAV/`);
+  `_pick_formats` keeps FLAC, then M4A, Ogg, MP3, WAV, but only among formats with (nearly) as
+  many files as the largest one, so bonus tracks in another format stay. Untagged files take
+  their track number from the file name ("01 Intro.wav").
+- **Art**: a cover in the soundtrack's folder (usual names first, else the largest image), Steam's
+  album art, then a picture embedded in a track. Tags, lyrics and the incremental index reuse
+  `local.py`.
+- **Stored**: `steam-<id>.json` (index), `steam-<id>-owned.json`, `steam-<id>-favourites.json`.
+- Tested on a Bazzite handheld with 51 owned soundtracks: browsing, Steam's art for uninstalled
+  ones, installing one through the Install button, playback, and the running-game row.
 
 ## Navidrome / Subsonic (`subsonic.py`)
 
@@ -137,7 +182,8 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
 
 - **Two sign-ins in one flow** (OAuth with PKCE, redirect to `http://127.0.0.1:<port>/login`):
   1. *Playback*: Spotify's desktop client identity with the `streaming` scope. The access token is
-     handed to the helper once; librespot turns it into reusable credentials in `spotify/`.
+     handed to the helper once; librespot turns it into reusable credentials, kept per account
+     in `spotify/accounts/<username>/` (the sign-in runs in a scratch folder that becomes it).
   2. *Web API*: the public app shared by spotify-player and ncspot, or the user's own developer app
      (Client ID field), for library, search and changes. Only its refresh token is stored.
 - **Helper** (`bin/spotify-helper`, Rust, static musl build): JSON-lines control on stdin/stdout;

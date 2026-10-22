@@ -1,4 +1,5 @@
 import { callable } from "@decky/api";
+import type { OwnedSoundtrack } from "./steam";
 
 // Mirrors py_modules/musicdeck/models.py
 export interface Track {
@@ -71,6 +72,10 @@ export interface Page {
   extra?: { title: string; tracks: Track[] }[];
   /** show songs/videos above albums/artists/playlists (search results) */
   tracks_first?: boolean;
+  /** a button in the header: steam:// URLs run in Steam (e.g. installing a soundtrack), others open in the browser */
+  action?: { label: string; url: string } | null;
+  /** shown above the content, e.g. why there's nothing to play yet */
+  notice?: string | null;
 }
 
 /** A home row: collections and/or tracks (e.g. YouTube Music's "Quick picks") */
@@ -187,5 +192,8 @@ export const signInPoll = callable<
   { status: "waiting" | "done" | "error"; error?: string; url?: string; service?: ServiceInfo }
 >("sign_in_poll");
 export const signInCancel = callable<[loginId: string], void>("sign_in_cancel");
+export const steamLibrary = callable<[id: string, owned: OwnedSoundtrack[], running: number | null], void>(
+  "steam_library",
+);
 export const onAir = callable<[id: string, trackId: string], Result<string | null>>("on_air");
 export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");

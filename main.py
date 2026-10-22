@@ -185,10 +185,15 @@ class Plugin:
             previous_config = previous["config"] if previous else None
             config = cls.prepare_config(dict(service.get("config", {})), previous_config)
             config = await cls.authenticate(config, previous_config, decky.DECKY_PLUGIN_RUNTIME_DIR)
+            others = [s for s in self.settings.services() if s["type"] == cls.type and s["id"] != service.get("id")]
+            account = cls.account(config)
+            twin = next((s for s in others if account and cls.account(s["config"]) == account), None)
+            if twin:
+                raise ServiceError(f"That account is already added as “{twin['name']}”")
             saved = self.settings.upsert_service({
                 "id": service.get("id"),
                 "type": cls.type,
-                "name": (service.get("name") or "").strip() or cls.display_name,
+                "name": (service.get("name") or "").strip() or _unique_name(cls.display_name, others),
                 "config": config,
             })
             await self._start_instance(saved)
@@ -200,6 +205,7 @@ class Plugin:
         instance = self.instances.pop(instance_id, None)
         if instance:
             await instance.stop()
+            instance.remove()
         decky.logger.info(f"Removed source {instance_id} ({getattr(instance, 'type', '?')})")
         self.settings.remove_service(instance_id)
         self.playlists.delete_for_instance(instance_id)
@@ -326,6 +332,13 @@ class Plugin:
                 raise ServiceError("Not a YouTube source")
             return await instance.update_ytdlp()
         return await _result(work())
+
+    @_when_ready
+    async def steam_library(self, instance_id: str, owned: list[dict[str, Any]], running: Optional[int]) -> None:
+        """Owned soundtracks and the running game, which only Steam's UI knows (src/steam.ts)."""
+        instance = self.instances.get(instance_id)
+        if instance is not None and hasattr(instance, "set_library"):
+            instance.set_library(owned, running)
 
     @_when_ready
     async def on_air(self, instance_id: str, track_id: str) -> dict[str, Any]:
@@ -508,6 +521,16 @@ class Plugin:
     @_when_ready
     async def playlist_delete(self, playlist_id: str) -> None:
         self.playlists.delete(playlist_id)
+
+
+def _unique_name(base: str, others: list[dict[str, Any]]) -> str:
+    """The default name for a new source: "Spotify", then "Spotify 2" for a second account."""
+    taken = {s["name"] for s in others}
+    name, n = base, 1
+    while name in taken:
+        n += 1
+        name = f"{base} {n}"
+    return name
 
 
 def _parse_time(value: Optional[str]) -> Optional[float]:

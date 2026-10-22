@@ -18,6 +18,7 @@ import { DialogActions, countryName } from "./common";
 import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart, saveService, testService } from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
+import { syncSteam } from "../steam";
 
 // FileSelectionType.FOLDER from @decky/api (a const enum, which isolated builds can't import)
 const SELECT_FOLDER = 1;
@@ -428,6 +429,10 @@ export const ServiceModal: FC<{
     try {
       const saved = await saveService(draft);
       if (!saved.ok) return setError(saved.error);
+      if (type === "steam") {
+        await refreshState();
+        await syncSteam(); // what the account owns, so the first test can count it
+      }
       const test = await testService(saved.data.id);
       await refreshState();
       invalidateBrowserCache();
@@ -489,6 +494,12 @@ export const ServiceModal: FC<{
           />
         )}
         {type === "radio" && <RadioFields draft={draft} setConfig={setConfig} />}
+        {type === "steam" && (
+          <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
+            Plays the soundtracks you own on Steam. Installed ones play from this device, from every Steam library (SD
+            cards too); the rest can be installed from MusicDeck. Nothing to set up.
+          </div>
+        )}
         {type === "youtube" && (
           <ToggleField
             label="Include all YouTube videos in search"

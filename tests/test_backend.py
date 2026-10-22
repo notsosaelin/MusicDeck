@@ -25,6 +25,7 @@ decky.DECKY_PLUGIN_SETTINGS_DIR = os.path.join(tmp, "settings")
 decky.DECKY_PLUGIN_RUNTIME_DIR = os.path.join(tmp, "runtime")
 decky.DECKY_PLUGIN_LOG_DIR = os.path.join(tmp, "logs")
 decky.DECKY_USER_HOME = tmp
+os.environ["DECKY_USER_HOME"] = tmp  # Decky also passes it to the plugin as an environment variable
 sys.modules["decky"] = decky
 logging.basicConfig(level=logging.INFO)
 
@@ -487,6 +488,134 @@ async def run():
             check(not refused["ok"], "sources without a separate sign-in refuse one")
         finally:
             del SERVICE_TYPES["fakesignin"]
+
+        print("steam soundtracks")
+        from musicdeck.services import steam as stmod
+        check(stmod.parse_vdf('"a" { "B" "x \\"y\\"" // note\n "c" { } }') == {"a": {"b": 'x "y"', "c": {}}},
+              "vdf: nesting, escapes, comments, lower-cased keys")
+        steam_root = os.path.join(tmp, ".local", "share", "Steam")
+        sd = os.path.join(tmp, "SD Card")
+
+        def write(path, text=""):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+        def manifest(library, appid, name, installdir, flags, extra=""):
+            write(os.path.join(library, "steamapps", f"appmanifest_{appid}.acf"),
+                  f'"AppState"\n{{\n\t"appid"\t\t"{appid}"\n\t"name"\t\t"{name}"\n\t"installdir"\t\t"{installdir}"\n'
+                  f'\t"StateFlags"\t\t"{flags}"\n\t"LastUpdated"\t\t"{appid}"\n{extra}}}\n')
+
+        def vdf_path(path):  # backslashes are escapes in VDF (Windows paths when testing there)
+            return path.replace("\\", "\\\\")
+        write(os.path.join(steam_root, "steamapps", "libraryfolders.vdf"),
+              f'"libraryfolders"\n{{\n\t"0"\n\t{{\n\t\t"path"\t\t"{vdf_path(steam_root)}"\n\t}}\n'
+              f'\t"1"\n\t{{\n\t\t"path"\t\t"{vdf_path(sd)}"\n\t}}\n\t"2"\n\t{{\n\t\t"path"\t\t"/nowhere"\n\t}}\n}}\n')
+        ost = os.path.join(steam_root, "steamapps", "music", "Game OST")
+        manifest(steam_root, 100, "Game Soundtrack", "Game OST", 4)
+        for n, title in ((1, "Intro"), (2, "Battle")):  # the same album as MP3 and FLAC: one copy is kept
+            for folder, ext in (("MP3", ".mp3"), ("FLAC", ".flac")):
+                wav = os.path.join(ost, folder, f"0{n} {title}.wav")
+                make_wav(wav, title, "Composer", "Tagged Album", n)
+                os.rename(wav, wav[:-4] + ext)
+        make_wav(os.path.join(ost, "Bonus", "03 Bonus.wav"), "Bonus", "Composer", "Tagged Album", 3)
+        with open(os.path.join(ost, "cover.jpg"), "wb") as f:
+            f.write(JPEG)
+        # an older soundtrack: DLC installed inside its game's folder, next to the game's sound effects
+        manifest(sd, 200, "Old Game", "OldGame", 4,
+                 '\t"InstalledDepots"\n\t{\n\t\t"201"\n\t\t{\n\t\t\t"manifest"\t\t"1"\n\t\t\t"dlcappid"\t\t"202"\n\t\t}\n\t}\n')
+        make_wav(os.path.join(sd, "steamapps", "common", "OldGame", "Data", "Soundtrack", "theme.wav"),
+                 "Old Theme", "Old Composer", "", 1)
+        make_wav(os.path.join(sd, "steamapps", "common", "OldGame", "sfx", "boom.wav"), "Boom", "", "", 1)
+        manifest(steam_root, 300, "Downloading OST", "Downloading OST", 1026)
+        os.makedirs(os.path.join(steam_root, "steamapps", "music", "Downloading OST"))
+
+        saved = await plugin.save_service({"type": "steam", "name": "", "config": {}})
+        check(saved["ok"] and saved["data"]["name"] == "Steam soundtracks", "add the Steam soundtracks source")
+        st_id = saved["data"]["id"]
+        owned = [{"appid": 100, "name": "Game Soundtrack", "parent": 10, "parent_name": "Game", "cover": None},
+                 {"appid": 202, "name": "Old Game OST", "parent": 200, "parent_name": "Old Game", "cover": None},
+                 {"appid": 300, "name": "Downloading OST", "parent": None, "parent_name": "", "cover": None},
+                 {"appid": 400, "name": "Not Yet", "parent": 40, "parent_name": "Other Game",
+                  "cover": "https://shared.steamstatic.com/community_assets/images/apps/400/c.jpg"},
+                 {"appid": 500, "name": "Odd", "parent": None, "parent_name": "", "cover": "https://evil.example/c.jpg"}]
+        await plugin.steam_library(st_id, owned, 10)
+        st = plugin.instances[st_id]
+        while st.scan_task and not st.scan_task.done():
+            await asyncio.sleep(0.05)
+        home = (await plugin.home(st_id))["data"]
+        check([s["title"] for s in home] == ["From Game", "Installed", "Library", "Not installed"],
+              f"home: the running game's soundtrack first {[s['title'] for s in home]}")
+        check([c["id"] for c in home[0]["items"]] == ["100"], "running game's soundtrack")
+        check([c["title"] for c in home[1]["items"]] == ["Game Soundtrack", "Old Game OST"],
+              "installed from every library, DLC soundtracks included, named as Steam names them")
+        check([(c["id"], c["subtitle"]) for c in home[3]["items"]]
+              == [("300", "Installing…"), ("400", "Not installed · Other Game"), ("500", "Not installed")],
+              "not installed: downloading, with its game, plain")
+        page = (await plugin.open_collection(st_id, "album", "100"))["data"]
+        check([t["title"] for t in page["tracks"]] == ["Intro", "Battle", "Bonus"]
+              and page["subtitle"] == "Composer · 3 tracks", "one copy of each track, bonus extras kept")
+        check(st._track_index()[page["tracks"][0]["id"]][1]["path"].endswith(".flac"), "FLAC preferred over MP3")
+        check(page["tracks"][0]["album"] == "Game Soundtrack" and page["tracks"][0]["album_id"] == "100",
+              "a soundtrack is one album, whatever the tags say")
+        old = (await plugin.open_collection(st_id, "album", "202"))["data"]
+        check([t["title"] for t in old["tracks"]] == ["Old Theme"], "only the game's soundtrack folder, no sound effects")
+        later = (await plugin.open_collection(st_id, "album", "400"))["data"]
+        check(later["action"] == {"label": "Install", "url": "steam://install/400"} and later["notice"]
+              and not later["tracks"], "not installed: an Install action")
+        downloading = (await plugin.open_collection(st_id, "album", "300"))["data"]
+        check(downloading["action"] is None and downloading["subtitle"] == "Installing…", "downloading: no action")
+        base = plugin.server.base_url
+        async with aiohttp.ClientSession() as http:
+            async with http.get(f"{base}/art/{st_id}/c:100?k={plugin.server.key}") as r:
+                check(r.status == 200 and (await r.read()) == JPEG, "cover image from the soundtrack's folder")
+            async with http.get(f"{base}/stream/{st_id}/{page['tracks'][1]['id']}?k={plugin.server.key}") as r:
+                check(r.status == 200 and (await r.read())[:4] == b"RIFF", "track streamed from disk")
+        check((await st.art("c:400")).url.startswith("https://shared.steamstatic.com/"), "Steam's album art when not installed")
+        check(st.owned["500"]["cover"] is None, "cover URLs only from Steam's image hosts")
+        found = (await plugin.search(st_id, "old game"))["data"]
+        check([c["id"] for c in found["collections"]] == ["202"], "search finds a soundtrack by its game")
+        radio = (await plugin.radio(st_id, page["tracks"][0]))["data"]
+        check(len(radio) == 3 and page["tracks"][0]["id"] not in [t["id"] for t in radio], "radio from every soundtrack")
+        await plugin.steam_library(st_id, owned, None)
+        check([s["title"] for s in (await plugin.home(st_id))["data"]][0] == "Installed", "no game running: no game row")
+        # Steam finishing the download changes its folders; the next visit picks it up
+        manifest(steam_root, 300, "Downloading OST", "Downloading OST", 4)
+        make_wav(os.path.join(steam_root, "steamapps", "music", "Downloading OST", "a.wav"), "Done", "", "", 1)
+        os.utime(os.path.join(steam_root, "steamapps"), (time.time() + 5, time.time() + 5))
+        await plugin.home(st_id)
+        while st.scan_task and not st.scan_task.done():
+            await asyncio.sleep(0.05)
+        check([t["title"] for t in (await plugin.open_collection(st_id, "album", "300"))["data"]["tracks"]] == ["Done"],
+              "a finished install is found without a manual rescan")
+        await plugin.remove_service(st_id)
+        check(not [n for n in os.listdir(decky.DECKY_PLUGIN_RUNTIME_DIR) if n.startswith(f"steam-{st_id}")],
+              "removing the source deletes its files")
+
+        print("several accounts")
+        from musicdeck.services import spotify as spmod2
+        legacy = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "spotify", "credentials")
+        write(os.path.join(legacy, "credentials.json"), json.dumps({"username": "alice"}))
+        alice = await plugin.save_service({"type": "spotify", "name": "",
+                                           "config": {"refresh_token": "a", "username": "alice"}})
+        bob = await plugin.save_service({"type": "spotify", "name": "", "config": {"refresh_token": "b", "username": "bob"}})
+        check(alice["ok"] and bob["ok"] and [alice["data"]["name"], bob["data"]["name"]] == ["Spotify", "Spotify 2"],
+              "two accounts of one service, named apart")
+        again = await plugin.save_service({"type": "spotify", "name": "",
+                                           "config": {"refresh_token": "c", "username": "alice"}})
+        check(not again["ok"] and "already added as “Spotify”" in again["error"], "the same account twice is refused")
+        edit = await plugin.save_service({"id": alice["data"]["id"], "type": "spotify", "name": "Mine", "config": {}})
+        check(edit["ok"], "editing a source isn't a duplicate of itself")
+        alice_dir = spmod2.account_dir(decky.DECKY_PLUGIN_RUNTIME_DIR, "alice")
+        check(os.path.isfile(os.path.join(alice_dir, "credentials", "credentials.json")) and not os.path.exists(legacy),
+              "the old shared sign-in moves to its own account")
+        bob_dir = spmod2.account_dir(decky.DECKY_PLUGIN_RUNTIME_DIR, "bob")
+        check(alice_dir != bob_dir and plugin.instances[bob["data"]["id"]].helper.cache_dir == bob_dir,
+              "each account's playback sign-in kept apart")
+        write(os.path.join(bob_dir, "credentials", "credentials.json"), "{}")
+        await plugin.remove_service(bob["data"]["id"])
+        check(not os.path.exists(bob_dir) and os.path.exists(alice_dir), "removing an account deletes only its sign-in")
+        await plugin.remove_service(alice["data"]["id"])
 
         print("decky's python")
         import re as _re

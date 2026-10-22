@@ -30,6 +30,10 @@ class SubsonicService(MusicService):
     display_name = "Navidrome / Subsonic"
     features = frozenset({"star", "scrobble", "lyrics", "radio", "queue_sync", "playlists"})
 
+    @classmethod
+    def account(cls, config: dict[str, Any]) -> Optional[str]:
+        return f"{config['url']}|{config['username'].lower()}" if config.get("url") and config.get("username") else None
+
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.session: Optional[aiohttp.ClientSession] = None

@@ -77,6 +77,9 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
 - the stream server: keys, ranges, CORS, art, generated HLS playlists;
 - MusicDeck playlists and artwork, play-report de-duplication, session handling;
 - every service's mapping and config rules (Spotify, TIDAL, Jellyfin, radio, Bandcamp, Subsonic);
+- Steam soundtracks against a fake Steam folder: libraries, manifests, DLC soundtracks inside a
+  game, duplicate formats, installs finishing, art, the running-game row;
+- several accounts of one service: naming, duplicates refused, per-account Spotify credentials;
 - the shared sign-in flow, ListenBrainz (offline queue included);
 - that no MusicDeck module imports a standard-library package Decky's Python lacks.
 
@@ -110,6 +113,7 @@ m.switchSource(id)                        // change the live source
 m.sourceDialog("tidal")                   // open a source's add dialog (or pass a source id to edit)
 m.nameDialog()                            // the playlist name prompt
 m.setSleepTimer(0.25)                     // a 15-second sleep timer
+m.syncSteam()                             // resend owned soundtracks and the running game
 m.navigation / m.panelTab                 // the QAM panel's navigation state
 ```
 

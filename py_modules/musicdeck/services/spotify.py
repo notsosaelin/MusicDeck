@@ -19,7 +19,9 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
+import shutil
 import ssl
 import time
 from typing import Any, Optional
@@ -97,15 +99,36 @@ def helper_path(runtime_dir: str) -> Optional[str]:
     return None
 
 
-def helper_cache(runtime_dir: str) -> str:
-    return os.path.join(runtime_dir, "spotify")
+def account_dir(runtime_dir: str, username: str) -> str:
+    """Where one account's playback credentials live (the helper's --cache); one folder per account,
+    so several Spotify sources don't overwrite each other's sign-in."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", username) or "unknown"
+    return os.path.join(runtime_dir, "spotify", "accounts", safe)
+
+
+def _adopt_legacy_credentials(runtime_dir: str, username: str) -> None:
+    """Before multi-account support every account shared spotify/credentials; move it to its account."""
+    legacy = os.path.join(runtime_dir, "spotify", "credentials")
+    target = os.path.join(account_dir(runtime_dir, username), "credentials")
+    if not os.path.isdir(legacy) or os.path.exists(target):
+        return
+    try:
+        with open(os.path.join(legacy, "credentials.json"), "r", encoding="utf-8") as f:
+            owner = json.load(f).get("username")
+    except (OSError, ValueError):
+        return
+    if owner == username:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.move(legacy, target)
 
 
 class SpotifyHelper:
-    """The librespot helper process: JSON lines on stdin/stdout, audio on a loopback port."""
+    """The librespot helper process: JSON lines on stdin/stdout, audio on a loopback port.
+    `cache_dir` holds one account's stored playback credentials."""
 
-    def __init__(self, runtime_dir: str):
+    def __init__(self, runtime_dir: str, cache_dir: str):
         self.runtime_dir = runtime_dir
+        self.cache_dir = cache_dir
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.port = 0
         self.pending: dict[int, asyncio.Future] = {}
@@ -122,11 +145,11 @@ class SpotifyHelper:
             binary = helper_path(self.runtime_dir)
             if not binary:
                 raise ServiceError("The Spotify helper is missing; reinstall MusicDeck")
-            os.makedirs(helper_cache(self.runtime_dir), exist_ok=True)
+            os.makedirs(self.cache_dir, exist_ok=True)
             env = dict(os.environ)
             env.pop("LD_LIBRARY_PATH", None)  # static binary; never pick up Decky's bundled libraries
             self.proc = await asyncio.create_subprocess_exec(
-                binary, "--cache", helper_cache(self.runtime_dir), stdin=asyncio.subprocess.PIPE,
+                binary, "--cache", self.cache_dir, stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env,
                 # replies are one JSON line each, and a big playlist or discography runs to megabytes
                 limit=REPLY_LIMIT)
@@ -203,9 +226,13 @@ class SpotifyService(MusicService):
     display_name = "Spotify"
     features = frozenset({"star", "playlists", "radio", "lyrics"})
 
+    @classmethod
+    def account(cls, config: dict[str, Any]) -> Optional[str]:
+        return config.get("username") or None
+
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
-        self.helper = SpotifyHelper(runtime_dir)
+        self.helper = SpotifyHelper(runtime_dir, account_dir(runtime_dir, config.get("username") or ""))
         self.http: Optional[aiohttp.ClientSession] = None
         self.access_token = ""
         self.token_expires = 0.0
@@ -238,12 +265,17 @@ class SpotifyService(MusicService):
         return merged
 
     async def start(self) -> None:
+        if self.config.get("username"):
+            await asyncio.to_thread(_adopt_legacy_credentials, self.runtime_dir, self.config["username"])
         self.http = _session()
 
     async def stop(self) -> None:
         await self.helper.stop()
         if self.http:
             await self.http.close()
+
+    def remove(self) -> None:
+        shutil.rmtree(self.helper.cache_dir, ignore_errors=True)
 
     # --- Web API ---
 
@@ -702,7 +734,9 @@ class SpotifyLogin(SignIn):
         return data
 
     async def _run(self) -> None:
-        helper = SpotifyHelper(self.runtime_dir)
+        # signs in into a scratch folder; the credentials move to their account's folder at the end
+        scratch = os.path.join(self.runtime_dir, "spotify", f"sign-in-{self.id}")
+        helper = SpotifyHelper(self.runtime_dir, scratch)
         try:
             playback = await self._authorize(PLAYBACK_CLIENT_ID, PLAYBACK_PORT, PLAYBACK_SCOPES, dialog=True)
             account = await helper.call("login_token", token=playback["access_token"], timeout=60)
@@ -723,6 +757,11 @@ class SpotifyLogin(SignIn):
                            "display_name": me.get("display_name") or account.get("username", ""),
                            "product": me.get("product", ""), "signed_with": self.client_id,
                            "client_id": "" if self.client_id == WEB_CLIENT_ID else self.client_id}
+            await helper.stop()
+            target = account_dir(self.runtime_dir, self.result["username"])
+            shutil.rmtree(target, ignore_errors=True)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.move(scratch, target)
             self.step = "done"
             debuglog.debug("spotify", "signed in", user=self.result["username"])
         except asyncio.TimeoutError:
@@ -735,6 +774,7 @@ class SpotifyLogin(SignIn):
             self.step, self.error = "error", f"Sign-in failed: {e}"
         finally:
             await helper.stop()
+            shutil.rmtree(scratch, ignore_errors=True)
             await self._close_listener()
 
     async def _close_listener(self) -> None:
