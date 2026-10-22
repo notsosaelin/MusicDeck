@@ -334,8 +334,7 @@ account. Both are asked at once; LRCLIB's synced lyrics win, then NetEase's, the
   session uses a `DummyCookieJar`).
 - No lyrics is only reported when every site said so; one that couldn't be asked makes it an
   error, which the UI doesn't remember, so the next look tries again.
-- Musixmatch was considered and left out: its guest tokens come back blank and its terms forbid
-  this use.
+- Musixmatch was considered and left out: its guest token came back blank when tried.
 
 ## Candidates not implemented yet
 
