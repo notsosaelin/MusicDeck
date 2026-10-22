@@ -2,19 +2,18 @@ import asyncio
 import functools
 import json
 import os
-import ssl
 import time
 from datetime import datetime
 from typing import Any, Awaitable, Optional
 
 import aiohttp
-import certifi
 
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
 from musicdeck import backup, debuglog, lyrics
 from musicdeck.listenbrainz import ListenBrainz
+from musicdeck.net import tls
 from musicdeck.offline import OfflineStore
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
@@ -96,7 +95,7 @@ class Plugin:
         self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path,
                                    offline=self.offline)
         self.http = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+            connector=aiohttp.TCPConnector(ssl=tls()),
             timeout=aiohttp.ClientTimeout(total=10),
             # none of these sites needs cookies, and NetEase cuts its search results short for a
             # client that keeps the cookie it sets
@@ -183,7 +182,7 @@ class Plugin:
             # file pickers start here; distros don't all use /home/deck
             "user_home": decky.DECKY_USER_HOME,
             "server": {"base": self.server.base_url, "key": self.server.key},
-            "service_types": [{"type": c.type, "display_name": c.display_name} for c in SERVICE_TYPES.values()],
+            "service_types": SERVICE_TYPES.listing(),
             "planned_types": PLANNED_TYPES,
             "listenbrainz": {"user": self.settings.get("listenbrainz").get("user", ""),
                              "pending": self.listenbrainz.pending_count()},

@@ -22,17 +22,16 @@ import os
 import re
 import secrets
 import shutil
-import ssl
 import time
 from typing import Any, Optional
 from urllib.parse import urlencode
 
 import aiohttp
-import certifi
 from aiohttp import web
 
-from ..cache import Cache
 from .. import debuglog, models
+from ..cache import Cache
+from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource
 
 PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -87,7 +86,7 @@ class _Gate:
 
 def _session(timeout: float = 20) -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=timeout))
 
 

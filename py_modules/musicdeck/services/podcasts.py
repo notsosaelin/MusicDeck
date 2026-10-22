@@ -16,17 +16,16 @@ import base64
 import binascii
 import os
 import re
-import ssl
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import aiohttp
-import certifi
 
-from ..cache import Cache
 from .. import models
+from ..cache import Cache
 from ..feeds import parse_feed
+from ..net import tls
 from ..settings import load_json, save_json
 from .base import MusicService, ServiceError, StreamSource
 
@@ -63,7 +62,7 @@ def _decode(value: str) -> str:
 
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": USER_AGENT})
 
 

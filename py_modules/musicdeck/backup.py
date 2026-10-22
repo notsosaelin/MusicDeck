@@ -22,7 +22,7 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any, Container, Iterable
 
 FORMAT = 1
 MAX_BYTES = 64 * 1024 * 1024
@@ -97,9 +97,9 @@ def read(path: str) -> dict[str, Any]:
     return data
 
 
-def valid_source(s: Any, known_types: Iterable[str]) -> bool:
+def valid_source(s: Any, known_types: Container[str]) -> bool:
     return (isinstance(s, dict) and isinstance(s.get("id"), str) and ID.match(s["id"]) is not None
-            and s.get("type") in set(known_types) and isinstance(s.get("name"), str)
+            and s.get("type") in known_types and isinstance(s.get("name"), str)
             and isinstance(s.get("config"), dict))
 
 

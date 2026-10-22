@@ -24,16 +24,15 @@ import asyncio
 import base64
 import json
 import re
-import ssl
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import aiohttp
-import certifi
 
 from .. import models
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 LIST_LIMIT = 500
@@ -66,7 +65,7 @@ SHELVES = {
 
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=20))
 
 

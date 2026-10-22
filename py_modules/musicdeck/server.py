@@ -17,17 +17,16 @@ import base64
 import re
 import secrets
 import socket
-import ssl
 import time
 from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 from urllib.parse import quote, urljoin
 
 import aiohttp
-import certifi
 from aiohttp import web
 
 from . import debuglog
 from .cache import Cache
+from .net import tls
 from .services import MusicService, ServiceError, StreamSource
 
 # Bodies are relayed as received (compressed too, e.g. Spotify's generated covers), so the
@@ -76,7 +75,7 @@ class StreamServer:
 
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+            connector=aiohttp.TCPConnector(ssl=tls()),
             timeout=aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60),
             auto_decompress=False,
             # Follow redirects to the letter: re-quoting a signed URL (Libsyn's "audio%2Fmpeg", say)

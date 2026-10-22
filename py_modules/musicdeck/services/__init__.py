@@ -1,39 +1,78 @@
-from .audiobookshelf import AudiobookshelfService
-from .bandcamp import BandcampService
-from .base import MusicService, ServiceError, SignIn, StreamSource
-from .emby import EmbyService
-from .jellyfin import JellyfinService
-from .livemusic import LiveMusicService
-from .local import LocalService
-from .plex import PlexService
-from .podcasts import PodcastService
-from .qobuz import QobuzService
-from .radio import RadioService
-from .soundcloud import SoundCloudService
-from .spotify import SpotifyService
-from .steam import SteamService
-from .subsonic import SubsonicService
-from .tidal import TidalService
-from .youtube import YouTubeService
+"""
+Every kind of source MusicDeck has. A source type's code is loaded the first time it's needed (a
+source of that type is added, or its sign-in starts), not at start-up: most people use a few of
+these, and the rest would only take memory.
+"""
+import importlib
+from typing import Any, Optional
 
-SERVICE_TYPES: dict[str, type[MusicService]] = {
-    LocalService.type: LocalService,
-    SteamService.type: SteamService,
-    SubsonicService.type: SubsonicService,
-    JellyfinService.type: JellyfinService,
-    EmbyService.type: EmbyService,
-    PlexService.type: PlexService,
-    AudiobookshelfService.type: AudiobookshelfService,
-    SoundCloudService.type: SoundCloudService,
-    YouTubeService.type: YouTubeService,
-    BandcampService.type: BandcampService,
-    RadioService.type: RadioService,
-    PodcastService.type: PodcastService,
-    LiveMusicService.type: LiveMusicService,
-    QobuzService.type: QobuzService,
-    TidalService.type: TidalService,
-    SpotifyService.type: SpotifyService,
-}
+from .base import MusicService, ServiceError, SignIn, StreamSource
+
+# (type, module, class, name shown in "Add a source"), in the order that list shows them
+CATALOGUE = [
+    ("local", "local", "LocalService", "Local files"),
+    ("steam", "steam", "SteamService", "Steam soundtracks"),
+    ("subsonic", "subsonic", "SubsonicService", "Navidrome / Subsonic"),
+    ("jellyfin", "jellyfin", "JellyfinService", "Jellyfin"),
+    ("emby", "emby", "EmbyService", "Emby"),
+    ("plex", "plex", "PlexService", "Plex"),
+    ("audiobookshelf", "audiobookshelf", "AudiobookshelfService", "Audiobookshelf"),
+    ("soundcloud", "soundcloud", "SoundCloudService", "SoundCloud"),
+    ("youtube", "youtube", "YouTubeService", "YouTube Music"),
+    ("bandcamp", "bandcamp", "BandcampService", "Bandcamp"),
+    ("radio", "radio", "RadioService", "Internet radio"),
+    ("podcasts", "podcasts", "PodcastService", "Podcasts"),
+    ("livemusic", "livemusic", "LiveMusicService", "Live Music Archive"),
+    ("qobuz", "qobuz", "QobuzService", "Qobuz"),
+    ("tidal", "tidal", "TidalService", "TIDAL"),
+    ("spotify", "spotify", "SpotifyService", "Spotify"),
+]
+
+
+class SourceTypes:
+    """The source types by name, as a lookup that imports each one's module on first use.
+    Tests can register their own (`types[name] = cls`) and take them away again."""
+
+    def __init__(self, catalogue: list[tuple[str, str, str, str]]):
+        self._where = {t: (module, cls) for t, module, cls, _ in catalogue}
+        self._names = {t: name for t, _, _, name in catalogue}
+        self._loaded: dict[str, type[MusicService]] = {}
+
+    def get(self, type_: str, default: Any = None) -> Optional[type[MusicService]]:
+        if type_ in self._loaded:
+            return self._loaded[type_]
+        if type_ not in self._where:
+            return default
+        module, cls = self._where[type_]
+        loaded = getattr(importlib.import_module(f".{module}", __name__), cls)
+        self._loaded[type_] = loaded
+        return loaded
+
+    def __contains__(self, type_: object) -> bool:
+        return type_ in self._names
+
+    def listing(self) -> list[dict[str, str]]:
+        """[{"type", "display_name"}] for "Add a source", without loading anything."""
+        return [{"type": t, "display_name": name} for t, name in self._names.items()]
+
+    def __setitem__(self, type_: str, cls: type[MusicService]) -> None:
+        self._loaded[type_] = cls
+        self._names[type_] = cls.display_name
+
+    def update(self, classes: dict[str, type[MusicService]]) -> None:
+        for type_, cls in classes.items():
+            self[type_] = cls
+
+    def pop(self, type_: str, default: Any = None) -> Any:
+        self._names.pop(type_, None)
+        self._where.pop(type_, None)
+        return self._loaded.pop(type_, default)
+
+    def __delitem__(self, type_: str) -> None:
+        self.pop(type_)
+
+
+SERVICE_TYPES = SourceTypes(CATALOGUE)
 
 # Shown in the UI as "coming soon" so the roadmap is visible without pretending they work.
 PLANNED_TYPES: list[dict[str, str]] = []

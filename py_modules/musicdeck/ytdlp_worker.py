@@ -1,14 +1,20 @@
 """
-yt-dlp worker, run as a separate process on the system's Python.
+The YouTube worker: yt-dlp and ytmusicapi, run as a separate process on the system's Python.
 
 Decky's backend runs in a frozen interpreter that leaves out parts of the standard library; yt-dlp
 imports some of them (e.g. getpass), and the fallback can load an incompatible copy from the
-system's Python. Running yt-dlp here, on a complete interpreter, sidesteps that and keeps a slow
-or stuck extraction from affecting the plugin.
+system's Python. Running here, on a complete interpreter, sidesteps that, keeps a slow or stuck
+extraction from affecting the plugin, and keeps both libraries (most of the memory YouTube takes)
+in a process the plugin stops when YouTube hasn't been used for a while.
+
+Each library is imported on first use: browsing needs only ytmusicapi, playing only yt-dlp.
 
 Protocol: one JSON object per line on stdin -> one per line on stdout, matched by "id".
   {"id", "op": "extract", "video_id", "js_path"?, "cachedir", "format"}  -> {"id", "result": {...}}
   {"id", "op": "search", "query", "count"}                                -> {"id", "result": [...]}
+  {"id", "op": "channel", "channel_id", "count"}                          -> {"id", "result": {...}}
+  {"id", "op": "music", "method", "args", "kwargs"}                       -> {"id", "result": ...}
+  {"id", "op": "version"}                                                  -> {"id", "result": "2026.10.21"}
   failures                                                                 -> {"id", "error": "..."}
 """
 import json
@@ -57,7 +63,36 @@ def channel(req: dict) -> dict:
             "entries": [{k: e.get(k) for k in keep} for e in info.get("entries") or []]}
 
 
-OPS = {"extract": extract, "search": search, "channel": channel}
+# the YouTube Music calls the plugin makes; nothing else of ytmusicapi can be asked for
+MUSIC_METHODS = {"search", "get_home", "get_album", "get_artist", "get_playlist", "get_watch_playlist", "get_lyrics"}
+music_client = None
+music_lock = threading.Lock()
+
+
+def music(req: dict):
+    """A YouTube Music (ytmusicapi) call, signed out. Timed lyrics come back as objects; they're
+    sent as {"start_time", "text"}."""
+    global music_client
+    if req["method"] not in MUSIC_METHODS:
+        raise ValueError(f"unknown method {req['method']}")
+    with music_lock:
+        if music_client is None:
+            from ytmusicapi import YTMusic
+            music_client = YTMusic()
+    result = getattr(music_client, req["method"])(*req.get("args", []), **req.get("kwargs", {}))
+    if req["method"] == "get_lyrics" and isinstance(result, dict) and isinstance(result.get("lyrics"), list):
+        result = {**result, "lyrics": [{"start_time": getattr(line, "start_time", 0), "text": getattr(line, "text", "")}
+                                       for line in result["lyrics"]]}
+    return result
+
+
+def version(req: dict) -> str:
+    """The yt-dlp that loads (checked after an update)."""
+    import yt_dlp.version
+    return yt_dlp.version.__version__
+
+
+OPS = {"extract": extract, "search": search, "channel": channel, "music": music, "version": version}
 
 
 def handle(req: dict) -> None:
@@ -68,9 +103,7 @@ def handle(req: dict) -> None:
 
 
 def main() -> None:
-    # import once up front so the first real request doesn't pay for it
-    import yt_dlp  # noqa: F401
-    reply({"id": None, "ready": True, "version": yt_dlp.version.__version__})
+    reply({"id": None, "ready": True})
     pool = ThreadPoolExecutor(max_workers=3)
     for line in sys.stdin:
         line = line.strip()

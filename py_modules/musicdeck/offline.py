@@ -19,15 +19,14 @@ import hashlib
 import json
 import os
 import shutil
-import ssl
 import tempfile
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urljoin
 
 import aiohttp
-import certifi
 
 from . import debuglog
+from .net import tls
 from .services.base import ServiceError, StreamSource
 from .settings import load_json
 
@@ -152,7 +151,7 @@ class OfflineStore:
         if self.session is None:
             # no overall timeout: an hour-long episode on a slow link is fine as long as bytes arrive
             self.session = aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+                connector=aiohttp.TCPConnector(ssl=tls()),
                 timeout=aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60))
         failures = 0
         while True:

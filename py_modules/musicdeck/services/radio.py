@@ -10,15 +10,14 @@ on air as ICY metadata, which on_air() reads with a short side request.
 import asyncio
 import random
 import re
-import ssl
 import time
 from typing import Any, Optional
 
 import aiohttp
-import certifi
 
-from ..cache import Cache
 from .. import debuglog, models
+from ..cache import Cache
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 DIRECTORY = "https://all.api.radio-browser.info"
@@ -71,7 +70,7 @@ def parse_on_air(title: str, stream_url: str = "") -> Optional[dict[str, Any]]:
 
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=15), headers={"User-Agent": USER_AGENT})
 
 

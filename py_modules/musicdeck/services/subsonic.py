@@ -5,14 +5,13 @@ the spec's salted token on save and never stored. Audio is the original file (fo
 """
 import hashlib
 import secrets
-import ssl
 from typing import Any, Optional
 from urllib.parse import urlencode
 
 import aiohttp
-import certifi
 
 from .. import models
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 API_VERSION = "1.16.1"
@@ -56,7 +55,7 @@ class SubsonicService(MusicService):
 
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+            connector=aiohttp.TCPConnector(ssl=tls()),
             timeout=aiohttp.ClientTimeout(total=20))
 
     async def stop(self) -> None:

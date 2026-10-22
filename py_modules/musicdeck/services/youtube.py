@@ -9,8 +9,10 @@ YouTube Music and YouTube, signed out, the way NewPipe-style clients work:
   stream URLs; yt-dlp first tries without a JS engine (fast, ~1 s) and falls back to the bundled
   QuickJS-NG binary (~5 s) when YouTube insists, so playback survives YouTube tightening the
   no-engine path.
-* yt-dlp runs in a persistent worker process on the system's Python (see ytdlp_worker.py), not
-  inside Decky's frozen interpreter, which lacks parts of the standard library yt-dlp needs.
+* Both run in a worker process on the system's Python (see ytdlp_worker.py), not inside Decky's
+  frozen interpreter, which lacks parts of the standard library yt-dlp needs. The worker holds most
+  of the memory YouTube takes, so it's stopped after a few minutes without YouTube and started
+  again (in about a second) when it's next needed.
 """
 import asyncio
 import itertools
@@ -20,13 +22,12 @@ import re
 import shutil
 import stat
 import subprocess
-import threading
 import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-from ..cache import Cache
 from .. import debuglog, models, ytdlp_update
+from ..cache import Cache
 from .base import MusicService, ServiceError, StreamSource
 
 PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -34,6 +35,8 @@ PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."
 QJS_NAME = "qjs"
 # Once the fast path has failed, go straight to QuickJS for a while instead of paying twice
 NEEDS_JS_FOR = 6 * 3600
+# the worker stops after this long without a request (it takes ~80 MB while running)
+IDLE_STOP = 5 * 60
 LYRICS_IDS_TTL = 6 * 3600
 LYRICS_IDS_KEPT = 1000
 # opus (itag 251, ~160 kbps) first, then AAC; both play natively in Steam's Chromium
@@ -78,8 +81,9 @@ def _clean_env(extra_path: Optional[str] = None) -> dict[str, str]:
     return env
 
 
-class YtdlpWorker:
-    """Long-lived yt-dlp process; requests are JSON lines, answered out of order by id."""
+class YouTubeWorker:
+    """The worker process (ytdlp_worker.py); requests are JSON lines, answered out of order by id.
+    Started on the first request, stopped after IDLE_STOP seconds with none."""
 
     def __init__(self, runtime_dir: str) -> None:
         self.runtime_dir = runtime_dir
@@ -88,7 +92,12 @@ class YtdlpWorker:
         self.ids = itertools.count(1)
         self.lock = asyncio.Lock()
         self.reader: Optional[asyncio.Task] = None
-        self.version = ""
+        self.idle: Optional[asyncio.TimerHandle] = None
+
+    @property
+    def version(self) -> str:
+        """The yt-dlp version the worker runs (or would), without starting it."""
+        return ytdlp_update.installed_version(self.runtime_dir, PY_MODULES)
 
     async def _ensure(self) -> None:
         async with self.lock:
@@ -102,9 +111,8 @@ class YtdlpWorker:
                 stderr=asyncio.subprocess.DEVNULL, env=_clean_env(ytdlp_update.active_path(self.runtime_dir)),
                 limit=8 * 1024 * 1024)
             assert self.proc.stdout
-            ready = json.loads(await asyncio.wait_for(self.proc.stdout.readline(), 30))
-            self.version = ready.get("version", "")
-            debuglog.debug("youtube", "yt-dlp worker started", python=python, yt_dlp=self.version)
+            await asyncio.wait_for(self.proc.stdout.readline(), 30)  # {"ready": true}
+            debuglog.debug("youtube", "worker started", python=python)
             self.reader = asyncio.get_event_loop().create_task(self._read(self.proc))
 
     async def _read(self, proc: asyncio.subprocess.Process) -> None:
@@ -127,23 +135,34 @@ class YtdlpWorker:
         self.pending.clear()
 
     async def call(self, op: str, timeout: float = 60, **args: Any) -> Any:
-        await self._ensure()
-        assert self.proc and self.proc.stdin
+        if self.idle:
+            self.idle.cancel()
+            self.idle = None
         rid = next(self.ids)
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.pending[rid] = future
-        self.proc.stdin.write((json.dumps({"id": rid, "op": op, **args}) + "\n").encode())
-        await self.proc.stdin.drain()
         try:
+            await self._ensure()
+            assert self.proc and self.proc.stdin
+            self.proc.stdin.write((json.dumps({"id": rid, "op": op, **args}) + "\n").encode())
+            await self.proc.stdin.drain()
             return await asyncio.wait_for(future, timeout)
         finally:
             self.pending.pop(rid, None)
+            if not self.pending:
+                self.idle = asyncio.get_event_loop().call_later(
+                    IDLE_STOP, lambda: asyncio.ensure_future(self._stop_if_idle()))
+
+    async def _stop_if_idle(self) -> None:
+        if not self.pending:
+            debuglog.debug("youtube", "worker stopped while idle")
+            await self.stop()
 
     async def restart(self) -> str:
+        """A fresh worker (after an update); returns the yt-dlp version it loads."""
         await self.stop()
         self.proc = None
-        await self._ensure()
-        return self.version
+        return await self.call("version", timeout=60)
 
     async def stop(self) -> None:
         if self.proc and self.proc.returncode is None:
@@ -151,19 +170,6 @@ class YtdlpWorker:
             await self.proc.wait()
         if self.reader:
             self.reader.cancel()
-
-
-def _ensure_stdlib_stubs() -> None:
-    """Decky's frozen Python leaves out some stdlib modules; importing them can then pick up the
-    system Python's copy, which may use newer syntax and fail. ytmusicapi only uses `webbrowser`
-    for its OAuth sign-in, which we never call, so an empty stand-in is enough."""
-    import sys
-    import types
-    try:
-        import webbrowser  # noqa: F401
-    except Exception as e:
-        debuglog.debug("youtube", "stubbing webbrowser", error=str(e)[:200])
-        sys.modules["webbrowser"] = types.ModuleType("webbrowser")
 
 
 def _thumb(thumbnails: Optional[list[dict[str, Any]]], want: int = 300) -> Optional[str]:
@@ -207,12 +213,10 @@ class YouTubeService(MusicService):
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
-        self._ytm = None
-        self._ytm_lock = threading.Lock()
         self._needs_js_until = 0.0
         # where each track's lyrics are (None: it has none), learnt from its watch playlist
         self._lyrics_ids: Cache[Optional[str]] = Cache(LYRICS_IDS_TTL, LYRICS_IDS_KEPT)
-        self.worker = YtdlpWorker(runtime_dir)
+        self.worker = YouTubeWorker(runtime_dir)
         self.update_status = ""
         self.qjs_path = next((p for p in (os.path.join(runtime_dir, "bin", QJS_NAME),
                                           os.path.join(PLUGIN_ROOT, "bin", QJS_NAME)) if os.path.isfile(p)), None)
@@ -246,10 +250,6 @@ class YouTubeService(MusicService):
 
     async def update_ytdlp(self) -> str:
         """Installs the newest yt-dlp if there is one; returns a short message for the UI."""
-        try:
-            await self.worker._ensure()
-        except ServiceError:
-            pass  # a broken install is exactly when an update helps
         before = self.worker.version
         self.update_status = "Checking…"
         try:
@@ -273,27 +273,18 @@ class YouTubeService(MusicService):
             self.update_status = ""
             raise ServiceError(f"The update didn't work and was rolled back ({e})") from e
 
-    @property
-    def ytm(self):
-        with self._ytm_lock:
-            if self._ytm is None:
-                _ensure_stdlib_stubs()
-                from ytmusicapi import YTMusic
-                self._ytm = YTMusic()  # signed out
-            return self._ytm
-
-    async def _run(self, fn, *args, **kwargs):
-        """ytmusicapi and yt-dlp block; keep them off the event loop."""
+    async def _music(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        """A YouTube Music call (ytmusicapi, signed out), made by the worker."""
         try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
-        except ServiceError:
+            return await self.worker.call("music", method=method, args=list(args), kwargs=kwargs, timeout=30)
+        except ServiceError as e:
+            debuglog.debug("youtube", "call failed", method=method, error=str(e)[:300])
             raise
-        except Exception as e:
-            debuglog.debug("youtube", "call failed", fn=getattr(fn, "__name__", str(fn)), error=str(e)[:300])
-            raise ServiceError(f"YouTube: {str(e).splitlines()[0][:160]}") from e
+        except asyncio.TimeoutError as e:
+            raise ServiceError("YouTube Music didn't answer in time") from e
 
     async def test(self) -> str:
-        await self._run(self.ytm.search, "test", filter="songs", limit=1)
+        await self._music("search", "test", filter="songs", limit=1)
         return "Connected to YouTube Music"
 
     # --- mapping ---
@@ -335,7 +326,7 @@ class YouTubeService(MusicService):
     # --- browsing ---
 
     async def home(self) -> list[dict[str, Any]]:
-        rows = await self._run(self.ytm.get_home, limit=8)
+        rows = await self._music("get_home", limit=8)
         sections = []
         for row in rows:
             contents = row.get("contents") or []
@@ -347,7 +338,7 @@ class YouTubeService(MusicService):
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "album":
-            a = await self._run(self.ytm.get_album, id)
+            a = await self._music("get_album", id)
             artist, _ = _artists(a)
             art = _thumb(a.get("thumbnails"))
             tracks = self._tracks(a.get("tracks"))
@@ -359,7 +350,7 @@ class YouTubeService(MusicService):
             return models.page(a.get("title", ""), sub, art, tracks=tracks)
         if kind == "artist":
             try:
-                a = await self._run(self.ytm.get_artist, id)
+                a = await self._music("get_artist", id)
             except ServiceError:
                 # not a YouTube Music artist (e.g. a label or live-session channel): show its uploads
                 return await self._channel_page(id)
@@ -372,7 +363,7 @@ class YouTubeService(MusicService):
                                extra=[{"title": "Videos", "tracks": videos}])
         if kind == "playlist":
             pid = id[2:] if id.startswith("VL") else id
-            p = await self._run(self.ytm.get_playlist, pid, limit=300)
+            p = await self._music("get_playlist", pid, limit=300)
             author = p.get("author") or {}
             sub = author.get("name", "") if isinstance(author, dict) else str(author)
             return models.page(p.get("title", ""), sub, _thumb(p.get("thumbnails")), tracks=self._tracks(p.get("tracks")))
@@ -381,13 +372,12 @@ class YouTubeService(MusicService):
     async def search(self, query: str) -> dict[str, Any]:
         """Both catalogs at once, each category searched on its own so none is starved: YouTube Music's
         songs, albums, artists and playlists, plus YouTube's videos (any upload, music-labelled or not)."""
-        ytm = self.ytm
         jobs = {
-            "songs": self._run(ytm.search, query, filter="songs", limit=40),
-            "music_videos": self._run(ytm.search, query, filter="videos", limit=20),
-            "albums": self._run(ytm.search, query, filter="albums", limit=20),
-            "artists": self._run(ytm.search, query, filter="artists", limit=10),
-            "playlists": self._run(ytm.search, query, filter="community_playlists", limit=20),
+            "songs": self._music("search", query, filter="songs", limit=40),
+            "music_videos": self._music("search", query, filter="videos", limit=20),
+            "albums": self._music("search", query, filter="albums", limit=20),
+            "artists": self._music("search", query, filter="artists", limit=10),
+            "playlists": self._music("search", query, filter="community_playlists", limit=20),
         }
         if self.config.get("include_videos", True):
             jobs["youtube"] = self._youtube_search(query, 40)
@@ -431,20 +421,20 @@ class YouTubeService(MusicService):
         return self._flat_videos(entries)
 
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
-        data = await self._run(self.ytm.get_watch_playlist, videoId=track["id"], radio=True, limit=50)
+        data = await self._music("get_watch_playlist", videoId=track["id"], radio=True, limit=50)
         self._lyrics_ids.put(track["id"], data.get("lyrics"))
         return [t for t in self._tracks(data.get("tracks")) if t["id"] != track["id"]]
 
     async def lyrics(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
         browse_id = self._lyrics_ids.get(track["id"])
         if track["id"] not in self._lyrics_ids:
-            data = await self._run(self.ytm.get_watch_playlist, videoId=track["id"], limit=1)
+            data = await self._music("get_watch_playlist", videoId=track["id"], limit=1)
             browse_id = self._lyrics_ids.put(track["id"], data.get("lyrics"))
         if not browse_id:
             return None
         found = None
         try:
-            found = await self._run(self.ytm.get_lyrics, browse_id, timestamps=True)
+            found = await self._music("get_lyrics", browse_id, timestamps=True)
         except ServiceError:
             pass
         if not found:
@@ -452,7 +442,7 @@ class YouTubeService(MusicService):
         body = found.get("lyrics")
         source = "YouTube Music"
         if found.get("hasTimestamps") and isinstance(body, list):
-            lines = [{"t": (getattr(l, "start_time", 0) or 0) / 1000, "text": getattr(l, "text", "")} for l in body]
+            lines = [{"t": (line.get("start_time") or 0) / 1000, "text": line.get("text") or ""} for line in body]
             return {"synced": True, "lines": lines, "source": source}
         if isinstance(body, str) and body.strip():
             return {"synced": False, "lines": [{"t": None, "text": x} for x in body.splitlines()], "source": source}

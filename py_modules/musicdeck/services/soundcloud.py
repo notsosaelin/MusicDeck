@@ -9,16 +9,15 @@ import base64
 import json
 import os
 import re
-import ssl
 import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
-import certifi
 
-from ..cache import Cache
 from .. import models
+from ..cache import Cache
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 API = "https://api-v2.soundcloud.com"
@@ -75,7 +74,7 @@ class SoundCloudService(MusicService):
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
             headers={"User-Agent": USER_AGENT},
-            connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+            connector=aiohttp.TCPConnector(ssl=tls()),
             timeout=aiohttp.ClientTimeout(total=20))
         try:
             with open(self.cache_path, "r", encoding="utf-8") as f:

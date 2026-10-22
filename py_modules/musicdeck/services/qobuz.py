@@ -18,16 +18,15 @@ import hashlib
 import json
 import os
 import re
-import ssl
 import time
 from collections import OrderedDict
 from typing import Any, Optional
 
 import aiohttp
-import certifi
 from aiohttp import web
 
 from .. import debuglog, models
+from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource
 
 API = "https://www.qobuz.com/api.json/0.2"
@@ -52,7 +51,7 @@ FEATURED = [("new-releases-full", "New releases"), ("qobuzissims", "Qobuzissimes
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         headers={"User-Agent": USER_AGENT},
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=20))
 
 

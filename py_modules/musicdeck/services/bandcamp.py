@@ -8,16 +8,15 @@ import asyncio
 import json
 import random
 import re
-import ssl
 import time
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
-import certifi
 
-from ..cache import Cache
 from .. import lyrics, models
+from ..cache import Cache
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 SEARCH = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic"
@@ -75,7 +74,7 @@ class BandcampService(MusicService):
 
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+            connector=aiohttp.TCPConnector(ssl=tls()),
             timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": USER_AGENT})
 
     async def stop(self) -> None:

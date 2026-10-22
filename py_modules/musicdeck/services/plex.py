@@ -19,15 +19,14 @@ import platform
 import random
 import re
 import secrets as pysecrets
-import ssl
 import time
 from typing import Any, Optional
 from urllib.parse import quote, urlencode
 
 import aiohttp
-import certifi
 
 from .. import debuglog, lyrics, models
+from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource
 
 PRODUCT = "MusicDeck"
@@ -53,7 +52,7 @@ ART_PATH = re.compile(r"^/(library|playlists)/[\w/.\-]+$")
 
 def _session(timeout: float = 20) -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=timeout))
 
 

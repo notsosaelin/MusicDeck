@@ -30,7 +30,7 @@ flowchart LR
     PL --> SV
     SS --> SV
   end
-  W["ytdlp_worker.py<br/>(system Python)"]
+  W["ytdlp_worker.py<br/>(system Python, on demand)"]
   H["bin/spotify-helper<br/>(Rust, librespot)"]
   NET[("Music services<br/>on the internet / LAN")]
 
@@ -123,7 +123,8 @@ Details worth knowing:
 | `main.py` | `Plugin`: every RPC endpoint the frontend calls. Owns settings, playlist store, stream server, service instances, the sign-in in progress, ListenBrainz. Endpoints return `{"ok": True, "data": ...}` or `{"ok": False, "error": "message for the user"}` via `_result`. |
 | `musicdeck/models.py` | The one data model every service returns: Track, Collection, Page, Section. Plain dicts, mirrored by TypeScript types in `src/api.ts`. |
 | `musicdeck/services/base.py` | `MusicService` (the interface every source implements), `StreamSource` (where audio/art comes from), `SignIn` (OAuth/device-code sign-ins), `ServiceError` (errors safe to show the user). |
-| `musicdeck/services/__init__.py` | `SERVICE_TYPES`: the registry of sources shown in "Add a source". |
+| `musicdeck/services/__init__.py` | `CATALOGUE` and `SERVICE_TYPES`: every source type, in "Add a source" order; a type's module is imported the first time it's needed. |
+| `musicdeck/net.py`, `musicdeck/cache.py` | The one TLS context every HTTPS connection shares (certifi's bundle costs ~1 MB per context), and the bounded, expiring cache every in-memory cache uses. |
 | `musicdeck/services/*.py` | One file per source. See [SOURCES.md](SOURCES.md). |
 | `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; downloaded files first, then range proxying, HLS rewriting, resolved-source cache. |
 | `musicdeck/settings.py` | `Settings`: atomic JSON store for preferences and configured sources (credentials included, so `chmod 600`). |
@@ -135,7 +136,7 @@ Details worth knowing:
 | `musicdeck/feeds.py` | A small XML reader and the RSS parser for podcast feeds (Decky's Python has no `xml`). |
 | `musicdeck/listenbrainz.py` | ListenBrainz client with an on-disk queue for listens made offline. |
 | `musicdeck/debuglog.py` | Optional verbose log (`musicdeck-debug.log`), toggled in settings; the player's events land here too. |
-| `musicdeck/ytdlp_worker.py` | Runs under the system Python; answers yt-dlp requests as JSON lines. |
+| `musicdeck/ytdlp_worker.py` | Runs under the system Python; answers yt-dlp and YouTube Music (ytmusicapi) requests as JSON lines. Started on demand, stopped after 5 idle minutes. |
 | `musicdeck/ytdlp_update.py` | Keeps yt-dlp current from PyPI (checksum-verified, rolled back if the new version fails). |
 | `backend/spotify-helper/` | Rust crate for `bin/spotify-helper` (librespot). `main.rs`: control protocol and audio server; `reads.rs`: catalogue reads over Spotify's own client API. |
 
@@ -336,6 +337,25 @@ uses that style itself, as Steamcord does for Discord avatars:
   and an unloading copy empties; a change to the hooks themselves raises `HOOKS_VERSION`.
 - Once shown, the toast is removed from Steam's notification list (`RemoveGroupFromTray`).
 - They follow Steam's own notification settings for friend messages: turning those off hides them.
+
+## Resources
+
+MusicDeck is meant to cost nothing noticeable while a game runs. Measured on a Deck (Bazzite,
+October 2026) with seven sources set up:
+
+| What | Cost | How it's kept there |
+| --- | --- | --- |
+| Backend, idle | 28 MB (PSS), ~0% CPU | Source modules load only for types in use; one shared TLS context; bounded caches |
+| Backend, streaming | +0.05% of one core | Bytes are relayed as they arrive, never decoded or re-encoded |
+| Steam UI, playing, menu closed | 0.13% of one core (the same as paused) | No timers while hidden; audio decodes in Chromium's audio thread |
+| Steam UI, menu open on MusicDeck | 2–3% of one core | Position updates only redraw the now-playing card |
+| YouTube worker | ~80 MB while YouTube is in use, 0 otherwise | Stops after 5 idle minutes |
+| On disk | ~31 MB (8 MB download), of which yt-dlp is 16 MB | |
+
+For comparison, the hidden-browser route to Apple Music measured 313 MB on disk and ~300 MB of
+memory idle (see SOURCES.md). To measure again: the backend's `/proc/<pid>/smaps_rollup` (PSS),
+and CDP's `Performance.getMetrics` (`ScriptDuration`, `TaskDuration`) on `SharedJSContext` and
+`QuickAccess` over a fixed window.
 
 ## Constraints that shaped the code
 

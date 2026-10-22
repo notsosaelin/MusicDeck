@@ -12,15 +12,14 @@ import json
 import os
 import re
 import shutil
-import ssl
 import time
 import zipfile
 from typing import Any, Optional
 
 import aiohttp
-import certifi
 
 from . import debuglog
+from .net import tls
 
 PYPI = "https://pypi.org/pypi/{name}/json"
 CHECK_EVERY = 7 * 24 * 3600
@@ -54,6 +53,20 @@ def active_path(runtime_dir: str) -> Optional[str]:
     """The installed update to put first on the worker's PYTHONPATH, if any."""
     path = load_state(runtime_dir).get("active")
     return path if path and os.path.isdir(path) else None
+
+
+def installed_version(runtime_dir: str, bundled: str) -> str:
+    """The version of the yt-dlp the worker loads (an installed update, else the copy in `bundled`),
+    read from its files without importing it."""
+    for root in (active_path(runtime_dir), bundled):
+        try:
+            with open(os.path.join(root or "", "yt_dlp", "version.py"), encoding="utf-8") as f:
+                found = re.search(r"^__version__\s*=\s*['\"]([^'\"]+)", f.read(), re.M)
+            if found:
+                return found.group(1)
+        except OSError:
+            continue
+    return ""
 
 
 def check_due(runtime_dir: str) -> bool:
@@ -97,7 +110,7 @@ async def update(runtime_dir: str, current_version: str) -> dict[str, Any]:
     Returns {"updated": bool, "version": str}. The caller restarts the worker and calls
     `confirm` or `rollback` depending on whether it comes up."""
     state = load_state(runtime_dir)
-    connector = aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where()))
+    connector = aiohttp.TCPConnector(ssl=tls())
     async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=120)) as session:
         latest = await _release(session, "yt-dlp")
         state["checked_at"] = time.time()

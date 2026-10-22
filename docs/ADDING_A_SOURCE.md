@@ -214,16 +214,18 @@ class ExampleService(MusicService):
 
 ## 2. Register it
 
-`py_modules/musicdeck/services/__init__.py`:
+Add a line to `CATALOGUE` in `py_modules/musicdeck/services/__init__.py`, where it should appear in
+"Add a source":
 
 ```python
-from .example import ExampleService
-
-SERVICE_TYPES = {
+CATALOGUE = [
     ...,
-    ExampleService.type: ExampleService,   # order here is the order in "Add a source"
-}
+    ("example", "example", "ExampleService", "Example Music"),  # type, module, class, display name
+]
 ```
+
+Don't import the module there: a source's code is loaded only once someone adds one (the backend
+tests check that every entry loads, with the same type and display name as its class).
 
 ## 3. Frontend
 

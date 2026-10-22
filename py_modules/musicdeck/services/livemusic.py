@@ -13,16 +13,15 @@ a show's own is usually a generated waveform.
 import asyncio
 import random
 import re
-import ssl
 from datetime import date
 from typing import Any, Optional
 from urllib.parse import quote
 
 import aiohttp
-import certifi
 
-from ..cache import Cache
 from .. import models
+from ..cache import Cache
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 SEARCH = "https://archive.org/advancedsearch.php"
@@ -48,7 +47,7 @@ RADIO_SIZE = 25
 
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
+        connector=aiohttp.TCPConnector(ssl=tls()),
         timeout=aiohttp.ClientTimeout(total=25), headers={"User-Agent": USER_AGENT})
 
 

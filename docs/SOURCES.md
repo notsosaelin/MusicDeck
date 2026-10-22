@@ -219,9 +219,13 @@ source (`MusicService.remove`).
 - **Browsing**: ytmusicapi, signed out (YouTube Music's internal API). Search combines songs, music
   videos, albums, artists and community playlists, plus plain YouTube videos via yt-dlp when
   "Include all YouTube videos" is on.
-- **Audio**: yt-dlp in a persistent worker on the system Python (Decky's Python lacks modules it
-  needs). It first tries without a JavaScript engine, then with the bundled QuickJS-NG (`bin/qjs`,
-  checksum-pinned in `scripts/vendor.py`) when YouTube requires its signature challenge.
+- **Audio**: yt-dlp. It first tries without a JavaScript engine, then with the bundled QuickJS-NG
+  (`bin/qjs`, checksum-pinned in `scripts/vendor.py`) when YouTube requires its signature challenge.
+- **The worker**: both libraries run in `ytdlp_worker.py` on the system Python (Decky's Python
+  lacks modules yt-dlp needs), each imported on first use. It holds nearly all the memory YouTube
+  takes (about 80 MB with both loaded, measured on a Deck), so it starts on the first YouTube
+  request and stops after 5 minutes without one; starting again takes about a second. YouTube
+  Music calls are limited to the methods the plugin uses (`MUSIC_METHODS`).
 - **Updates**: YouTube changes often, so yt-dlp updates itself from PyPI (`ytdlp_update.py`): wheel
   checksums verified, the new copy must start, else MusicDeck rolls back.
 - **Breaks when**: YouTube changes faster than yt-dlp; the update usually fixes it.
