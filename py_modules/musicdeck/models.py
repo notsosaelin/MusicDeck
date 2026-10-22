@@ -9,8 +9,10 @@ Collection: {"id", "kind", "title", "subtitle", "art"}   kind: album | artist | 
 Page:       {"title", "subtitle", "art", "collections": [Collection], "tracks": [Track],
              "extra": [{"title", "tracks": [Track]}], "action", "notice"}
             extra = more titled track lists (e.g. "Videos")
-            action = {"label", "url"}: a button in the page header; steam:// URLs run in Steam
-                     (e.g. "Install" for a soundtrack), others open in Steam's browser. Or None.
+            action = a button in the page header, or None. {"label", "url"}: steam:// URLs run in Steam
+                     (e.g. "Install" for a soundtrack), others open in Steam's browser.
+                     {"label", "call"}: asks the source to do something (collection_action, e.g.
+                     subscribing to a podcast), then the page reloads.
             notice = a sentence shown above the content (why there's nothing to play yet), or None
 Section:    {"title", "items": [Collection], "tracks": [Track]}   a home row of collections and/or tracks
 

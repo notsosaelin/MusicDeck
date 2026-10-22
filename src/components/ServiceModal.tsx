@@ -106,6 +106,28 @@ const RadioFields: FC<{ draft: ServiceDraft; setConfig: (c: Record<string, any>)
   />
 );
 
+/** Podcasts: no account; the country picks whose top charts the home view shows. */
+const PodcastFields: FC<{ draft: ServiceDraft; setConfig: (c: Record<string, any>) => void }> = ({
+  draft,
+  setConfig,
+}) => (
+  <>
+    <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5, marginBottom: 8 }}>
+      Find shows in Apple's podcast directory (no account) or paste a feed address into Search. Subscriptions and where
+      you left each episode stay on this device.
+    </div>
+    <DropdownItem
+      label="Top charts"
+      description="Whose most popular podcasts the home view shows."
+      rgOptions={["US", ...RADIO_COUNTRIES.filter((c) => c !== "US")]
+        .map((c) => ({ data: c === "US" ? "" : c, label: countryName(c) }))
+        .sort((a, b) => a.label.localeCompare(b.label))}
+      selectedOption={draft.config.country ?? ""}
+      onChange={(o) => setConfig({ ...draft.config, country: o.data })}
+    />
+  </>
+);
+
 const TIDAL_QUALITIES = [
   { data: "LOW", label: "AAC 96 kbps" },
   { data: "HIGH", label: "AAC 320 kbps" },
@@ -490,6 +512,7 @@ export const ServiceModal: FC<{
           />
         )}
         {type === "radio" && <RadioFields draft={draft} setConfig={setConfig} />}
+        {type === "podcasts" && <PodcastFields draft={draft} setConfig={setConfig} />}
         {type === "steam" && (
           <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
             Plays the soundtracks you own on Steam. Installed ones play from this device, from every Steam library (SD

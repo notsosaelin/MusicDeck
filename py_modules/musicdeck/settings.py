@@ -44,6 +44,15 @@ def load_json(path: str) -> dict[str, Any]:
     return {}
 
 
+def save_json(path: str, data: Any) -> None:
+    """Writes JSON atomically (a temporary file, then a rename), so a crash can't leave half a file."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
 class Settings:
     """Small JSON-backed settings store. Writes are atomic so a crash can't truncate the file."""
 

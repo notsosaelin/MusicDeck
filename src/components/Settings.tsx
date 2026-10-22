@@ -24,6 +24,7 @@ import {
   FaFolderOpen,
   FaGamepad,
   FaPlus,
+  FaPodcast,
   FaServer,
   FaSoundcloud,
   FaSpotify,
@@ -60,6 +61,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   youtube: <FaYoutube />,
   bandcamp: <FaBandcamp />,
   radio: <FaBroadcastTower />,
+  podcasts: <FaPodcast />,
   qobuz: <FaCompactDisc />,
   spotify: <FaSpotify />,
   tidal: <SiTidal />,
@@ -73,6 +75,10 @@ const describeStatus = (s: ServiceInfo) => {
   if (s.type === "soundcloud" || s.type === "bandcamp") return "No account";
   if (s.type === "radio")
     return ["No account", s.config.country && countryName(s.config.country)].filter(Boolean).join(" · ");
+  if (s.type === "podcasts") {
+    const n = s.config.subscriptions?.length ?? 0;
+    return `No account · ${n} subscription${n === 1 ? "" : "s"}`;
+  }
   if (s.type === "spotify") return `${s.config.display_name ?? "Spotify"} · ${s.config.bitrate ?? 320} kbps`;
   if (s.type === "tidal") {
     const q: Record<string, string> = { LOW: "AAC 96", HIGH: "AAC 320", LOSSLESS: "FLAC CD" };

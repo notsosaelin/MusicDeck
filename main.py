@@ -313,7 +313,10 @@ class Plugin:
             source = await self.server.resolve_stream(instance_id, track_id)
             debuglog.debug("stream", "resolved", instance=instance_id, track=track_id, hls=source.hls,
                            local=bool(source.path), expires=source.expires)
-            return {"hls": source.hls, "gain": source.gain}
+            instance = self.instances.get(instance_id)
+            # long tracks (podcast episodes) start where they were left
+            start_at = instance.resume_position(track_id) if hasattr(instance, "resume_position") else 0
+            return {"hls": source.hls, "gain": source.gain, "start_at": start_at}
         return await _result(work())
 
     @_when_ready
@@ -415,7 +418,8 @@ class Plugin:
 
         token = self.settings.get("listenbrainz").get("token")
         instance = self.instances.get(instance_id)
-        if token and track and instance:
+        # ListenBrainz keeps music listening history; podcast episodes (feature "progress") aren't that
+        if token and track and instance and "progress" not in instance.features:
             report = self.listenbrainz.listen if submission else self.listenbrainz.now_playing
             asyncio.get_event_loop().create_task(report(token, track, instance.display_name))
         if not self.settings.get("playback").get("scrobble", True) or not instance \
@@ -445,6 +449,8 @@ class Plugin:
     async def get_lyrics(self, instance_id: str, track: dict[str, Any]) -> dict[str, Any]:
         async def work():
             instance = self.instances.get(instance_id)
+            if instance and "progress" in instance.features:
+                return None  # podcast episodes: talk, not songs; nothing to look up
             found = await instance.lyrics(track) if instance and "lyrics" in instance.features else None
             if not found and self.http:
                 found = await lyrics.from_lrclib(self.http, track)
@@ -571,6 +577,30 @@ class Plugin:
         self.recents.forget(collection_id=playlist_id)
         if self._forget_game_music(lambda m: m["collection"]["id"] == playlist_id):
             await _announce_change()
+
+    @_when_ready
+    async def collection_action(self, instance_id: str, kind: str, collection_id: str, call: str) -> dict[str, Any]:
+        """A page's own button (Page.action with "call"), e.g. subscribing to a podcast; returns what
+        to tell the user."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not hasattr(instance, "collection_action"):
+                raise ServiceError("This source has no such action")
+            return await instance.collection_action(kind, collection_id, call)
+        return await _result(work())
+
+    @_when_ready
+    async def save_progress(self, instance_id: str, track: dict[str, Any], position: float, duration: float) -> None:
+        """How far a long track (a podcast episode) got, so it resumes there (feature "progress")."""
+        instance = self.instances.get(instance_id)
+        if instance is not None and hasattr(instance, "save_progress")                 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (position, duration)):
+            instance.save_progress(track, position, duration)
+
+    @_when_ready
+    async def set_played(self, instance_id: str, track: dict[str, Any], played: bool) -> None:
+        instance = self.instances.get(instance_id)
+        if instance is not None and hasattr(instance, "set_played"):
+            instance.set_played(track, bool(played))
 
     @_when_ready
     async def played_collection(self, instance_id: str, collection: dict[str, Any]) -> None:

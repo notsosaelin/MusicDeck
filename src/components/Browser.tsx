@@ -10,6 +10,7 @@ import {
 } from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useState } from "react";
 import {
+  FaCheck,
   FaDownload,
   FaExternalLinkAlt,
   FaGamepad,
@@ -26,6 +27,7 @@ import {
   Result,
   Section,
   Track,
+  collectionAction,
   forgetSearch,
   getHome,
   isLocalPlaylist,
@@ -36,7 +38,17 @@ import {
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
 import { hasFeature, player } from "../player";
 import { pluginState, useStore } from "../store";
-import { ROOTS, StackName, dataVersion, navigation, playFrom, pushView, resultCache, setStack } from "../nav";
+import {
+  ROOTS,
+  StackName,
+  dataVersion,
+  invalidateBrowserCache,
+  navigation,
+  playFrom,
+  pushView,
+  resultCache,
+  setStack,
+} from "../nav";
 import { notify } from "../notify";
 import { MenuContext, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
 import {
@@ -51,7 +63,12 @@ import {
   TrackRow,
 } from "./common";
 
-function useResult<T>(key: string, load: () => Promise<Result<T>>): Result<T> | null {
+/**
+ * A view's data, cached per key so going back doesn't refetch. With `revalidate` (the home view, whose
+ * rows change as you listen: "Jump back in", "Continue listening"), the cached copy shows at once and
+ * a fresh one replaces it when it arrives.
+ */
+function useResult<T>(key: string, load: () => Promise<Result<T>>, revalidate = false): Result<T> | null {
   const [result, setResult] = useState<Result<T> | null>(() => resultCache.get(key) ?? null);
   const [shownKey, setShownKey] = useState(key);
   const { v } = useStore(dataVersion);
@@ -59,17 +76,19 @@ function useResult<T>(key: string, load: () => Promise<Result<T>>): Result<T> | 
     const cached = resultCache.get(key);
     if (cached) {
       setShownKey(key);
-      return setResult(cached);
+      setResult(cached);
+      if (!revalidate) return;
     }
     // refetching the same view after an edit: keep showing it instead of flashing a spinner
-    if (key !== shownKey) setResult(null);
+    if (key !== shownKey && !cached) setResult(null);
     setShownKey(key);
     let cancelled = false;
     load()
       .catch((e) => ({ ok: false as const, error: String(e) }))
       .then((r) => {
         if (r.ok) resultCache.set(key, r);
-        if (!cancelled) setResult(r);
+        // a failed refresh doesn't replace what's already showing
+        if (!cancelled && (r.ok || !cached)) setResult(r);
       });
     return () => {
       cancelled = true;
@@ -168,7 +187,7 @@ const CollectionList: FC<{
 };
 
 const HomeView: FC<{ instanceId: string }> = ({ instanceId }) => {
-  const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId));
+  const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
   if (!result?.ok) return <Loading result={result} />;
   if (!result.data.length)
     return <Message>Nothing here yet. If you just added a library it may still be scanning.</Message>;
@@ -329,6 +348,13 @@ const Header: FC<{
   </PanelSection>
 );
 
+/** A page's button that asks the source to do something (e.g. subscribe); the page reloads after. */
+async function callAction(instanceId: string, c: Collection, call: string) {
+  const result = await collectionAction(instanceId, c.kind, c.id, call);
+  notify(c.title, result.ok ? result.data : result.error);
+  if (result.ok) invalidateBrowserCache();
+}
+
 /** A page's header button: steam:// URLs are Steam's own actions (its install dialog shows in the
  * main window, so the menu closes); anything else opens in Steam's browser. */
 const runAction = (url: string) => {
@@ -390,8 +416,26 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
         )}
         {page?.action && (
           <ButtonRow>
-            <IconButton onClick={() => runAction(page.action!.url)}>
-              {page.action.url.startsWith("steam://") ? <FaDownload /> : <FaExternalLinkAlt />} {page.action.label}
+            <IconButton
+              active={page.action.call === "unsubscribe"}
+              onClick={() =>
+                page.action!.call
+                  ? callAction(instanceId, collection, page.action!.call)
+                  : runAction(page.action!.url ?? "")
+              }
+            >
+              {page.action.call ? (
+                page.action.call === "unsubscribe" ? (
+                  <FaCheck />
+                ) : (
+                  <FaPlus />
+                )
+              ) : page.action.url?.startsWith("steam://") ? (
+                <FaDownload />
+              ) : (
+                <FaExternalLinkAlt />
+              )}{" "}
+              {page.action.label}
             </IconButton>
           </ButtonRow>
         )}

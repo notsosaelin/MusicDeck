@@ -70,7 +70,10 @@ class StreamServer:
         self.session = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
             timeout=aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=60),
-            auto_decompress=False)
+            auto_decompress=False,
+            # Follow redirects to the letter: re-quoting a signed URL (Libsyn's "audio%2Fmpeg", say)
+            # breaks its signature and the CDN answers 403
+            requote_redirect_url=False)
         app = web.Application()
         app.router.add_get("/stream/{instance}/{id:.+}", self._handle_stream)
         app.router.add_get("/art/{instance}/{id:.+}", self._handler(lambda s, i: s.art(i)))

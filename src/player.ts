@@ -6,6 +6,7 @@ import {
   Session,
   Track,
   getRadio,
+  saveProgress,
   saveSession,
   scrobble,
   forgetStream,
@@ -22,6 +23,8 @@ const SCROBBLE_MAX_SECONDS = 240;
 const SESSION_SAVE_INTERVAL_MS = 20_000;
 /** Playing but the clock hasn't moved for this long: treat as a stall and recover. */
 const STALL_TIMEOUT_MS = 12_000;
+/** How often a long track's position is saved while it plays (sources with "progress", e.g. podcasts). */
+const PROGRESS_SAVE_MS = 15_000;
 /** A live stream paused longer than this rejoins the broadcast on play instead of resuming the buffer. */
 const LIVE_REJOIN_MS = 30_000;
 /** How long before a track ends the next one is loaded on the idle deck (more when crossfading). */
@@ -160,6 +163,7 @@ export class Player {
   private consecutiveErrors = 0;
   /** Bumped whenever the queue is replaced or cleared, so slow work for the old one is dropped. */
   private queueGeneration = 0;
+  private lastProgressSave = 0;
   /** When a live stream was paused; resuming much later rejoins the broadcast (see toggle) */
   private livePausedAt = 0;
   /** Recovery attempts for the current track; one fresh re-resolve before giving up */
@@ -202,6 +206,7 @@ export class Player {
       this.livePausedAt = Date.now();
       this.state.update({ playing: false });
       this.persistSession();
+      this.reportProgress(true);
     });
     on("loadedmetadata", () => {
       if (this.pendingSeek !== undefined) {
@@ -223,6 +228,7 @@ export class Player {
     on("timeupdate", () => {
       this.updatePosition();
       this.maybeScrobble();
+      this.reportProgress(false);
       void this.maybePreload();
       this.maybeCrossfade();
     });
@@ -579,6 +585,8 @@ export class Player {
       this.onError(info.error);
       return;
     }
+    // a long track (a podcast episode) picks up where it was left, unless told where to start
+    if (!startAt && info.data.start_at) startAt = info.data.start_at;
     this.lastProgress = { time: startAt, at: Date.now() };
     // loudness that only shows up when resolving the stream (Spotify keeps it in the file header)
     if (info.data.gain && !item.track.gain) this.updateTrack(item.instanceId, item.track.id, { gain: info.data.gain });
@@ -664,6 +672,8 @@ export class Player {
       const info = await streamInfo(item.instanceId, item.track.id).catch(() => null);
       if (!info?.ok || queue !== this.queueGeneration || this.state.get().queue[next] !== item || idle === this.deck)
         return;
+      // an episode that resumes partway isn't loaded ahead: it starts (from there) when its turn comes
+      if (info.data.start_at) return;
       idle.empty();
       this.attach(idle, url, info.data.hls, 0, this.loadToken);
       idle.preloaded = { index: next, item, queue, gain: info.data.gain };
@@ -793,6 +803,21 @@ export class Player {
       this.submitted = true;
       scrobble(item.instanceId, item.track.id, true, item.track).catch(() => {});
     }
+  }
+
+  /**
+   * Tells sources that keep it (feature "progress": podcasts) where the playing track is: every
+   * PROGRESS_SAVE_MS while it plays, and at once (`now`) when it pauses or ends.
+   */
+  private reportProgress(now: boolean) {
+    const item = this.current;
+    if (!item || item.track.live || !hasFeature(item.instanceId, "progress")) return;
+    if (!now && Date.now() - this.lastProgressSave < PROGRESS_SAVE_MS) return;
+    const position = this.audio.ended ? this.audio.duration : this.audio.currentTime;
+    if (!Number.isFinite(position) || position <= 0) return;
+    this.lastProgressSave = Date.now();
+    const duration = Number.isFinite(this.audio.duration) ? this.audio.duration : item.track.duration;
+    saveProgress(item.instanceId, item.track, position, duration || 0).catch(() => {});
   }
 
   private persistSession() {

@@ -36,6 +36,7 @@ FEATURES = {
     "radio",       # endless "more like this" from a track
     "queue_sync",  # save / restore the play queue on the server, to resume on another device
     "playlists",   # add tracks to the user's playlists
+    "progress",    # long tracks (podcast episodes) resume where they were left and can be marked played
 }
 
 

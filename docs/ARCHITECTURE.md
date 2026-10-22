@@ -129,7 +129,8 @@ Details worth knowing:
 | `musicdeck/settings.py` | `Settings`: atomic JSON store for preferences and configured sources (credentials included, so `chmod 600`). |
 | `musicdeck/recents.py` | `Recents`: the albums and playlists played lately per source, for the "Jump back in" row (`played_collection`; recorded by `playFrom` in nav.ts), and recent searches (recorded by `search`; `search_history`, `forget_search`). |
 | `musicdeck/playlists.py` | `PlaylistStore`: MusicDeck's own playlists (`md:` ids) with custom artwork (`mdart:` ids), stored on the Deck. |
-| `musicdeck/lyrics.py` | The lyrics shape, LRC parsing, LRCLIB fallback. |
+| `musicdeck/lyrics.py` | The lyrics shape, LRC parsing, LRCLIB fallback (a failed lookup is an error, not "no lyrics"). |
+| `musicdeck/feeds.py` | A small XML reader and the RSS parser for podcast feeds (Decky's Python has no `xml`). |
 | `musicdeck/listenbrainz.py` | ListenBrainz client with an on-disk queue for listens made offline. |
 | `musicdeck/debuglog.py` | Optional verbose log (`musicdeck-debug.log`), toggled in settings; the player's events land here too. |
 | `musicdeck/ytdlp_worker.py` | Runs under the system Python; answers yt-dlp requests as JSON lines. |
@@ -227,6 +228,7 @@ classDiagram
 | `~/homebrew/data/MusicDeck/` | `recents.json` | The last 10 albums and playlists played and the last 8 searches, per source |
 | | `local-<id>.json`, `local-<id>-favourites.json`, `art-cache/` | Local library index, favourites, extracted cover art |
 | | `steam-<id>.json`, `steam-<id>-owned.json`, `steam-<id>-favourites.json` | Installed soundtracks index, owned soundtracks (from Steam's UI), favourites |
+| | `podcasts-<id>-progress.json` | Where each podcast episode was left, and which are played |
 | | `qobuz-app.json`, `soundcloud-client.json` | Public app credentials scraped from the services' web players (refreshed when rejected) |
 | | `spotify/accounts/<username>/` | librespot's reusable credentials, one folder per account |
 | | `yt-dlp-cache/`, `ytdlp-update/` | yt-dlp's cache and self-updated copies |

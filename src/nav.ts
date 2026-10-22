@@ -54,15 +54,10 @@ export const openInLibrary = (collection: Collection) => {
 export const resultCache = new Map<string, Result<any>>();
 /** Bumped on invalidation so views that are open refetch instead of showing stale data. */
 export const dataVersion = new Store<{ v: number }>({ v: 0 });
-/**
- * Plays a page's tracks and puts the page first in its source's "Jump back in" row (the next visit to
- * the home view fetches it afresh to show that).
- */
+/** Plays a page's tracks and puts the page first in its source's "Jump back in" row. */
 export function playFrom(instanceId: string, from: Collection, tracks: Track[], start = 0, shuffle?: boolean) {
   player.playList(instanceId, tracks, start, shuffle);
-  playedCollection(instanceId, from)
-    .then(() => resultCache.delete(`${instanceId}:home`))
-    .catch(() => {});
+  playedCollection(instanceId, from).catch(() => {});
 }
 
 export const invalidateBrowserCache = () => {

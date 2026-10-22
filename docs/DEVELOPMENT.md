@@ -77,6 +77,10 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
 - the stream server: keys, ranges, CORS, art, generated HLS playlists;
 - MusicDeck playlists and artwork, play-report de-duplication, session handling;
 - every service's mapping and config rules (Spotify, TIDAL, Jellyfin, radio, Bandcamp, Subsonic);
+- podcasts against a fake directory and feed: the XML reader (CDATA, entities, broken markup),
+  subscribing, home rows, resuming and marking played, refused ids;
+- lyrics lookups (LRCLIB down or rate limited is an error, not "no lyrics"), "Jump back in" and
+  recent searches, game music;
 - Steam soundtracks against a fake Steam folder: libraries, manifests, DLC soundtracks inside a
   game, duplicate formats, installs finishing, art, the running-game row;
 - several accounts of one service: naming, duplicates refused, per-account Spotify credentials;

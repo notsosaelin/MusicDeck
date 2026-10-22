@@ -5,8 +5,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 ## Features
 
-- **Eleven sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, SoundCloud, YouTube
-  Music (plus regular YouTube), Bandcamp, internet radio, Qobuz, TIDAL and Spotify. One source is live at a
+- **Twelve sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, SoundCloud, YouTube
+  Music (plus regular YouTube), Bandcamp, internet radio, podcasts, Qobuz, TIDAL and Spotify. One source is live at a
   time, chosen in the plugin's Decky page.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
@@ -42,11 +42,12 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | YouTube Music | None | Home, search across YouTube Music **and** regular YouTube, artists and channels, radio, lyrics |
 | Bandcamp | None | Genre charts, search, albums and artist discographies, full-track streaming, lyrics, same-artist radio |
 | Internet radio | None | Tens of thousands of stations from [Radio Browser](https://www.radio-browser.info): popular near you, trending, genres, search, favourite stations, song on air |
+| Podcasts | None | Apple's top charts, search for shows and episodes (or paste a feed address), subscriptions, new episodes, episodes resume where you stopped, mark as played |
 | Qobuz | Your subscription | Your playlists and favourites (synced), editorial picks, search, MP3 up to 24-bit/192 kHz FLAC, plays reported as from the official player |
 | TIDAL | Your subscription | Your playlists, mixes and favourites, TIDAL's home page, search, track radio, synced lyrics, up to CD-quality FLAC |
 | Spotify | Premium | Your playlists, Liked Songs (synced), recently played, top tracks and artists, saved albums, new releases, search, Spotify's synced lyrics, up to 320 kbps, Spotify's own loudness levelling |
 
-**No accounts where a service doesn't need one.** SoundCloud, YouTube, Bandcamp and radio are used signed
+**No accounts where a service doesn't need one.** SoundCloud, YouTube, Bandcamp, radio and podcasts are used signed
 out, as NewPipe does: nothing ties your listening to an identity, and there's no account to get flagged for
 using an unofficial client. Your playlists and favourites for those stay on the Deck.
 

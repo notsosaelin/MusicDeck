@@ -14,6 +14,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | radio, lyrics |
 | Bandcamp | `bandcamp` | — | — | MP3 128 kbps | radio, lyrics |
 | Internet radio | `radio` | — | — | Station streams (MP3/AAC/Ogg/HLS) | favourite stations |
+| Podcasts | `podcasts` | — | — | The episode's own file (usually MP3) | subscriptions, resume (`progress`) |
 | Qobuz | `qobuz` | Subscription | OAuth on qobuz.com | FLAC up to 24/192, MP3 | favourites, play reports, playlists |
 | TIDAL | `tidal` | Subscription | Device login on link.tidal.com | FLAC 16/44.1, AAC | favourites, radio, lyrics, playlists |
 | Spotify | `spotify` | Premium | Two OAuth consents (PKCE) | Ogg Vorbis via librespot | favourites, radio, lyrics, playlists |
@@ -159,6 +160,31 @@ source (`MusicService.remove`).
 - **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse
   requests without a user agent, so `art()` sends MusicDeck's.
 - **Favourites**: stored in this source's config (`favourites`) via `save_config`.
+
+## Podcasts (`podcasts.py`, `feeds.py`)
+
+- **Directory**: Apple's podcast directory, free and without an account: `itunes.apple.com/search`
+  (shows and episodes), `/lookup` (an Apple id to its feed) and the top-charts JSON at
+  `rss.marketingtools.apple.com` (country from the source's settings, US by default).
+- **Feeds**: each show's own RSS feed, read by `musicdeck/feeds.py`, a small forgiving XML reader
+  (Decky's Python has no `xml` package): elements, attributes, CDATA, comments, entities; namespaces
+  stay as prefixes (`itunes:image`). Items without an audio enclosure are skipped. Feeds are cached
+  for 30 minutes. A feed address pasted into Search opens that show.
+- **Ids** carry what's needed to play, so nothing has to be looked up again after a restart: a show
+  is `p:` + its feed URL in base64 (`a:` + an Apple id from the charts, looked up when opened), an
+  episode `e:` + its audio URL. Art ids are image URLs.
+- **Subscriptions** are in the source's config (`subscriptions`); the show page's Subscribe button
+  is a Page `action` with `call` (see `collection_action`).
+- **Progress**: the player reports an episode's position every 15 s and on pause
+  (`save_progress`, feature `progress`); `stream_info` returns `start_at` (where it was left, 5 s
+  back) so it resumes. Within 60 s of the end counts as played; "Mark as played/unplayed" in the
+  track menu. Kept in `podcasts-<id>-progress.json`. Episodes resuming partway aren't preloaded for
+  gapless playback.
+- **Home**: Continue listening (episodes in progress), New episodes (the latest from each
+  subscription), Your podcasts, Top podcasts.
+- **Not done for episodes**: lyrics lookups and ListenBrainz reports (it's a music history).
+- **Breaks when**: Apple moves the charts JSON (update `CHARTS`); a feed that's not RSS shows an
+  error on its page.
 
 ## Qobuz (`qobuz.py`)
 

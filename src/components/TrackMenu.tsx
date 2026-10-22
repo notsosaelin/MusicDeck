@@ -15,6 +15,7 @@ import {
   playlistRename,
   playlistSetArt,
   saveAsPlaylist,
+  setPlayed,
   star,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
@@ -99,6 +100,13 @@ async function showPlaylistPicker(item: Item, parent: EventTarget) {
 }
 
 /** Context about where the menu was opened, for page-specific items. */
+/** Podcast episodes: "Played" shows in their date line (see podcasts.py), and lists refresh. */
+async function markPlayed(instanceId: string, track: Track, played: boolean) {
+  await setPlayed(instanceId, track, played);
+  invalidateBrowserCache();
+  notify(played ? "Marked as played" : "Marked as unplayed", track.title, { instanceId, track });
+}
+
 export interface MenuContext {
   /** the MusicDeck playlist being viewed, if any */
   playlistId?: string;
@@ -205,6 +213,11 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
       {hasFeature(instanceId, "radio") && (
         <MenuItem onSelected={() => player.startRadio(instanceId, track)}>Start radio</MenuItem>
       )}
+      {hasFeature(instanceId, "progress") && (
+        <MenuItem onSelected={() => markPlayed(instanceId, track, !track.artist.endsWith("Played"))}>
+          {track.artist.endsWith("Played") ? "Mark as unplayed" : "Mark as played"}
+        </MenuItem>
+      )}
       {hasFeature(instanceId, "star") && (
         <MenuItem onSelected={() => toggleStar(instanceId, track)}>
           {track.starred ? "Remove from favourites" : "Add to favourites"}
@@ -241,7 +254,8 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
             })
           }
         >
-          Go to album
+          {/* a podcast episode's "album" is its show */}
+          {hasFeature(instanceId, "progress") ? "Go to podcast" : "Go to album"}
         </MenuItem>
       )}
       {browsable && track.artist_id && (

@@ -23,7 +23,7 @@ export interface Track {
   live?: boolean;
 }
 
-export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists";
+export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress";
 
 export interface LyricLine {
   /** seconds; null for unsynced lyrics */
@@ -77,7 +77,8 @@ export interface Page {
   /** show songs/videos above albums/artists/playlists (search results) */
   tracks_first?: boolean;
   /** a button in the header: steam:// URLs run in Steam (e.g. installing a soundtrack), others open in the browser */
-  action?: { label: string; url: string } | null;
+  /** url: a steam:// command or a web page; call: something the source does (collectionAction) */
+  action?: { label: string; url?: string; call?: string } | null;
   /** shown above the content, e.g. why there's nothing to play yet */
   notice?: string | null;
 }
@@ -174,9 +175,19 @@ export const addToPlaylist = callable<[id: string, playlistId: string, trackIds:
 );
 export const saveSession = callable<[session: Session], void>("save_session");
 export const loadSession = callable<[], Session | null>("load_session");
-export const streamInfo = callable<[id: string, trackId: string], Result<{ hls: boolean; gain?: Track["gain"] }>>(
-  "stream_info",
+export const streamInfo = callable<
+  [id: string, trackId: string],
+  /** start_at: where a long track (a podcast episode) was left, in seconds */
+  Result<{ hls: boolean; gain?: Track["gain"]; start_at?: number }>
+>("stream_info");
+export const collectionAction = callable<
+  [id: string, kind: CollectionKind, collectionId: string, call: string],
+  Result<string>
+>("collection_action");
+export const saveProgress = callable<[id: string, track: Track, position: number, duration: number], void>(
+  "save_progress",
 );
+export const setPlayed = callable<[id: string, track: Track, played: boolean], void>("set_played");
 export const forgetStream = callable<[id: string, trackId: string], void>("forget_stream");
 export const logEvents = callable<[entries: { t: number; event: string; data?: Record<string, unknown> }[]], void>(
   "log_events",

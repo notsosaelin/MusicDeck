@@ -4,12 +4,10 @@ home, and the recent searches under an empty search field. Kept on the device in
 {"collections": {instance id: [collection, ...]}, "searches": {instance id: [query, ...]}}, newest
 first. (The first version held only the collections, as {instance id: [...]}; that's read too.)
 """
-import json
 import os
-import tempfile
 from typing import Any
 
-from .settings import load_json
+from .settings import load_json, save_json
 
 COLLECTIONS_LIMIT = 10
 SEARCHES_LIMIT = 8
@@ -31,11 +29,7 @@ class Recents:
         self.searches_by_instance = _lists(data.get("searches"))
 
     def _save(self) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path), suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"collections": self.collections, "searches": self.searches_by_instance}, f)
-        os.replace(tmp, self.path)
+        save_json(self.path, {"collections": self.collections, "searches": self.searches_by_instance})
 
     # --- albums and playlists ---
 

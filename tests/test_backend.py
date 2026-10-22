@@ -776,6 +776,120 @@ async def run():
         check([c["title"] for c in Recents(first_version).for_instance(sid)] == ["X"], "the first version's file still reads")
         plugin.recents.forget(instance_id=sid)
 
+        print("podcasts")
+        from musicdeck import feeds
+        from musicdeck.services import podcasts as podmod
+        FEED = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+  <title>Tom &amp; Jerry&#39;s <![CDATA[<Show>]]></title>
+  <itunes:author>Tom</itunes:author>
+  <itunes:image href="https://example.com/show.jpg"/>
+  <description><![CDATA[<p>A <b>great</b> show</p>]]></description>
+  <!-- a comment with <tags> -->
+  <item><title>Older</title><pubDate>Mon, 01 Jan 2024 10:00:00 GMT</pubDate>
+    <enclosure url="https://example.com/1.mp3" type="audio/mpeg" length="1"/><itunes:duration>1:02:03</itunes:duration></item>
+  <item><title>Newer &lt;3</title><pubDate>Tue, 02 Jan 2024 10:00:00 +0100</pubDate>
+    <enclosure url="https://example.com/2.mp3" type="audio/mpeg"/><itunes:duration>125</itunes:duration>
+    <itunes:image href="https://example.com/2.jpg"/><p>an unclosed tag, and 3 < 4</item>
+  <item><title>Just text, no audio</title></item>
+  <item><title>Video</title><enclosure url="https://example.com/v.mov" type="video/quicktime"/></item>
+</channel></rss>"""
+        show = feeds.parse_feed(FEED)
+        check(show["title"] == "Tom & Jerry's <Show>" and show["author"] == "Tom" and show["description"] == "A great show"
+              and show["art"] == "https://example.com/show.jpg", "feed: entities, CDATA and HTML in titles and notes")
+        check([e["title"] for e in show["episodes"]] == ["Newer <3", "Older"] and show["episodes"][1]["duration"] == 3723
+              and show["episodes"][0]["duration"] == 125 and show["episodes"][0]["art"] == "https://example.com/2.jpg"
+              and show["episodes"][1]["art"] == "https://example.com/show.jpg",
+              "feed: episodes newest first, durations, own art or the show's; no audio, no episode")
+        check(show["episodes"][0]["published"] == 1704186000, "feed: dates with a time zone")
+        check(feeds.duration_seconds("62:03") == 3723 and feeds.duration_seconds("12.5") == 12.5
+              and feeds.duration_seconds("soon") == 0, "durations in every format, or 0")
+        for junk in [b"", b"<html><body>Not a feed</body></html>", b"\xff\xfe garbage"]:
+            try:
+                feeds.parse_feed(junk)
+                check(False, f"not a feed: {junk[:20]!r}")
+            except ValueError:
+                pass
+
+        async def fake_directory(request):
+            if request.path == "/feed.xml":
+                return lrweb.Response(body=FEED, content_type="application/rss+xml")
+            if request.path == "/charts.json":
+                return lrweb.json_response({"feed": {"results": [
+                    {"id": "123", "name": "Top Show", "artistName": "Someone",
+                     "artworkUrl100": "https://x/100x100bb.jpg"}]}})
+            return lrweb.Response(status=404)
+        pod_app = lrweb.Application()
+        pod_app.router.add_get("/{path:.*}", fake_directory)
+        pod_runner = lrweb.AppRunner(pod_app)
+        await pod_runner.setup()
+        pod_site = lrweb.TCPSite(pod_runner, "127.0.0.1", 0)
+        await pod_site.start()
+        base_url = f"http://127.0.0.1:{pod_site._server.sockets[0].getsockname()[1]}"
+        real_charts = podmod.CHARTS
+        podmod.CHARTS = base_url + "/charts.json?country={country}&count={count}"
+        try:
+            pod = (await plugin.save_service({"type": "podcasts", "name": "", "config": {"country": "gb"}}))["data"]
+            pid = pod["id"]
+            check(pod["name"] == "Podcasts" and pod["config"]["country"] == "GB" and pod["features"] == ["progress"],
+                  "add the Podcasts source")
+            home = (await plugin.home(pid))["data"]
+            check([s["title"] for s in home] == ["Top podcasts"] and home[0]["items"][0]["id"] == "a:123"
+                  and home[0]["items"][0]["art"] == "https://x/600x600bb.jpg", "home: the top charts, big artwork")
+            found = (await plugin.search(pid, base_url + "/feed.xml"))["data"]
+            show_id = found["collections"][0]["id"]
+            check(found["collections"][0]["title"] == "Tom & Jerry's <Show>", "a pasted feed address finds its podcast")
+            page = (await plugin.open_collection(pid, "album", show_id))["data"]
+            check(page["subtitle"] == "Tom · 2 episodes" and page["action"] == {"label": "Subscribe", "call": "subscribe"}
+                  and [t["title"] for t in page["tracks"]] == ["Newer <3", "Older"]
+                  and page["tracks"][1]["artist"] == "1 Jan 2024", "a podcast's page: episodes and Subscribe")
+            r = await plugin.collection_action(pid, "album", show_id, "subscribe")
+            check(r == {"ok": True, "data": "Subscribed to Tom & Jerry's <Show>"}
+                  and plugin.settings.find_service(pid)["config"]["subscriptions"][0]["feed"] == base_url + "/feed.xml",
+                  "subscribing is kept in the source's config")
+            page = (await plugin.open_collection(pid, "album", show_id))["data"]
+            check(page["action"] == {"label": "Subscribed", "call": "unsubscribe"}, "then the button unsubscribes")
+            home = (await plugin.home(pid))["data"]
+            check([s["title"] for s in home] == ["New episodes", "Your podcasts", "Top podcasts"],
+                  f"home with a subscription {[s['title'] for s in home]}")
+            episode = page["tracks"][1]
+            info = (await plugin.stream_info(pid, episode["id"]))["data"]
+            check(info["start_at"] == 0, "a new episode starts at the beginning")
+            await plugin.save_progress(pid, episode, 600.0, 3723.0)
+            info = (await plugin.stream_info(pid, episode["id"]))["data"]
+            check(info["start_at"] == 595, "an episode resumes where it was left, a few seconds back")
+            home = (await plugin.home(pid))["data"]
+            check(home[0]["title"] == "Continue listening" and home[0]["tracks"][0]["artist"] == "52 min left",
+                  "home: continue listening, with the time left")
+            await plugin.save_progress(pid, episode, 3700.0, 3723.0)
+            check((await plugin.stream_info(pid, episode["id"]))["data"]["start_at"] == 0
+                  and "Continue listening" not in [s["title"] for s in (await plugin.home(pid))["data"]],
+                  "listened to the end: played, starts over, leaves continue listening")
+            page = (await plugin.open_collection(pid, "album", show_id))["data"]
+            check(page["tracks"][1]["artist"] == "1 Jan 2024 · Played", "played episodes say so")
+            await plugin.set_played(pid, episode, False)
+            await plugin.set_played(pid, page["tracks"][0], True)
+            page = (await plugin.open_collection(pid, "album", show_id))["data"]
+            check([t["artist"] for t in page["tracks"]] == ["2 Jan 2024 · Played", "1 Jan 2024"],
+                  "marking played and unplayed")
+            for bad in ["nope", "e:", "e:!!!", "e:" + podmod._encode("file:///etc/passwd")]:
+                r = await plugin.stream_info(pid, bad)
+                check(not r["ok"], f"not an episode: {bad[:20]}")
+            for bad in [("p:!!", "subscribe"), (show_id, "explode"), ("a:notanumber", "subscribe")]:
+                check(not (await plugin.collection_action(pid, "album", *bad))["ok"], f"refused: {bad}")
+            check((await plugin.get_lyrics(pid, episode)) == {"ok": True, "data": None}, "episodes have no lyrics to look up")
+            await plugin.save_progress(pid, episode, "far", 10)
+            await plugin.save_progress(pid, {"id": "not-an-episode"}, 1.0, 2.0)
+            check(all(k.startswith("e:") for k in plugin.instances[pid].progress), "garbage progress is ignored")
+            check(not (await plugin.open_collection(pid, "album", "p:" + podmod._encode(base_url + "/missing.xml")))["ok"],
+                  "a feed that's gone: an error, not a crash")
+            progress_file = plugin.instances[pid].progress_path
+            await plugin.remove_service(pid)
+            check(not os.path.exists(progress_file), "removing the source deletes its progress")
+        finally:
+            podmod.CHARTS = real_charts
+            await pod_runner.cleanup()
+
         print("game music")
         mix = await plugin.create_playlist(sid, "Boss fights", [])
         album = {"id": album_one["id"], "kind": "album", "title": "Album One", "art": None, "extra": "dropped"}
