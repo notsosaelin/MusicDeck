@@ -890,6 +890,84 @@ async def run():
             podmod.CHARTS = real_charts
             await pod_runner.cleanup()
 
+        print("live music archive")
+        from musicdeck.services import livemusic as lmmod
+        from datetime import date as _date
+        today = _date.today()
+        searches = []
+
+        async def fake_archive(request):
+            if request.path == "/advancedsearch.php":
+                q = request.query.get("q", "")
+                searches.append(q)
+                if "mediatype:collection" in q:
+                    docs = [{"identifier": "TheBand", "title": "The Band", "item_count": 1234}]
+                elif "collection:TheBand" in q:
+                    docs = [{"identifier": "tb2000", "title": "The Band Live on 2000-01-01", "date": "2000-01-01T00:00:00Z"},
+                            {"identifier": "tb1999", "title": "The Band Live on 1999-05-05", "date": "1999-05-05T00:00:00Z"}]
+                    return lrweb.json_response({"response": {"numFound": 5000, "docs": docs}})
+                elif "title:" in q:  # on this day: one match from today, one only sharing the numbers
+                    docs = [{"identifier": "today", "title": "x", "date": f"1977-{today:%m-%d}T00:00:00Z"},
+                            {"identifier": "other", "title": "y", "date": f"{today:%m-%d}".replace("-", "") + "-01-01"}]
+                else:
+                    docs = [{"identifier": "tb1999", "title": "The Band Live on 1999-05-05", "date": "1999-05-05T00:00:00Z",
+                             "venue": "The Hall", "creator": "The Band"}]
+                return lrweb.json_response({"response": {"numFound": len(docs), "docs": docs}})
+            if request.path == "/metadata/TheBand":
+                return lrweb.json_response({"metadata": {"title": "The Band"}})
+            if request.path in ("/metadata/tb1999", "/metadata/tb2000"):
+                return lrweb.json_response({"metadata": {"title": "The Band Live", "creator": "The Band", "date": "1999-05-05",
+                                                         "venue": "The Hall", "collection": ["TheBand", "etree"]},
+                                            "files": [{"name": "tb d1t02.mp3", "format": "VBR MP3", "title": "Second", "length": "1:02:03"},
+                                                      {"name": "tb d1t01.mp3", "format": "VBR MP3", "title": "First", "length": "512.5"},
+                                                      {"name": "tb d1t01.flac", "format": "Flac", "title": "First"},
+                                                      {"name": "tb.jpg", "format": "JPEG"}]})
+            if request.path == "/metadata/nothing":
+                return lrweb.json_response({})
+            return lrweb.Response(status=404)
+        lm_app = lrweb.Application()
+        lm_app.router.add_get("/{path:.*}", fake_archive)
+        lm_runner = lrweb.AppRunner(lm_app)
+        await lm_runner.setup()
+        lm_site = lrweb.TCPSite(lm_runner, "127.0.0.1", 0)
+        await lm_site.start()
+        lm_base = f"http://127.0.0.1:{lm_site._server.sockets[0].getsockname()[1]}"
+        real_urls = (lmmod.SEARCH, lmmod.METADATA)
+        lmmod.SEARCH, lmmod.METADATA = lm_base + "/advancedsearch.php", lm_base + "/metadata/{id}"
+        try:
+            lm = (await plugin.save_service({"type": "livemusic", "name": "", "config": {}}))["data"]
+            lid = lm["id"]
+            check(lm["name"] == "Live Music Archive" and lm["features"] == ["radio"], "add the Live Music Archive")
+            home = (await plugin.home(lid))["data"]
+            check([s["title"] for s in home] == ["On this day", "Popular this week", "Bands", "Just added"]
+                  and [c["id"] for c in home[0]["items"]] == ["s:today"],
+                  "home rows; on this day keeps only shows from this date")
+            check(home[2]["items"][0]["subtitle"] == "1,234 shows", "bands with their show counts")
+            page = (await plugin.open_collection(lid, "album", "s:tb1999"))["data"]
+            check([t["title"] for t in page["tracks"]] == ["First", "Second"] and page["tracks"][1]["duration"] == 3723
+                  and page["tracks"][0]["artist_id"] == "a:TheBand" and page["subtitle"] == "1999-05-05 · The Hall"
+                  and page["art"] == "TheBand" and page["tracks"][0]["art"] == "TheBand",
+                  "a show: MP3s in order (FLAC and images left out), lengths, its band and the band's picture")
+            band = (await plugin.open_collection(lid, "artist", "a:TheBand"))["data"]
+            check(band["title"] == "The Band" and band["subtitle"] == "5,000 shows · the latest 2"
+                  and [c["id"] for c in band["collections"]] == ["s:tb2000", "s:tb1999"], "a band: newest shows first, the true count")
+            src = await plugin.instances[lid].stream(page["tracks"][0]["id"])
+            check(src.url == "https://archive.org/download/tb1999/tb%20d1t01.mp3", "track files are downloaded by name, quoted")
+            radio = (await plugin.radio(lid, page["tracks"][0]))["data"]
+            check(radio and all(t["album_id"] == "s:tb2000" for t in radio), "radio plays the band's other shows")
+            before = len(searches)
+            found = (await plugin.search(lid, 'dead "77 (cornell)'))["data"]
+            check(found["collections"] and all('"' not in q and "(cornell)" not in q for q in searches[before:]),
+                  "search words only: quotes and brackets can't break the query")
+            for bad in ["s:../../etc", "s:", "x:1", "a:a b", "s:nothing"]:
+                check(not (await plugin.open_collection(lid, "album", bad))["ok"], f"refused: {bad}")
+            for bad in ["t:tb1999", "t:../x/y.mp3", "t:tb1999/../../secret", "nope"]:
+                check(not (await plugin.stream_info(lid, bad))["ok"], f"not a track: {bad}")
+            await plugin.remove_service(lid)
+        finally:
+            lmmod.SEARCH, lmmod.METADATA = real_urls
+            await lm_runner.cleanup()
+
         print("game music")
         mix = await plugin.create_playlist(sid, "Boss fights", [])
         album = {"id": album_one["id"], "kind": "album", "title": "Album One", "art": None, "extra": "dropped"}

@@ -1,6 +1,7 @@
 from .bandcamp import BandcampService
 from .base import MusicService, ServiceError, SignIn, StreamSource
 from .jellyfin import JellyfinService
+from .livemusic import LiveMusicService
 from .local import LocalService
 from .podcasts import PodcastService
 from .qobuz import QobuzService
@@ -22,6 +23,7 @@ SERVICE_TYPES: dict[str, type[MusicService]] = {
     BandcampService.type: BandcampService,
     RadioService.type: RadioService,
     PodcastService.type: PodcastService,
+    LiveMusicService.type: LiveMusicService,
     QobuzService.type: QobuzService,
     TidalService.type: TidalService,
     SpotifyService.type: SpotifyService,

@@ -16,6 +16,7 @@ import {
 } from "@decky/ui";
 import { FC, ReactNode, useEffect, useState } from "react";
 import {
+  FaArchive,
   FaCheckCircle,
   FaBandcamp,
   FaBroadcastTower,
@@ -62,6 +63,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   bandcamp: <FaBandcamp />,
   radio: <FaBroadcastTower />,
   podcasts: <FaPodcast />,
+  livemusic: <FaArchive />,
   qobuz: <FaCompactDisc />,
   spotify: <FaSpotify />,
   tidal: <SiTidal />,
@@ -72,7 +74,7 @@ const describeStatus = (s: ServiceInfo) => {
     if (s.status.update) return s.status.update;
     return s.status.ytdlp ? `yt-dlp ${s.status.ytdlp} · no account` : "No account";
   }
-  if (s.type === "soundcloud" || s.type === "bandcamp") return "No account";
+  if (s.type === "soundcloud" || s.type === "bandcamp" || s.type === "livemusic") return "No account";
   if (s.type === "radio")
     return ["No account", s.config.country && countryName(s.config.country)].filter(Boolean).join(" · ");
   if (s.type === "podcasts") {

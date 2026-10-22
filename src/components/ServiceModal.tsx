@@ -513,6 +513,12 @@ export const ServiceModal: FC<{
         )}
         {type === "radio" && <RadioFields draft={draft} setConfig={setConfig} />}
         {type === "podcasts" && <PodcastFields draft={draft} setConfig={setConfig} />}
+        {type === "livemusic" && (
+          <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
+            The Internet Archive's Live Music Archive: over 250,000 concert recordings that bands allow to be shared.
+            Free, no account, nothing to set up.
+          </div>
+        )}
         {type === "steam" && (
           <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
             Plays the soundtracks you own on Steam. Installed ones play from this device, from every Steam library (SD

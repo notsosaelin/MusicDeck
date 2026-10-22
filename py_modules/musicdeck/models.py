@@ -64,5 +64,5 @@ def section(title: str, items: list[dict[str, Any]], tracks: Optional[list[dict[
 
 
 def count(n: int, noun: str) -> str:
-    """"1 track", "3 tracks"."""
-    return f"{n} {noun}{'' if n == 1 else 's'}"
+    """"1 track", "3 tracks", "18,407 shows"."""
+    return f"{n:,} {noun}{'' if n == 1 else 's'}"

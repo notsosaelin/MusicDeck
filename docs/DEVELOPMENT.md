@@ -79,6 +79,8 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
 - every service's mapping and config rules (Spotify, TIDAL, Jellyfin, radio, Bandcamp, Subsonic);
 - podcasts against a fake directory and feed: the XML reader (CDATA, entities, broken markup),
   subscribing, home rows, resuming and marking played, refused ids;
+- the Live Music Archive against a fake archive.org: home rows (on this day really today), shows,
+  bands with true counts, radio, query-safe search, ids that try to climb out of an item;
 - lyrics lookups (LRCLIB down or rate limited is an error, not "no lyrics"), "Jump back in" and
   recent searches, game music;
 - Steam soundtracks against a fake Steam folder: libraries, manifests, DLC soundtracks inside a

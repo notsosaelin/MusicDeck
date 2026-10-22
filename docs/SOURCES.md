@@ -15,6 +15,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Bandcamp | `bandcamp` | — | — | MP3 128 kbps | radio, lyrics |
 | Internet radio | `radio` | — | — | Station streams (MP3/AAC/Ogg/HLS) | favourite stations |
 | Podcasts | `podcasts` | — | — | The episode's own file (usually MP3) | subscriptions, resume (`progress`) |
+| Live Music Archive | `livemusic` | — | — | archive.org's MP3s of each recording | radio |
 | Qobuz | `qobuz` | Subscription | OAuth on qobuz.com | FLAC up to 24/192, MP3 | favourites, play reports, playlists |
 | TIDAL | `tidal` | Subscription | Device login on link.tidal.com | FLAC 16/44.1, AAC | favourites, radio, lyrics, playlists |
 | Spotify | `spotify` | Premium | Two OAuth consents (PKCE) | Ogg Vorbis via librespot | favourites, radio, lyrics, playlists |
@@ -185,6 +186,24 @@ source (`MusicService.remove`).
 - **Not done for episodes**: lyrics lookups and ListenBrainz reports (it's a music history).
 - **Breaks when**: Apple moves the charts JSON (update `CHARTS`); a feed that's not RSS shows an
   error on its page.
+
+## Live Music Archive (`livemusic.py`)
+
+- **What**: the Internet Archive's `etree` collection, live recordings bands allow to be traded. Each
+  band is an archive.org collection inside it; each show an item.
+- **Lists and search**: `advancedsearch.php` (Solr): popular this week (`week desc`), just added,
+  bands (`mediatype:collection`), a band's shows (newest first, the latest 300; the page says how
+  many there are in all). "On this day" searches titles for the month and day, then keeps only shows
+  whose date really is today's. Search sends only the words typed, as a phrase-free term list, so
+  quotes or brackets can't change the query.
+- **A show's tracks**: `/metadata/<item>`, files of the first format present in `FORMATS` (VBR MP3
+  first; FLAC only when there's nothing else), ordered by file name (disc, then track).
+- **Audio**: `/download/<item>/<file>`, which redirects to a storage server (proxied; the file name is
+  quoted). Ids are checked so `..` can't climb out of the item.
+- **Art**: archive.org's thumbnails; shows and tracks use their band's (a show's own is usually a
+  generated waveform).
+- **Radio**: tracks from three other popular shows by the same band, shuffled.
+- **Breaks when**: archive.org changes advancedsearch's fields (`SEARCH`, the `fl[]` list).
 
 ## Qobuz (`qobuz.py`)
 
