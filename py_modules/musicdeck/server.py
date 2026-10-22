@@ -6,8 +6,12 @@ Every source goes through here, for two reasons:
   * remote streams need CORS headers, or the Web Audio graph (used for the EQ) outputs silence.
 Requests must carry the per-session key, so other local processes can't use it as an open proxy.
 
-HLS sources (SoundCloud) are served as a rewritten playlist whose segment URLs point back at
-/fetch, so hls.js in the frontend fetches every piece through here too.
+HLS sources (SoundCloud, some radio stations, or a playlist a service built itself such as TIDAL's
+DASH) are served as a rewritten playlist whose segment URLs point back at /fetch, so hls.js in the
+frontend fetches every piece through here too. Service credentials (StreamSource.headers) are added
+here when proxying, so they never appear in URLs the frontend sees.
+
+Routes: /stream/{instance}/{track id}, /art/{instance}/{art id}, /fetch?u={base64 url}; all need ?k=.
 """
 import base64
 import re

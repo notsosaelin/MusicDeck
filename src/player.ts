@@ -34,7 +34,7 @@ const reportsPlays = (instanceId: string) =>
   hasFeature(instanceId, "scrobble") || !!pluginState.get()?.listenbrainz?.user;
 
 export interface QueueItem {
-  /** Service instance the track belongs to; the queue can mix services. */
+  /** Service instance the track belongs to: always the live source (switching sources clears the queue). */
   instanceId: string;
   track: Track;
 }
@@ -94,7 +94,7 @@ export class Player {
   private extendingRadio = false;
   /** Seek target applied once metadata loads (restoring a session) */
   private pendingSeek?: number;
-  /** hls.js instance while an HLS source (SoundCloud) is attached */
+  /** hls.js instance while an HLS source (SoundCloud, TIDAL DASH, some radio) is attached */
   private hls?: Hls;
   /** Incremented per load so a slow stream resolution can't clobber a newer track */
   private loadToken = 0;
