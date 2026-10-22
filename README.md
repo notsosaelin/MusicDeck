@@ -62,7 +62,8 @@ Add your own free app's Client ID in the Spotify source (the dialog links to Spo
 | Decky → MusicDeck | Add and manage sources, pick the live one, playback options, ListenBrainz, debug log |
 | Quick Access → Soundtracks tab | The player. Takes over the tab by default, or gets its own tab |
 
-Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the Queue), **Y** opens a
+Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the Queue) or plays an album or
+playlist without opening it, **Y** opens a
 track's or playlist's options (including the sleep timer for the playing track), **B** goes back.
 Re-selecting Library or Search returns to its start.
 

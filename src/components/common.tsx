@@ -238,8 +238,10 @@ export const CollectionRow: FC<{
   instanceId: string;
   item: Collection;
   onOpen: (c: Collection) => void;
+  /** X: play it without opening it */
+  onPlay?: () => void;
   onOptions?: (e?: any) => void;
-}> = ({ instanceId, item, onOpen, onOptions }) => (
+}> = ({ instanceId, item, onOpen, onPlay, onOptions }) => (
   <ListRow
     leading={
       <Art
@@ -253,6 +255,8 @@ export const CollectionRow: FC<{
     title={item.title}
     subtitle={item.subtitle}
     onActivate={() => onOpen(item)}
+    onSecondary={onPlay}
+    secondaryLabel="Play"
     onOptions={onOptions}
     optionsLabel="Options"
   />

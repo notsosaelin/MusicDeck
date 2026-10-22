@@ -86,6 +86,21 @@ const canSave = (instanceId: string, c: Collection) =>
 const hasCollectionMenu = (instanceId: string, c: Collection) =>
   isLocalPlaylist(c.id) || canSave(instanceId, c) || (!!runningGame.get() && canPlayWithGame(c));
 
+/**
+ * Plays an album or playlist straight from its row (X). Uses the page if it's been opened already;
+ * says why when there's nothing to play (a Steam soundtrack that isn't installed, an empty playlist).
+ */
+async function playCollection(instanceId: string, c: Collection) {
+  const key = `${instanceId}:${c.kind}:${c.id}`;
+  const result: Result<Page> = resultCache.get(key) ?? (await openCollection(instanceId, c.kind, c.id));
+  // the live source changed while it loaded: this belongs to the old one
+  if (pluginState.get()?.active_service !== instanceId) return;
+  if (!result.ok) return notify(`Couldn't play ${c.title}`, result.error);
+  if (!result.data.tracks.length) return notify(c.title, result.data.notice || "Nothing to play here");
+  resultCache.set(key, result);
+  player.playList(instanceId, result.data.tracks, 0);
+}
+
 const CollectionList: FC<{
   instanceId: string;
   stack: StackName;
@@ -104,6 +119,9 @@ const CollectionList: FC<{
           instanceId={instanceId}
           item={item}
           onOpen={(c) => pushView(stack, { type: "collection", collection: c })}
+          onPlay={
+            item.kind === "album" || item.kind === "playlist" ? () => playCollection(instanceId, item) : undefined
+          }
           onOptions={
             hasCollectionMenu(instanceId, item)
               ? (e) => showCollectionMenu(instanceId, item, e?.currentTarget)
