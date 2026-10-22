@@ -23,7 +23,7 @@ import {
   FaSpotify,
   FaYoutube,
 } from "react-icons/fa";
-import { SiTidal } from "react-icons/si";
+import { SiJellyfin, SiTidal } from "react-icons/si";
 import { PlaybackSettings, ServiceInfo, rescan, setSetting, testService, youtubeUpdate } from "../api";
 import { notify } from "../notify";
 import { deleteSource, switchSource } from "../sources";
@@ -36,6 +36,7 @@ import { ServiceModal } from "./ServiceModal";
 const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,
   subsonic: <FaServer />,
+  jellyfin: <SiJellyfin />,
   soundcloud: <FaSoundcloud />,
   youtube: <FaYoutube />,
   qobuz: <FaCompactDisc />,
@@ -58,6 +59,8 @@ const describeStatus = (s: ServiceInfo) => {
     const q: Record<number, string> = { 5: "MP3 320", 6: "FLAC CD", 7: "FLAC 24/96", 27: "FLAC 24/192" };
     return `${s.config.email ?? ""} · ${q[s.config.quality ?? 6] ?? ""}`;
   }
+  if (s.type === "jellyfin")
+    return [s.config.username, s.config.url?.replace(/^https?:\/\//, "")].filter(Boolean).join(" · ");
   if (s.type !== "local") return s.config.url ?? "";
   if (s.status.scanning) return `Scanning… ${s.status.found} files`;
   if (s.status.error) return `Scan failed: ${s.status.error}`;

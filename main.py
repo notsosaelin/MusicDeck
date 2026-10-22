@@ -58,6 +58,7 @@ class Plugin:
         self.http: Optional[aiohttp.ClientSession] = None  # shared client for LRCLIB etc.
         self.qobuz_logins: dict[str, Any] = {}
         self.tidal_logins: dict[str, Any] = {}
+        self.jellyfin_logins: dict[str, Any] = {}
         self.spotify_logins: dict[str, Any] = {}
         self.recent_scrobbles: dict[tuple[str, str, bool], float] = {}
 
@@ -294,6 +295,40 @@ class Plugin:
         if login:
             if login._task:
                 login._task.cancel()
+            await login.close()
+
+    @_when_ready
+    async def jellyfin_login_start(self, url: str) -> dict[str, Any]:
+        """Starts Jellyfin Quick Connect; the frontend shows the returned code to approve."""
+        async def work():
+            from musicdeck.services.jellyfin import JellyfinQuickConnect
+            for old in self.jellyfin_logins.values():
+                await old.close()
+            login = JellyfinQuickConnect(url)
+            self.jellyfin_logins = {login.id: login}
+            code = await login.start()
+            return {"login_id": login.id, "code": code}
+        return await _result(work())
+
+    @_when_ready
+    async def jellyfin_login_poll(self, login_id: str, service: dict[str, Any]) -> dict[str, Any]:
+        """Waiting / error, or once approved: saves the source (token only) and returns it."""
+        login = self.jellyfin_logins.get(login_id)
+        if not login:
+            return {"status": "error", "error": "Sign-in expired; start again"}
+        if login.status != "done":
+            return {"status": login.status, "error": login.error}
+        self.jellyfin_logins.pop(login_id, None)
+        saved = await self.save_service({**service, "type": "jellyfin",
+                                         "config": {**service.get("config", {}), **(login.result or {})}})
+        if not saved["ok"]:
+            return {"status": "error", "error": saved["error"]}
+        return {"status": "done", "service": saved["data"]}
+
+    @_when_ready
+    async def jellyfin_login_cancel(self, login_id: str) -> None:
+        login = self.jellyfin_logins.pop(login_id, None)
+        if login:
             await login.close()
 
     @_when_ready

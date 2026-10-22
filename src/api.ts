@@ -200,3 +200,11 @@ export const tidalLoginPoll = callable<
   { status: "waiting" | "done" | "error"; error?: string; service?: ServiceInfo }
 >("tidal_login_poll");
 export const tidalLoginCancel = callable<[loginId: string], void>("tidal_login_cancel");
+export const jellyfinLoginStart = callable<[url: string], Result<{ login_id: string; code: string }>>(
+  "jellyfin_login_start",
+);
+export const jellyfinLoginPoll = callable<
+  [loginId: string, service: ServiceDraft],
+  { status: "starting" | "waiting" | "done" | "error"; error?: string; service?: ServiceInfo }
+>("jellyfin_login_poll");
+export const jellyfinLoginCancel = callable<[loginId: string], void>("jellyfin_login_cancel");

@@ -1,4 +1,5 @@
 from .base import MusicService, ServiceError, StreamSource
+from .jellyfin import JellyfinService
 from .local import LocalService
 from .qobuz import QobuzService
 from .soundcloud import SoundCloudService
@@ -10,6 +11,7 @@ from .youtube import YouTubeService
 SERVICE_TYPES: dict[str, type[MusicService]] = {
     LocalService.type: LocalService,
     SubsonicService.type: SubsonicService,
+    JellyfinService.type: JellyfinService,
     SoundCloudService.type: SoundCloudService,
     YouTubeService.type: YouTubeService,
     QobuzService.type: QobuzService,

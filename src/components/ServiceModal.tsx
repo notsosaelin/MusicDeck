@@ -12,10 +12,18 @@ import {
   showModal,
 } from "@decky/ui";
 import { browseThenReturn, readClipboard, signIn } from "../signIn";
-import { FC, useState } from "react";
+import { FC, useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
 import { DialogActions } from "./common";
-import { ServiceDraft, ServiceInfo, saveService, testService } from "../api";
+import {
+  ServiceDraft,
+  ServiceInfo,
+  jellyfinLoginCancel,
+  jellyfinLoginPoll,
+  jellyfinLoginStart,
+  saveService,
+  testService,
+} from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
 
@@ -266,6 +274,98 @@ const SubsonicFields: FC<{
   </>
 );
 
+/**
+ * Jellyfin: Quick Connect (approve a code in any signed-in Jellyfin app, nothing typed here) or a
+ * username and password, which the backend swaps for an access token on save.
+ */
+const JellyfinFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  hasCredentials: boolean;
+  closeModal?: () => void;
+}> = ({ draft, setConfig, hasCredentials, closeModal }) => {
+  const [code, setCode] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const login = useRef<string | null>(null);
+
+  // closing the dialog abandons a pending Quick Connect
+  useEffect(
+    () => () => {
+      if (login.current) jellyfinLoginCancel(login.current);
+    },
+    [],
+  );
+
+  const quickConnect = async () => {
+    setStatus("Asking the server for a code…");
+    const start = await jellyfinLoginStart(draft.config.url ?? "");
+    if (!start.ok) return setStatus(start.error);
+    login.current = start.data.login_id;
+    setCode(start.data.code);
+    setStatus(null);
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (login.current !== start.data.login_id) return; // cancelled or restarted
+      const poll = await jellyfinLoginPoll(start.data.login_id, draft);
+      if (poll.status === "error") {
+        login.current = null;
+        setCode(null);
+        return setStatus(poll.error ?? "Sign-in failed");
+      }
+      if (poll.status === "done" && poll.service) {
+        login.current = null;
+        await refreshState();
+        invalidateBrowserCache();
+        notify(poll.service.name, `Signed in as ${poll.service.config.username || "Jellyfin user"}`);
+        return closeModal?.();
+      }
+    }
+  };
+
+  return (
+    <>
+      <Field label="Server address">
+        <TextField
+          value={draft.config.url ?? ""}
+          placeholder="https://jellyfin.example.com"
+          onChange={(e) => setConfig({ ...draft.config, url: e.target.value })}
+        />
+      </Field>
+      <Field label="Quick Connect">
+        {code ? (
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <div style={{ fontSize: 32, fontWeight: "bold", letterSpacing: 6 }}>{code}</div>
+            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+              In a Jellyfin app you're signed in to, open your profile → Quick Connect and enter this code. MusicDeck
+              continues by itself.
+            </div>
+          </div>
+        ) : (
+          <DialogButton disabled={!draft.config.url} onClick={quickConnect}>
+            {hasCredentials ? "Sign in again with Quick Connect" : "Sign in with Quick Connect"}
+          </DialogButton>
+        )}
+        {status && <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>{status}</div>}
+      </Field>
+      <div style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 10px" }}>Or sign in with a username and password:</div>
+      <Field label="Username">
+        <TextField
+          value={draft.config.username ?? ""}
+          onChange={(e) => setConfig({ ...draft.config, username: e.target.value })}
+        />
+      </Field>
+      <Field label="Password">
+        <TextField
+          bIsPassword
+          value={draft.config.password ?? ""}
+          placeholder={hasCredentials ? "Unchanged" : ""}
+          onChange={(e) => setConfig({ ...draft.config, password: e.target.value })}
+        />
+      </Field>
+    </>
+  );
+};
+
 export const ServiceModal: FC<{
   closeModal?: () => void;
   type: string;
@@ -336,6 +436,14 @@ export const ServiceModal: FC<{
         {type === "local" && <LocalFields draft={draft} setConfig={setConfig} />}
         {type === "subsonic" && (
           <SubsonicFields draft={draft} setConfig={setConfig} hasCredentials={!!existing?.has_credentials} />
+        )}
+        {type === "jellyfin" && (
+          <JellyfinFields
+            draft={draft}
+            setConfig={setConfig}
+            hasCredentials={!!existing?.has_credentials}
+            closeModal={closeModal}
+          />
         )}
         {type === "qobuz" && (
           <QobuzFields

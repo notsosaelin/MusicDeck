@@ -305,6 +305,31 @@ async def run():
         cfg = await tdmod.TidalService.authenticate({"quality": "MAX"}, {"refresh_token": "r"}, tmp)
         check(cfg["quality"] == "LOSSLESS" and cfg["refresh_token"] == "r", "unknown quality falls back to lossless")
 
+        print("jellyfin")
+        from musicdeck.services.jellyfin import JellyfinService as JF
+        prev = {"url": "https://jf.example", "device_id": "dev1", "token": "tok", "user_id": "u1", "username": "me"}
+        kept = await JF.authenticate({"url": "jf.example/", "username": "me"}, prev, tmp)
+        check(kept["token"] == "tok" and kept["device_id"] == "dev1" and kept["url"] == "https://jf.example"
+              and "password" not in kept, "editing keeps the token; address normalised")
+        qc = await JF.authenticate({"url": "https://jf.example", "token": "new", "user_id": "u2", "device_id": "dev2",
+                                    "username": "other"}, prev, tmp)
+        check(qc["token"] == "new" and qc["device_id"] == "dev2" and qc["user_id"] == "u2",
+              "a Quick Connect token keeps the device id it was issued to")
+        from musicdeck.services.base import ServiceError as JFError
+        try:
+            await JF.authenticate({"url": "https://other.example", "username": "me"}, prev, tmp)
+            refused = False
+        except JFError:
+            refused = True
+        check(refused, "a new server needs a new sign-in")
+        jf = JF("jf", prev, tmp)
+        item = {"Id": "t1", "Name": "Song", "Artists": ["A", "B"], "ArtistItems": [{"Id": "a1", "Name": "A"}],
+                "Album": "Al", "AlbumId": "al1", "AlbumPrimaryImageTag": "x", "RunTimeTicks": 1_800_000_000,
+                "UserData": {"IsFavorite": True}, "NormalizationGain": -6.2, "ImageTags": {}}
+        t = jf._track(item)
+        check(t["artist"] == "A, B" and t["duration"] == 180 and t["art"] == "al1" and t["starred"]
+              and t["artist_id"] == "a1" and t["gain"]["track"] == -6.2, "track mapping (ticks, album art fallback)")
+
         print("decky's python")
         import re as _re
         # Decky's frozen interpreter ships without these; a top-level import stops the whole plugin loading
