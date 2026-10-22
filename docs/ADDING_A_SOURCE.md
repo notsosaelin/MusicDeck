@@ -10,6 +10,10 @@ engine can play *without DRM*: MP3, AAC, FLAC, Ogg Vorbis/Opus, WAV, or HLS/DASH
 HTTP(S). If every stream is Widevine/FairPlay-protected (Apple Music, Deezer, Amazon Music), it
 can't be supported; don't work around that. See [SOURCES.md](SOURCES.md#not-possible).
 
+**If it speaks another source's API**, subclass that source and override only what differs, as
+`EmbyService` does with `JellyfinService` (its own paths, a playlist filter, no Quick Connect).
+Prefer small hooks in the parent (a class attribute, an `_item()` method) over copying its code.
+
 ## 1. The service class
 
 Create `py_modules/musicdeck/services/example.py`:

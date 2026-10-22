@@ -5,10 +5,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 ## Features
 
-- **Thirteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, SoundCloud, YouTube
-  Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live Music Archive, Qobuz, TIDAL and
-  Spotify. One source is live at a
-  time, chosen in the plugin's Decky page.
+- **Fourteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, SoundCloud,
+  YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live Music Archive, Qobuz, TIDAL
+  and Spotify. One source is live at a time, chosen in the plugin's Decky page.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
 - **Games:** pick an album or playlist for a game and it plays when the game starts; or have the music
@@ -39,6 +38,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | Steam soundtracks | Your Steam account | Every soundtrack you own, from every Steam library (SD cards too); the running game's soundtrack first; install the rest with Steam's own dialog; one copy when a soundtrack ships MP3 and FLAC; composers, favourites, lyrics, radio |
 | Navidrome / Subsonic | Your server | Favourites, play reports, lyrics, similar-song radio, queue sync across devices, add to server playlists, ReplayGain |
 | Jellyfin | Your server | Sign in with Quick Connect (no typing), favourites, play reports, lyrics, Instant Mix radio, add to playlists, original-quality audio |
+| Emby | Your server | Favourites, play reports, Instant Mix radio, add to playlists, original-quality audio |
 | SoundCloud | None | Search, curated selections, artists, playlists and albums, related-track radio |
 | YouTube Music | None | Home, search across YouTube Music **and** regular YouTube, artists and channels, radio, lyrics |
 | Bandcamp | None | Genre charts, search, albums and artist discographies, full-track streaming, lyrics, same-artist radio |
@@ -53,8 +53,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 out, as NewPipe does: nothing ties your listening to an identity, and there's no account to get flagged for
 using an unofficial client. Your playlists and favourites for those stay on the Deck.
 
-**Passwords are never stored.** Navidrome passwords become Subsonic tokens and Jellyfin passwords become
-access tokens on save (or skip the password with Jellyfin's Quick Connect). Qobuz, TIDAL and Spotify sign in on
+**Passwords are never stored.** Navidrome passwords become Subsonic tokens and Jellyfin and Emby passwords
+become access tokens on save (or skip the password with Jellyfin's Quick Connect). Qobuz, TIDAL and Spotify sign in on
 their own websites, in Steam's browser, and MusicDeck only receives the resulting tokens.
 
 **Spotify tip:** Spotify's public Web API app is shared by every client that uses it and is often

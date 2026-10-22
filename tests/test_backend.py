@@ -358,6 +358,71 @@ async def run():
         check(t["artist"] == "A, B" and t["duration"] == 180 and t["art"] == "al1" and t["starred"]
               and t["artist_id"] == "a1" and t["gain"]["track"] == -6.2, "track mapping (ticks, album art fallback)")
 
+        print("emby")
+        from aiohttp import web as emweb
+        emby_calls = []
+
+        async def fake_emby(request):
+            body = await request.json() if request.can_read_body else None
+            emby_calls.append((request.method, request.path, dict(request.query), body))
+            if request.path == "/Users/AuthenticateByName":
+                if body.get("Pw") != "right":
+                    return emweb.Response(status=401)
+                return emweb.json_response({"AccessToken": "etok", "User": {"Id": "eu"}})
+            if request.headers.get("Authorization", "").find('Token="etok"') < 0:
+                return emweb.Response(status=401)
+            if request.path == "/Users/eu/Items/al1":
+                return emweb.json_response({"Id": "al1", "Name": "Album", "AlbumArtist": "A", "ImageTags": {}})
+            if request.path == "/Items/al1":  # the Jellyfin path: Emby doesn't have it
+                return emweb.Response(status=404)
+            if request.path == "/Items":
+                if request.query.get("ParentId") == "al1":
+                    return emweb.json_response({"Items": [{"Id": "t1", "Name": "Song", "Type": "Audio", "AlbumId": "al1",
+                                                           "RunTimeTicks": 600_000_000, "ImageTags": {}}]})
+                if request.query.get("IncludeItemTypes") == "Playlist":
+                    return emweb.json_response({"Items": [{"Id": "p1", "Name": "Mix", "Type": "Playlist", "ImageTags": {}}]})
+                return emweb.json_response({"Items": []})
+            if request.path in ("/Sessions/Playing", "/Users/eu/FavoriteItems/t1", "/Users/eu/PlayedItems/t1"):
+                return emweb.Response(status=204 if body is None or body.get("PlaySessionId") or request.path != "/Sessions/Playing" else 400)
+            return emweb.Response(status=500)
+        em_app = emweb.Application()
+        em_app.router.add_route("*", "/{path:.*}", fake_emby)
+        em_runner = emweb.AppRunner(em_app)
+        await em_runner.setup()
+        em_site = emweb.TCPSite(em_runner, "127.0.0.1", 0)
+        await em_site.start()
+        em_url = f"http://127.0.0.1:{em_site._server.sockets[0].getsockname()[1]}"
+        try:
+            wrong = await plugin.save_service({"type": "emby", "name": "", "config": {"url": em_url, "username": "me", "password": "nope"}})
+            check(not wrong["ok"] and "Emby didn't accept" in wrong["error"], "a wrong password names Emby")
+            empty = await plugin.save_service({"type": "emby", "name": "", "config": {"url": em_url, "username": "me"}})
+            check(not empty["ok"] and "username and password" in empty["error"] and "Quick Connect" not in empty["error"],
+                  "no password: asks for one, and doesn't offer Quick Connect")
+            check(not (await plugin.sign_in_start("emby", {"url": em_url}))["ok"], "Emby has no Quick Connect")
+            em = (await plugin.save_service({"type": "emby", "name": "", "config": {"url": em_url, "username": "me", "password": "right"}}))["data"]
+            eid = em["id"]
+            stored = next(x for x in plugin.settings.services() if x["id"] == eid)["config"]
+            check(em["name"] == "Emby" and stored["token"] == "etok" and "password" not in stored
+                  and "lyrics" not in em["features"], "the password becomes a token; lyrics come from LRCLIB")
+            em_page = (await plugin.open_collection(eid, "album", "al1"))["data"]
+            check(em_page["title"] == "Album" and [t["id"] for t in em_page["tracks"]] == ["t1"], "an album, from the user's item path")
+            lists = await plugin.instances[eid].user_playlists()
+            check([p["id"] for p in lists] == ["p1"] and not any("MediaTypes" in c[2] for c in emby_calls),
+                  "playlists aren't filtered by media type (Emby would return everything)")
+            await plugin.instances[eid].star("t1", True)
+            await plugin.instances[eid].star("t1", False)
+            check([c[:2] for c in emby_calls[-2:]] == [("POST", "/Users/eu/FavoriteItems/t1"), ("DELETE", "/Users/eu/FavoriteItems/t1")],
+                  "favourites under the user")
+            await plugin.instances[eid].scrobble("t1", False)
+            await plugin.instances[eid].scrobble("t1", True)
+            check(emby_calls[-2][1] == "/Sessions/Playing" and emby_calls[-2][3]["MediaSourceId"] == "t1"
+                  and emby_calls[-1][:2] == ("POST", "/Users/eu/PlayedItems/t1"), "now playing with a session id; played under the user")
+            edited = (await plugin.save_service({"id": eid, "type": "emby", "name": "Home", "config": {"url": em_url, "username": "me"}}))["data"]
+            check(edited["name"] == "Home" and next(x for x in plugin.settings.services() if x["id"] == eid)["config"]["token"] == "etok", "editing keeps the token")
+            await plugin.remove_service(eid)
+        finally:
+            await em_runner.cleanup()
+
         print("internet radio")
         from aiohttp import web as aioweb
         from musicdeck.services.radio import RadioService

@@ -55,27 +55,35 @@ def _auth_header(device_id: str, token: str = "") -> dict[str, str]:
 
 
 async def _call(session: aiohttp.ClientSession, method: str, url: str, device_id: str, token: str = "",
-                **kwargs: Any) -> Any:
+                server: str = "Jellyfin", **kwargs: Any) -> Any:
+    """One API request; `server` names the kind of server in error messages (Jellyfin or Emby)."""
     try:
         async with session.request(method, url, headers=_auth_header(device_id, token), **kwargs) as resp:
             if resp.status == 401:
-                raise ServiceError("Jellyfin didn't accept the sign-in; edit the source and sign in again")
+                raise ServiceError(f"{server} didn't accept the sign-in; edit the source and sign in again")
             if resp.status == 404:
-                raise ServiceError("Not found on the Jellyfin server")
+                raise ServiceError(f"Not found on the {server} server")
             if resp.status >= 400:
-                raise ServiceError(f"Jellyfin returned HTTP {resp.status}")
+                raise ServiceError(f"{server} returned HTTP {resp.status}")
             text = await resp.text()
             return json.loads(text) if text.strip() else None
     except aiohttp.ClientError as e:
-        raise ServiceError(f"Could not reach the Jellyfin server: {e}") from e
+        raise ServiceError(f"Could not reach the {server} server: {e}") from e
 
 
 class JellyfinService(MusicService):
-    """config: {"url", "device_id", "user_id", "username", "token"}"""
+    """config: {"url", "device_id", "user_id", "username", "token"}
+
+    Emby (emby.py) shares this API, being the project Jellyfin forked from; it overrides the few
+    places where they differ.
+    """
 
     type = "jellyfin"
     display_name = "Jellyfin"
     features = frozenset({"star", "scrobble", "lyrics", "radio", "playlists"})
+    # music playlists only (Emby reads this filter as "or" and returns everything; see emby.py)
+    PLAYLIST_FILTER: dict[str, str] = {"MediaTypes": "Audio"}
+    SIGN_IN_HINT = "Sign in with Quick Connect, or enter your username and password"
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:
@@ -107,13 +115,14 @@ class JellyfinService(MusicService):
         elif "password" in config and result["username"]:
             async with _session() as session:
                 data = await _call(session, "POST", f"{url}/Users/AuthenticateByName", device_id,
+                                   server=cls.display_name,
                                    json={"Username": result["username"], "Pw": config.get("password") or ""})
             result.update(token=data["AccessToken"], user_id=data["User"]["Id"])
         elif previous and previous.get("token") and previous.get("url") == url:
             result.update(token=previous["token"], user_id=previous.get("user_id"),
                           username=result["username"] or previous.get("username", ""))
         else:
-            raise ServiceError("Sign in with Quick Connect, or enter your username and password")
+            raise ServiceError(cls.SIGN_IN_HINT)
         return result
 
     async def start(self) -> None:
@@ -128,7 +137,7 @@ class JellyfinService(MusicService):
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         assert self.session
         return await _call(self.session, method, self.config["url"] + path, self.config.get("device_id", ""),
-                           self.config.get("token", ""), **kwargs)
+                           self.config.get("token", ""), server=self.display_name, **kwargs)
 
     async def _get(self, path: str, **params: Any) -> Any:
         query = {k: str(v).lower() if isinstance(v, bool) else v for k, v in params.items() if v is not None}
@@ -139,9 +148,14 @@ class JellyfinService(MusicService):
                                Fields="PrimaryImageAspectRatio,ProductionYear,ChildCount", **params)
         return (data or {}).get("Items") or []
 
+    async def _item(self, id: str) -> dict[str, Any]:
+        """One item (album, artist, playlist) as the signed-in user sees it."""
+        return await self._get(f"/Items/{id}", userId=self.config.get("user_id"))
+
     async def test(self) -> str:
         info = await self._get("/System/Info")
-        return f"Signed in as {self.config.get('username') or 'Jellyfin user'} · {info.get('ServerName', 'Jellyfin')} {info.get('Version', '')}".strip()
+        name = self.display_name
+        return f"Signed in as {self.config.get('username') or name + ' user'} · {info.get('ServerName', name)} {info.get('Version', '')}".strip()
 
     # --- mapping ---
 
@@ -175,7 +189,7 @@ class JellyfinService(MusicService):
 
     async def home(self) -> list[dict[str, Any]]:
         jobs = {
-            "playlists": self._items(IncludeItemTypes="Playlist", MediaTypes="Audio", SortBy="SortName"),
+            "playlists": self._items(IncludeItemTypes="Playlist", SortBy="SortName", **self.PLAYLIST_FILTER),
             "recent": self._items(IncludeItemTypes="Audio", SortBy="DatePlayed", SortOrder="Descending",
                                   Filters="IsPlayed", Limit=30),
             "added": self._items(IncludeItemTypes="MusicAlbum", SortBy="DateCreated", SortOrder="Descending", Limit=20),
@@ -219,13 +233,13 @@ class JellyfinService(MusicService):
                                    collections=[self._album(a) for a in albums])
             raise ServiceError(f"Unknown list: {id}")
         if kind == "album":
-            album = await self._get(f"/Items/{id}", userId=self.config.get("user_id"))
+            album = await self._item(id)
             tracks = await self._items(ParentId=id, IncludeItemTypes="Audio", SortBy="ParentIndexNumber,IndexNumber")
             c = self._album(album)
             return models.page(c["title"], c["subtitle"], c["art"], tracks=[self._track(t) for t in tracks])
         if kind == "artist":
             artist, albums, top = await asyncio.gather(
-                self._get(f"/Items/{id}", userId=self.config.get("user_id")),
+                self._item(id),
                 self._items(ArtistIds=id, IncludeItemTypes="MusicAlbum", SortBy="ProductionYear,SortName",
                             SortOrder="Descending"),
                 self._items(ArtistIds=id, IncludeItemTypes="Audio", SortBy="PlayCount,SortName",
@@ -234,7 +248,7 @@ class JellyfinService(MusicService):
             return models.page(c["title"], models.count(len(albums), "album"), c["art"],
                                collections=[self._album(a) for a in albums], tracks=[self._track(t) for t in top])
         if kind == "playlist":
-            playlist = await self._get(f"/Items/{id}", userId=self.config.get("user_id"))
+            playlist = await self._item(id)
             data = await self._get(f"/Playlists/{id}/Items", userId=self.config.get("user_id"))
             tracks = [self._track(t) for t in (data or {}).get("Items", []) if t.get("Type") == "Audio"]
             c = self._playlist({**playlist, "ChildCount": len(tracks)})
@@ -246,7 +260,7 @@ class JellyfinService(MusicService):
             self._items(searchTerm=query, IncludeItemTypes="Audio", Limit=50),
             self._items(searchTerm=query, IncludeItemTypes="MusicAlbum", Limit=20),
             self._get("/Artists", userId=self.config.get("user_id"), searchTerm=query, Limit=10),
-            self._items(searchTerm=query, IncludeItemTypes="Playlist", MediaTypes="Audio", Limit=10))
+            self._items(searchTerm=query, IncludeItemTypes="Playlist", Limit=10, **self.PLAYLIST_FILTER))
         return models.page(f"Results for “{query}”",
                            collections=[self._artist(a) for a in (artists or {}).get("Items", [])]
                            + [self._album(a) for a in albums] + [self._playlist(p) for p in playlists],
@@ -280,8 +294,10 @@ class JellyfinService(MusicService):
         if submission:
             await self._request("POST", f"/UserPlayedItems/{track_id}", params={"userId": self.config.get("user_id")})
         else:
-            await self._request("POST", "/Sessions/Playing", json={"ItemId": track_id, "CanSeek": True,
-                                                                  "PlayMethod": "DirectStream"})
+            # the media source and session ids are optional for Jellyfin; Emby refuses the report without them
+            await self._request("POST", "/Sessions/Playing", json={
+                "ItemId": track_id, "MediaSourceId": track_id, "PlaySessionId": pysecrets.token_hex(8),
+                "CanSeek": True, "PlayMethod": "DirectStream"})
 
     async def lyrics(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
         try:
@@ -301,8 +317,8 @@ class JellyfinService(MusicService):
         return [self._track(t) for t in (data or {}).get("Items", []) if t["Id"] != track["id"]]
 
     async def user_playlists(self) -> list[dict[str, Any]]:
-        return [self._playlist(p) for p in await self._items(IncludeItemTypes="Playlist", MediaTypes="Audio",
-                                                             SortBy="SortName")]
+        return [self._playlist(p) for p in await self._items(IncludeItemTypes="Playlist", SortBy="SortName",
+                                                             **self.PLAYLIST_FILTER)]
 
     async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> None:
         await self._request("POST", f"/Playlists/{playlist_id}/Items",

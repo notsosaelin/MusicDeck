@@ -276,16 +276,18 @@ const SpotifyFields: FC<{
   );
 };
 
-const SubsonicFields: FC<{
+/** A server address, username and password: Navidrome/Subsonic, and Emby (whose password becomes a token on save). */
+const ServerFields: FC<{
   draft: ServiceDraft;
   setConfig: (c: Record<string, any>) => void;
   hasCredentials: boolean;
-}> = ({ draft, setConfig, hasCredentials }) => (
+  placeholder: string;
+}> = ({ draft, setConfig, hasCredentials, placeholder }) => (
   <>
     <Field label="Server URL">
       <TextField
         value={draft.config.url ?? ""}
-        placeholder="https://music.example.com"
+        placeholder={placeholder}
         onChange={(e) => setConfig({ ...draft.config, url: e.target.value })}
       />
     </Field>
@@ -476,7 +478,20 @@ export const ServiceModal: FC<{
         </Field>
         {type === "local" && <LocalFields draft={draft} setConfig={setConfig} />}
         {type === "subsonic" && (
-          <SubsonicFields draft={draft} setConfig={setConfig} hasCredentials={!!existing?.has_credentials} />
+          <ServerFields
+            draft={draft}
+            setConfig={setConfig}
+            hasCredentials={!!existing?.has_credentials}
+            placeholder="https://music.example.com"
+          />
+        )}
+        {type === "emby" && (
+          <ServerFields
+            draft={draft}
+            setConfig={setConfig}
+            hasCredentials={!!existing?.has_credentials}
+            placeholder="https://emby.example.com"
+          />
         )}
         {type === "jellyfin" && (
           <JellyfinFields

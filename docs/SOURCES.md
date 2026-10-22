@@ -10,6 +10,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Steam soundtracks | `steam` | Steam's own | — | Original files | favourites, lyrics, radio |
 | Navidrome / Subsonic | `subsonic` | Server | Password → salted token | Original files (`format=raw`) | favourites, play reports, lyrics, radio, queue sync, playlists |
 | Jellyfin | `jellyfin` | Server | Quick Connect or password → access token | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
+| Emby | `emby` | Server | Password → access token | Original, server transcodes the rest | favourites, play reports, radio, playlists |
 | SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | radio |
 | YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | radio, lyrics |
 | Bandcamp | `bandcamp` | — | — | MP3 128 kbps | radio, lyrics |
@@ -25,7 +26,7 @@ the Deck otherwise. Every source can also use MusicDeck playlists and ListenBrai
 
 **Several accounts.** Every source type can be added more than once. Sources with accounts say who
 they are signed in as through `account(config)` (Spotify username, Qobuz/TIDAL user id, server +
-user for Navidrome and Jellyfin); saving refuses a second source for an account already added. A
+user for Navidrome, Jellyfin and Emby); saving refuses a second source for an account already added. A
 new source with no name gets "Spotify", then "Spotify 2", and so on. Per-account files are kept
 apart (Spotify's playback credentials live in `spotify/accounts/<username>/`) and deleted with the
 source (`MusicService.remove`).
@@ -107,7 +108,26 @@ source (`MusicService.remove`).
 - **Extras**: favourites (`/UserFavoriteItems`, with the pre-10.9 path as fallback), play reports
   (`/Sessions/Playing` then `/UserPlayedItems`), lyrics (`/Audio/{id}/Lyrics`, 10.9+), Instant Mix
   radio, playlist editing, loudness from `NormalizationGain`.
-- Tested against `demo.jellyfin.org/stable` (12.2). Emby shares much of the API but is untested.
+- Tested against `demo.jellyfin.org/stable` (12.2).
+
+## Emby (`emby.py`)
+
+- **What**: Jellyfin began as a fork of Emby and both still speak the same REST API, so
+  `EmbyService` is `JellyfinService` with the differences below; everything else (header, audio,
+  Instant Mix, mapping) is shared.
+- **Differences**, found against Emby 4.10:
+  - single items, favourites and "played" are under `/Users/{user}/Items/{id}`,
+    `/Users/{user}/FavoriteItems/{id}` and `/Users/{user}/PlayedItems/{id}` (Jellyfin's newer
+    paths answer 404);
+  - `/Sessions/Playing` is refused (HTTP 400) without `MediaSourceId` and `PlaySessionId`; Jellyfin
+    accepts them too, so the shared report always sends them;
+  - playlist queries aren't filtered with `MediaTypes=Audio` (`PLAYLIST_FILTER`): Emby treats it as
+    "or" and returns every item in the library;
+  - no Quick Connect (username and password only, `SIGN_IN_HINT`);
+  - `/Audio/{id}/Lyrics` errors, so lyrics come from LRCLIB.
+- **Art**: Emby only has art it found (a `cover.jpg`/`folder.jpg` next to the files, or embedded
+  pictures); an album without either shows the placeholder, as it does in Emby's own apps.
+- Tested against Emby Server 4.10.2 in a container, with a music library and a playlist.
 
 ## SoundCloud (`soundcloud.py`)
 
@@ -268,6 +288,3 @@ These were investigated and can't be supported without DRM circumvention:
 
 - **Plex**: feasible (PIN sign-in at plex.tv/link, `/library/sections`, direct play of parts,
   `/:/scrobble`, sonic "nearest" for radio), but there is no public server to test against.
-- **Emby**: Jellyfin's ancestor; `jellyfin.py` could likely serve it with header changes.
-- **Podcasts**: possible (iTunes search API + RSS), but RSS would need a regex parser since Decky's
-  Python has no `xml` module.

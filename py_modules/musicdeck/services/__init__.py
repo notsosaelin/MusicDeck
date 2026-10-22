@@ -1,5 +1,6 @@
 from .bandcamp import BandcampService
 from .base import MusicService, ServiceError, SignIn, StreamSource
+from .emby import EmbyService
 from .jellyfin import JellyfinService
 from .livemusic import LiveMusicService
 from .local import LocalService
@@ -18,6 +19,7 @@ SERVICE_TYPES: dict[str, type[MusicService]] = {
     SteamService.type: SteamService,
     SubsonicService.type: SubsonicService,
     JellyfinService.type: JellyfinService,
+    EmbyService.type: EmbyService,
     SoundCloudService.type: SoundCloudService,
     YouTubeService.type: YouTubeService,
     BandcampService.type: BandcampService,

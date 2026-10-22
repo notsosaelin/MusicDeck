@@ -32,7 +32,7 @@ import {
   FaSteam,
   FaYoutube,
 } from "react-icons/fa";
-import { SiJellyfin, SiTidal } from "react-icons/si";
+import { SiEmby, SiJellyfin, SiTidal } from "react-icons/si";
 import {
   GameMusic,
   PlaybackSettings,
@@ -58,6 +58,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   steam: <FaSteam />,
   subsonic: <FaServer />,
   jellyfin: <SiJellyfin />,
+  emby: <SiEmby />,
   soundcloud: <FaSoundcloud />,
   youtube: <FaYoutube />,
   bandcamp: <FaBandcamp />,
@@ -94,7 +95,7 @@ const describeStatus = (s: ServiceInfo) => {
     if (s.status.scanning) return `Scanning… ${s.status.found} files`;
     return `${s.status.installed ?? 0} installed · ${s.status.owned ?? 0} owned`;
   }
-  if (s.type === "jellyfin")
+  if (s.type === "jellyfin" || s.type === "emby")
     return [s.config.username, s.config.url?.replace(/^https?:\/\//, "")].filter(Boolean).join(" · ");
   if (s.type !== "local") return s.config.url ?? "";
   if (s.status.scanning) return `Scanning… ${s.status.found} files`;

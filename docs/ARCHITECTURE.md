@@ -256,14 +256,14 @@ SoundCloud scrape from their web players).
   random key (`?k=`) on every request. Other users or devices on the network can't reach it, and
   other local programs can't guess the key.
 - Service credentials stay in the backend. Where a service needs a token on audio or art requests
-  (Jellyfin, Subsonic), it is added by the server when proxying, not put into URLs the UI sees.
-- Passwords are never stored. Navidrome passwords become Subsonic salted tokens and Jellyfin
-  passwords become access tokens on save; Qobuz, TIDAL and Spotify sign in on their own websites.
+  (Jellyfin, Emby, Subsonic), it is added by the server when proxying, not put into URLs the UI sees.
+- Passwords are never stored. Navidrome passwords become Subsonic salted tokens and Jellyfin and
+  Emby passwords become access tokens on save; Qobuz, TIDAL and Spotify sign in on their own websites.
 - No source that works without an account asks for one (SoundCloud, YouTube, Bandcamp, radio).
 
 ## Sign-in
 
-Sources with a username/password form (Navidrome, Jellyfin) exchange it in `authenticate()` when
+Sources with a username/password form (Navidrome, Jellyfin, Emby) exchange it in `authenticate()` when
 the dialog is saved. Sources whose sign-in happens elsewhere implement `MusicService.sign_in()`,
 returning a `SignIn` that every flow drives the same way:
 
