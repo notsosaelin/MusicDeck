@@ -1199,7 +1199,7 @@ async def run():
         old = (await plugin.open_collection(st_id, "album", "202"))["data"]
         check([t["title"] for t in old["tracks"]] == ["Old Theme"], "only the game's soundtrack folder, no sound effects")
         later = (await plugin.open_collection(st_id, "album", "400"))["data"]
-        check(later["action"] == {"label": "Install", "url": "steam://install/400"} and later["notice"]
+        check(later["action"] == {"label": "Install", "url": "steam://install/400"} and later["subtitle"] == "Not installed"
               and not later["tracks"], "not installed: an Install action")
         downloading = (await plugin.open_collection(st_id, "album", "300"))["data"]
         check(downloading["action"] is None and downloading["subtitle"] == "Installing…", "downloading: no action")

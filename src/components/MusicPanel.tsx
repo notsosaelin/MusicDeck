@@ -58,7 +58,7 @@ export const MusicPanel: FC = () => {
         (!state ? null : active ? (
           <Browser instanceId={active.id} stack={tab} />
         ) : (
-          <Message>No music source set up yet. Open Decky → MusicDeck to add your library or a server.</Message>
+          <Message>Add a music source in Decky → MusicDeck</Message>
         ))}
       {tab === "queue" && <Queue />}
       {tab === "lyrics" && <LyricsView />}

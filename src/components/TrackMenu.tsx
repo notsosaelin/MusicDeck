@@ -360,7 +360,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
             showModal(
               <ConfirmModal
                 strTitle={`Delete ${c.title}?`}
-                strDescription="The playlist is removed from MusicDeck. The music itself isn't affected."
+                strDescription="The music itself isn't affected."
                 strOKButtonText="Delete"
                 bDestructiveWarning
                 onOK={async () => {

@@ -98,7 +98,7 @@ next to Play (or choose "Play when … starts" from a row's options). From then 
 game starts, and pauses when the game closes unless you've picked something else meanwhile. Each source
 keeps its own choices and only the live source's apply; Decky → MusicDeck → Games lists them all.
 
-**Pause while playing** (Decky → MusicDeck → Games, off by default) pauses the music when a game starts
+**Pause in games** (Decky → MusicDeck → Games, off by default) pauses the music when a game starts
 and resumes it when the last game closes, unless you played, skipped or changed something meanwhile.
 
 Any service can be added more than once, one account each; MusicDeck refuses the same account twice.

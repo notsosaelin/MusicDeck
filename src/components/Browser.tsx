@@ -196,7 +196,7 @@ const HomeView: FC<{ instanceId: string }> = ({ instanceId }) => {
   const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
   if (!result?.ok) return <Loading result={result} />;
   if (!result.data.length)
-    return <Message>Nothing here yet. If you just added a library it may still be scanning.</Message>;
+    return <Message>Nothing here yet</Message>;
   return (
     <>
       {result.data.map((s) => (
@@ -408,7 +408,7 @@ const DownloadButton: FC<{ instanceId: string; playlist: Collection; initial: Of
       showModal(
         <ConfirmModal
           strTitle={`Remove the download of ${playlist.title}?`}
-          strDescription="Its songs are deleted from this Deck and play from the source again. The playlist stays."
+          strDescription="Its songs are deleted from this Deck. The playlist stays."
           strOKButtonText="Remove"
           bDestructiveWarning
           onOK={() => change(false)}

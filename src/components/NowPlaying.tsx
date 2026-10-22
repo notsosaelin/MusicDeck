@@ -78,7 +78,7 @@ const LiveBar: FC = () => (
  * station); otherwise the station, where it is and its genres, like any track's title/artist/album.
  */
 function cardText(item: QueueItem | undefined, song: OnAir | null): { title: string; subtitle: string[] } {
-  if (!item) return { title: "Nothing playing", subtitle: ["Pick something from your library"] };
+  if (!item) return { title: "Nothing playing", subtitle: [] };
   const { title, artist, album } = item.track;
   if (song?.title) return { title: song.title, subtitle: [song.artist, title] };
   return { title, subtitle: [artist, album] };
@@ -125,23 +125,26 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
         </Field>
       </PanelSectionRow>
       {item && (item.track.live ? <LiveBar /> : <Seek />)}
-      <ButtonRow>
-        <IconButton label="Shuffle" active={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
-          <FaRandom />
-        </IconButton>
-        <IconButton label="Previous" disabled={!item} onClick={() => player.previous()}>
-          <FaStepBackward />
-        </IconButton>
-        <IconButton label={state.playing ? "Pause" : "Play"} disabled={!item} onClick={() => player.toggle()}>
-          {state.playing ? <FaPause /> : <FaPlay />}
-        </IconButton>
-        <IconButton label="Next" disabled={!item} onClick={() => player.next()}>
-          <FaStepForward />
-        </IconButton>
-        <IconButton label="Repeat" active={state.repeat !== "off"} onClick={() => player.cycleRepeat()}>
-          {state.repeat === "one" ? <MdRepeatOne /> : <FaRedo />}
-        </IconButton>
-      </ButtonRow>
+      {/* nothing loaded: no transport, which would only be five disabled buttons */}
+      {item && (
+        <ButtonRow>
+          <IconButton label="Shuffle" active={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
+            <FaRandom />
+          </IconButton>
+          <IconButton label="Previous" onClick={() => player.previous()}>
+            <FaStepBackward />
+          </IconButton>
+          <IconButton label={state.playing ? "Pause" : "Play"} onClick={() => player.toggle()}>
+            {state.playing ? <FaPause /> : <FaPlay />}
+          </IconButton>
+          <IconButton label="Next" onClick={() => player.next()}>
+            <FaStepForward />
+          </IconButton>
+          <IconButton label="Repeat" active={state.repeat !== "off"} onClick={() => player.cycleRepeat()}>
+            {state.repeat === "one" ? <MdRepeatOne /> : <FaRedo />}
+          </IconButton>
+        </ButtonRow>
+      )}
       <PanelSectionRow>
         <SliderField
           icon={volumeIcon}

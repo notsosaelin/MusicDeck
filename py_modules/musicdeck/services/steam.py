@@ -509,10 +509,7 @@ class SteamService(MusicService):
         installing = appid in self.soundtracks
         return models.page(self._name(appid), "Installing…" if installing else "Not installed", f"c:{appid}",
                            action=None if installing else {"label": "Install", "url": f"steam://install/{appid}"},
-                           notice=("Steam is downloading it. It appears here when the download finishes."
-                                   if installing else
-                                   "Install it to play it. Steam downloads it like a game, and it's playable "
-                                   "here as soon as it finishes."))
+                           notice="Playable here when Steam finishes" if installing else None)
 
     def _open_list(self, id: str) -> dict[str, Any]:
         index = self._track_index()

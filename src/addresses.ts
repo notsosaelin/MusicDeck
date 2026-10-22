@@ -10,5 +10,5 @@ const PRIVATE_HOST =
 export function unencryptedWarning(url: string | undefined): string | undefined {
   const match = /^http:\/\/(\[[^\]]+\]|[^/:?#]+)/i.exec((url ?? "").trim());
   if (!match || PRIVATE_HOST.test(match[1])) return undefined;
-  return "Not encrypted: your password and music would cross the internet readable by anyone on the way. Use https://.";
+  return "Not encrypted: your password would cross the internet readable. Use https://";
 }

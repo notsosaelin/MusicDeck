@@ -49,7 +49,7 @@ const LocalFields: FC<{
     }
   };
   return (
-    <Field label="Music folders (scanned recursively)">
+    <Field label="Music folders">
       {paths.map((p) => (
         <Focusable
           key={p}
@@ -95,8 +95,7 @@ const RadioFields: FC<{ draft: ServiceDraft; setConfig: (c: Record<string, any>)
   setConfig,
 }) => (
   <DropdownItem
-    label="Country"
-    description="Adds the most popular stations there to the home view."
+    label="Popular stations from"
     rgOptions={[
       { data: "", label: "None" },
       ...RADIO_COUNTRIES.map((c) => ({ data: c, label: countryName(c) })).sort((a, b) =>
@@ -113,21 +112,14 @@ const PodcastFields: FC<{ draft: ServiceDraft; setConfig: (c: Record<string, any
   draft,
   setConfig,
 }) => (
-  <>
-    <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5, marginBottom: 8 }}>
-      Find shows in Apple's podcast directory (no account) or paste a feed address into Search. Subscriptions and where
-      you left each episode stay on this device.
-    </div>
-    <DropdownItem
-      label="Top charts"
-      description="Whose most popular podcasts the home view shows."
-      rgOptions={["US", ...RADIO_COUNTRIES.filter((c) => c !== "US")]
-        .map((c) => ({ data: c === "US" ? "" : c, label: countryName(c) }))
-        .sort((a, b) => a.label.localeCompare(b.label))}
-      selectedOption={draft.config.country ?? ""}
-      onChange={(o) => setConfig({ ...draft.config, country: o.data })}
-    />
-  </>
+  <DropdownItem
+    label="Top charts from"
+    rgOptions={["US", ...RADIO_COUNTRIES.filter((c) => c !== "US")]
+      .map((c) => ({ data: c === "US" ? "" : c, label: countryName(c) }))
+      .sort((a, b) => a.label.localeCompare(b.label))}
+    selectedOption={draft.config.country ?? ""}
+    onChange={(o) => setConfig({ ...draft.config, country: o.data })}
+  />
 );
 
 const TIDAL_QUALITIES = [
@@ -155,9 +147,6 @@ const TidalFields: FC<{
           ? `Signed in${draft.config.username ? ` as ${draft.config.username}` : ""} · sign in again`
           : "Sign in with TIDAL"}
       </DialogButton>
-      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
-        Opens TIDAL's page to approve this device and comes back here by itself. MusicDeck never sees your password.
-      </div>
     </Field>
     <DropdownItem
       label="Streaming quality"
@@ -197,9 +186,6 @@ const QobuzFields: FC<{
           ? `Signed in${draft.config.email ? ` as ${draft.config.email}` : ""} · sign in again`
           : "Sign in with Qobuz"}
       </DialogButton>
-      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
-        Opens Qobuz's sign-in page and comes back here by itself. MusicDeck never sees your password.
-      </div>
     </Field>
     <DropdownItem
       label="Streaming quality"
@@ -234,23 +220,7 @@ const SpotifyFields: FC<{
   const appChanged = signedIn && (clientId || SPOTIFY_SHARED_APP) !== (draft.config.signed_with ?? SPOTIFY_SHARED_APP);
   return (
     <>
-      <Field label="Client ID (optional)">
-        <TextField
-          value={draft.config.client_id ?? ""}
-          placeholder="Shared app"
-          // a paste can bring text along with the ID; keep just the ID
-          onChange={(e) => setConfig({ ...draft.config, client_id: findClientId(e.target.value) ?? e.target.value })}
-        />
-        <div style={{ fontSize: 12, opacity: 0.6, margin: "6px 0 10px" }}>
-          Your own app gets its own rate limit instead of sharing one. Create an app with the redirect URI{" "}
-          <b>http://127.0.0.1:8989/login</b> and Web API access, copy its Client ID and paste it here, then sign in
-          again.
-        </div>
-        <DialogButton onClick={openDashboard}>
-          <FaExternalLinkAlt style={{ marginRight: 8 }} /> Open Spotify Developer Dashboard
-        </DialogButton>
-      </Field>
-      <Field label="Account">
+      <Field label="Account" hint="Needs Spotify Premium">
         <DialogButton
           onClick={() => {
             closeModal?.();
@@ -263,10 +233,6 @@ const SpotifyFields: FC<{
               ? `Signed in${draft.config.display_name ? ` as ${draft.config.display_name}` : ""} · sign in again`
               : "Sign in with Spotify"}
         </DialogButton>
-        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
-          Opens Spotify's sign-in pages and comes back here by itself. Needs Spotify Premium. MusicDeck never sees your
-          password.
-        </div>
       </Field>
       <DropdownItem
         label="Streaming quality"
@@ -274,6 +240,26 @@ const SpotifyFields: FC<{
         selectedOption={draft.config.bitrate ?? 320}
         onChange={(o) => setConfig({ ...draft.config, bitrate: o.data })}
       />
+      <Field
+        label="Your own app's Client ID (optional)"
+        hint="Avoids Spotify's shared rate limit. Redirect URI: http://127.0.0.1:8989/login"
+      >
+        <Focusable style={{ display: "flex", gap: 8 }} flow-children="row">
+          <div style={{ flex: 1 }}>
+            <TextField
+              value={draft.config.client_id ?? ""}
+              placeholder="Shared app"
+              // a paste can bring text along with the ID; keep just the ID
+              onChange={(e) =>
+                setConfig({ ...draft.config, client_id: findClientId(e.target.value) ?? e.target.value })
+              }
+            />
+          </div>
+          <DialogButton style={{ minWidth: 0, width: "auto", padding: "0 14px" }} onClick={openDashboard}>
+            <FaExternalLinkAlt />
+          </DialogButton>
+        </Focusable>
+      </Field>
     </>
   );
 };
@@ -371,7 +357,7 @@ const CodeSignIn: FC<{
       {code ? (
         <div style={{ textAlign: "center", padding: "8px 0" }}>
           <div style={{ fontSize: 32, fontWeight: "bold", letterSpacing: 6 }}>{code}</div>
-          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>{instructions} MusicDeck continues by itself.</div>
+          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>{instructions}</div>
         </div>
       ) : (
         <DialogButton disabled={disabled} onClick={start}>
@@ -408,12 +394,12 @@ const JellyfinFields: FC<{
         options={{ url: draft.config.url ?? "" }}
         disabled={!draft.config.url}
         label={hasCredentials ? "Sign in again with Quick Connect" : "Sign in with Quick Connect"}
-        instructions="In a Jellyfin app you're signed in to, open your profile → Quick Connect and enter this code."
+        instructions="Enter it in a signed-in Jellyfin app: Profile → Quick Connect"
         signedInAs={(s) => `Signed in as ${s.config.username || "Jellyfin user"}`}
         closeModal={closeModal}
       />
     </Field>
-    <div style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 10px" }}>Or sign in with a username and password:</div>
+    <div style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 10px" }}>Or with your password</div>
     <Field label="Username">
       <TextField
         value={draft.config.username ?? ""}
@@ -458,7 +444,7 @@ const PlexFields: FC<{
               ? `Signed in as ${draft.config.username} · sign in again`
               : "Sign in with Plex"
           }
-          instructions="On a phone or computer signed in to Plex, go to plex.tv/link and enter this code."
+          instructions="Enter it at plex.tv/link"
           signedInAs={plexSignedIn}
           closeModal={closeModal}
         />
@@ -469,7 +455,7 @@ const PlexFields: FC<{
             signIn("plex", draft);
           }}
         >
-          Sign in on this Deck instead
+          Sign in here instead
         </DialogButton>
       </Field>
       {servers.length > 1 && (
@@ -560,13 +546,6 @@ export const ServiceModal: FC<{
     <ModalRoot closeModal={closeModal} onCancel={closeModal}>
       <DialogHeader>{existing ? `Edit ${existing.name}` : `Add ${typeName}`}</DialogHeader>
       <DialogBody>
-        <Field label="Name">
-          <TextField
-            value={draft.name}
-            placeholder={typeName}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-        </Field>
         {type === "local" && <LocalFields draft={draft} setConfig={setConfig} />}
         {type === "subsonic" && (
           <ServerFields
@@ -590,7 +569,7 @@ export const ServiceModal: FC<{
             setConfig={setConfig}
             hasCredentials={!!existing?.has_credentials}
             placeholder="https://abs.example.com"
-            passwordHint="Or paste an API key here and leave the username empty"
+            passwordHint="Or an API key, with no username"
           />
         )}
         {type === "jellyfin" && (
@@ -637,25 +616,26 @@ export const ServiceModal: FC<{
         {type === "radio" && <RadioFields draft={draft} setConfig={setConfig} />}
         {type === "podcasts" && <PodcastFields draft={draft} setConfig={setConfig} />}
         {type === "livemusic" && (
-          <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
-            The Internet Archive's Live Music Archive: over 250,000 concert recordings that bands allow to be shared.
-            Free, no account, nothing to set up.
-          </div>
+          <div style={{ fontSize: 13, opacity: 0.7 }}>Concert recordings from archive.org. Nothing to set up.</div>
         )}
         {type === "steam" && (
-          <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
-            Plays the soundtracks you own on Steam. Installed ones play from this device, from every Steam library (SD
-            cards too); the rest can be installed from MusicDeck. Nothing to set up.
-          </div>
+          <div style={{ fontSize: 13, opacity: 0.7 }}>The soundtracks you own on Steam. Nothing to set up.</div>
         )}
         {type === "youtube" && (
           <ToggleField
-            label="Include all YouTube videos in search"
-            description="Also finds uploads YouTube Music doesn't label as music. No account needed."
+            label="Search all of YouTube"
+            description="Not only what YouTube Music lists as music"
             checked={draft.config.include_videos !== false}
             onChange={(on) => setConfig({ ...draft.config, include_videos: on })}
           />
         )}
+        <Field label="Name">
+          <TextField
+            value={draft.name}
+            placeholder={typeName}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          />
+        </Field>
         {error && <div style={{ color: "#ff6b6b", marginTop: 12 }}>{error}</div>}
       </DialogBody>
       <DialogActions

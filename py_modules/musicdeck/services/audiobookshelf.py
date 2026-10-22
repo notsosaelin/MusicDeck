@@ -426,7 +426,7 @@ class AudiobookshelfService(MusicService):
                 episodes = self._episodes(item)
                 subtitle = " · ".join(x for x in (meta.get("author"), models.count(len(episodes), "episode")) if x)
                 return models.page(meta.get("title") or "Podcast", subtitle, self._art(item), tracks=episodes,
-                                   notice=None if episodes else "This podcast has no episodes downloaded on the server")
+                                   notice=None if episodes else "No episodes on the server yet")
             tracks = self._book_tracks(item)
             people = [meta.get("authorName") or ""]
             if meta.get("narratorName"):
