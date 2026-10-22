@@ -114,6 +114,10 @@ source (`MusicService.remove`).
   `soundcloud-client.json` for a day, and re-scraped when rejected.
 - **Audio**: HLS transcodings. The signed playlist URLs live only minutes; their real expiry is read
   from the CloudFront policy in the URL, and the server re-resolves an expired playlist itself.
+- **Unplayable tracks are left out** (`_streams`): Go+ tracks (`policy` SNIP, 30-second snippets)
+  and some label releases (`policy` MONETIZE, ad-supported) that SoundCloud only serves as
+  `cbc-`/`ctr-encrypted-hls`. Those need Widevine, which Steam's browser engine lacks; a paid
+  account doesn't change that.
 - **Breaks when**: SoundCloud changes how its bundle embeds the client id (update the regex).
 
 ## YouTube Music (`youtube.py`, `ytdlp_worker.py`, `ytdlp_update.py`)

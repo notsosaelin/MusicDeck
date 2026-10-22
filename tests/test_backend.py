@@ -226,6 +226,19 @@ async def run():
         check(emitted == ["state_changed", "state_changed"],
               "every loaded frontend hears about a source switch or a setting change")
 
+        print("soundcloud streams")
+        from musicdeck.services.soundcloud import SoundCloudService
+
+        def tc(protocol, mime="audio/mp4", snipped=False):
+            return {"format": {"protocol": protocol, "mime_type": mime}, "quality": "sq", "snipped": snipped}
+        drm_only = {"policy": "MONETIZE", "media": {"transcodings": [tc("cbc-encrypted-hls"), tc("ctr-encrypted-hls")]}}
+        mixed = {"policy": "MONETIZE", "media": {"transcodings": [tc("ctr-encrypted-hls"), tc("hls", "audio/ogg")]}}
+        preview = {"policy": "SNIP", "media": {"transcodings": [tc("hls", snipped=True)]}}
+        check(not SoundCloudService._playable(drm_only) and not SoundCloudService._playable(preview)
+              and SoundCloudService._playable(mixed), "DRM-only tracks and Go+ previews are left out")
+        check([x["format"]["protocol"] for x in SoundCloudService._streams(mixed)] == ["hls"],
+              "an encrypted stream is never picked")
+
         print("spotify mapping")
         from musicdeck.services.spotify import SpotifyService
         spot = SpotifyService("sp", {}, tmp)

@@ -168,9 +168,16 @@ class SoundCloudService(MusicService):
         return [t if "title" in t else full.get(str(t["id"]), t) for t in tracks if "title" in t or str(t["id"]) in full]
 
     @staticmethod
-    def _playable(t: dict[str, Any]) -> bool:
-        # Go+ previews and region-blocked tracks only offer 30s snippets
-        return t.get("policy") not in ("SNIP", "BLOCK") and bool((t.get("media") or {}).get("transcodings"))
+    def _streams(t: dict[str, Any]) -> list[dict[str, Any]]:
+        """The track's streams that can be played here. Go+ previews only offer 30-second snippets,
+        and some label releases are only offered DRM-encrypted (cbc-/ctr-encrypted-hls), which needs
+        a DRM system Steam's browser engine doesn't have."""
+        return [tc for tc in (t.get("media") or {}).get("transcodings") or []
+                if not tc.get("snipped") and "encrypted" not in (tc.get("format") or {}).get("protocol", "")]
+
+    @classmethod
+    def _playable(cls, t: dict[str, Any]) -> bool:
+        return t.get("policy") not in ("SNIP", "BLOCK") and bool(cls._streams(t))
 
     def _tracks_of(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [self._track(t) for t in items if t.get("kind", "track") == "track" and self._playable(t)]
@@ -238,7 +245,6 @@ class SoundCloudService(MusicService):
                 raise ServiceError("Track not found")
             t = batch[0]
             self._tracks[track_id] = t
-        transcodings = (t.get("media") or {}).get("transcodings", [])
 
         def rank(tc: dict[str, Any]) -> tuple[int, int]:
             fmt = tc.get("format", {})
@@ -251,9 +257,10 @@ class SoundCloudService(MusicService):
                 kind = 2
             return kind, 0 if tc.get("quality") == "hq" else 1
 
-        candidates = sorted((tc for tc in transcodings if not tc.get("snipped")), key=rank)
+        candidates = sorted(self._streams(t), key=rank)
         if not candidates:
-            raise ServiceError("This track can't be streamed")
+            raise ServiceError("SoundCloud only offers this track copy-protected or as a preview, "
+                               "which can't be played here")
         tc = candidates[0]
         data = await self._get(tc["url"], track_authorization=t.get("track_authorization", ""))
         url = data.get("url")

@@ -104,6 +104,8 @@ Not possible:
   [Cider](https://github.com/ciderapp/cider) and [Sidra](https://github.com/wimpysworld/sidra) are separate
   apps built on CastLabs Electron, a Chromium that ships Widevine; nothing comparable exists inside Steam.
   MusicDeck doesn't decrypt streams.
+- **Some SoundCloud tracks.** A few label releases are only streamed DRM-protected, for the same
+  reason; MusicDeck leaves them out of lists, along with Go+ tracks free accounts only hear 30 seconds of.
 - **TIDAL 24-bit "Max".** TIDAL only grants it to a sign-in that hands its result back through a browser
   redirect Steam doesn't expose to plugins; MusicDeck plays TIDAL up to CD quality.
 
