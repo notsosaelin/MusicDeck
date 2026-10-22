@@ -27,6 +27,7 @@ import certifi
 from aiohttp import web
 
 from . import debuglog
+from .cache import Cache
 from .services import MusicService, ServiceError, StreamSource
 
 # Bodies are relayed as received (compressed too, e.g. Spotify's generated covers), so the
@@ -38,6 +39,7 @@ HLS_TYPE = "application/vnd.apple.mpegurl"
 URI_ATTR = re.compile(r'URI="([^"]+)"')
 # Resolved remote URLs (e.g. from yt-dlp) are reused for a while; most expire after ~6 hours
 RESOLVE_TTL = 3 * 3600
+RESOLVED_KEPT = 500
 
 if TYPE_CHECKING:
     from .offline import OfflineStore
@@ -66,7 +68,7 @@ class StreamServer:
         self.port = 0
         self.runner: Optional[web.AppRunner] = None
         self.session: Optional[aiohttp.ClientSession] = None
-        self._resolved: dict[tuple[str, str], tuple[StreamSource, float]] = {}
+        self._resolved: Cache[StreamSource] = Cache(RESOLVE_TTL, RESOLVED_KEPT)
 
     @property
     def base_url(self) -> str:
@@ -107,22 +109,20 @@ class StreamServer:
             return kept
         cache_key = (instance_id, track_id)
         cached = self._resolved.get(cache_key)
-        if cached and cached[1] > time.time():
-            return cached[0]
+        if cached:
+            return cached
         service = self.lookup(instance_id)
         if service is None:
             raise ServiceError("Unknown service")
         source = await service.stream(track_id)
         if source.url:
-            expiry = min(source.expires or time.time() + RESOLVE_TTL, time.time() + RESOLVE_TTL) - 60
-            self._resolved[cache_key] = (source, expiry)
-            if len(self._resolved) > 500:
-                now = time.time()
-                self._resolved = {k: v for k, v in self._resolved.items() if v[1] > now}
+            # a minute short of when a signed link stops working
+            life = min(source.expires - time.time() if source.expires else RESOLVE_TTL, RESOLVE_TTL) - 60
+            self._resolved.put(cache_key, source, life)
         return source
 
     def forget(self, instance_id: str, track_id: str) -> None:
-        self._resolved.pop((instance_id, track_id), None)
+        self._resolved.pop((instance_id, track_id))
 
     # --- handlers ---
 

@@ -31,6 +31,7 @@ import aiohttp
 import certifi
 from aiohttp import web
 
+from ..cache import Cache
 from .. import debuglog, models
 from .base import MusicService, ServiceError, SignIn, StreamSource
 
@@ -52,6 +53,10 @@ WEB_SCOPES = ["playlist-modify-private", "playlist-modify-public", "playlist-rea
               "user-read-private", "user-read-recently-played", "user-top-read"]
 LOGIN_TIMEOUT = 10 * 60
 CACHE_TTL = 180
+CACHE_KEPT = 300
+LIKED_TTL = 6 * 3600
+LIKED_KEPT = 5000
+MISSING = object()  # a cached answer can be None
 # A Retry-After longer than this isn't waited out: the request fails with the wait in the message,
 # and every request fails fast until it passes (retrying during a penalty only lengthens it).
 MAX_WAIT = 4
@@ -239,8 +244,9 @@ class SpotifyService(MusicService):
         self.token_lock = asyncio.Lock()
         self.client_id = web_client(config)
         self.gate = _Gate.of(self.client_id)
-        self.cache: dict[str, tuple[float, Any]] = {}
-        self.liked: dict[str, bool] = {}
+        self.cache: Cache[Any] = Cache(CACHE_TTL, CACHE_KEPT)
+        # which tracks are in Liked Songs (kept for the session; liking here updates it)
+        self.liked: Cache[bool] = Cache(LIKED_TTL, LIKED_KEPT)
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
@@ -341,24 +347,18 @@ class SpotifyService(MusicService):
         """GETs are cached briefly: browsing back and forth shouldn't spend the rate limit."""
         params = {k: v for k, v in params.items() if v is not None}
         key = path + "?" + urlencode(sorted(params.items()))
-        hit = self.cache.get(key)
-        if hit and hit[0] > time.time():
-            return hit[1]
-        data = await self._api("GET", path, params=params)
-        if len(self.cache) > 300:
-            self.cache.clear()
-        self.cache[key] = (time.time() + CACHE_TTL, data)
-        return data
+        hit = self.cache.get(key, MISSING)
+        if hit is not MISSING:
+            return hit
+        return self.cache.put(key, await self._api("GET", path, params=params))
 
     async def _read(self, op: str, **args: Any) -> Any:
         """A read over the librespot session (helper), cached like a GET."""
         key = f"helper:{op}:{json.dumps(args, sort_keys=True)}"
-        hit = self.cache.get(key)
-        if hit and hit[0] > time.time():
-            return hit[1]
-        data = await self.helper.call(op, timeout=60, **args)
-        self.cache[key] = (time.time() + CACHE_TTL, data)
-        return data
+        hit = self.cache.get(key, MISSING)
+        if hit is not MISSING:
+            return hit
+        return self.cache.put(key, await self.helper.call(op, timeout=60, **args))
 
     async def test(self) -> str:
         me = await self._get("/me")
@@ -422,10 +422,10 @@ class SpotifyService(MusicService):
             except ServiceError:
                 break
             for t, liked in zip(chunk, flags or []):
-                self.liked[t["id"]] = bool(liked)
+                self.liked.put(t["id"], bool(liked))
         for t in tracks:
             if t["id"] in self.liked:
-                t["starred"] = self.liked[t["id"]]
+                t["starred"] = self.liked.get(t["id"])
 
     async def _all(self, path: str, limit: int = 50, max_items: int = 1000, **params: Any) -> list[Any]:
         items: list[Any] = []
@@ -575,8 +575,8 @@ class SpotifyService(MusicService):
 
     async def star(self, track_id: str, starred: bool) -> None:
         await self._api("PUT" if starred else "DELETE", "/me/library", params={"uris": f"spotify:track:{track_id}"})
-        self.liked[track_id] = starred
-        self.cache = {k: v for k, v in self.cache.items() if not k.startswith("/me/tracks")}
+        self.liked.put(track_id, starred)
+        self.cache.drop(lambda k: k.startswith("/me/tracks"))
 
     async def user_playlists(self) -> list[dict[str, Any]]:
         items = await self._library_playlists()
@@ -587,7 +587,7 @@ class SpotifyService(MusicService):
     async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> None:
         await self._api("POST", f"/playlists/{playlist_id}/items",
                         body={"uris": [f"spotify:track:{t}" for t in track_ids]})
-        self.cache = {k: v for k, v in self.cache.items() if playlist_id not in k and "rootlist" not in k}
+        self.cache.drop(lambda k: playlist_id in k or "rootlist" in k)
 
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
         """Recommendations where Spotify still allows them; otherwise the artist's top tracks plus

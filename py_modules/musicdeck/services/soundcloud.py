@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 import aiohttp
 import certifi
 
+from ..cache import Cache
 from .. import models
 from .base import MusicService, ServiceError, StreamSource
 
@@ -26,6 +27,9 @@ USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like G
 SCRIPT_SRC = re.compile(r'<script crossorigin src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"')
 CLIENT_ID = re.compile(r'client_id\s*:\s*"([0-9a-zA-Z]{32})"')
 CLIENT_ID_TTL = 24 * 3600
+# track objects kept to stream from (their stream links are fetched fresh each time)
+TRACK_TTL = 6 * 3600
+TRACKS_KEPT = 2000
 
 
 def _signed_expiry(url: str) -> Optional[float]:
@@ -65,7 +69,8 @@ class SoundCloudService(MusicService):
         self.client_id_at = 0.0
         self._client_lock = asyncio.Lock()
         # tracks seen in listings, so stream() doesn't need another lookup for transcodings
-        self._tracks: dict[str, dict[str, Any]] = {}
+        # SoundCloud's own track objects, which say how to stream them
+        self._tracks: Cache[dict[str, Any]] = Cache(TRACK_TTL, TRACKS_KEPT)
 
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
@@ -132,7 +137,7 @@ class SoundCloudService(MusicService):
     # --- mapping ---
 
     def _track(self, t: dict[str, Any]) -> dict[str, Any]:
-        self._tracks[str(t["id"])] = t
+        self._tracks.put(str(t["id"]), t)
         user = t.get("user") or {}
         meta = t.get("publisher_metadata") or {}
         artist = meta.get("artist") or user.get("username", "")
@@ -245,7 +250,7 @@ class SoundCloudService(MusicService):
             if not batch:
                 raise ServiceError("Track not found")
             t = batch[0]
-            self._tracks[track_id] = t
+            self._tracks.put(track_id, t)
 
         def rank(tc: dict[str, Any]) -> tuple[int, int]:
             fmt = tc.get("format", {})

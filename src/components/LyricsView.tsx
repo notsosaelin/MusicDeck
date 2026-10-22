@@ -2,14 +2,14 @@ import { Focusable, Navigation, PanelSection, PanelSectionRow, Spinner } from "@
 import { FC, useEffect, useRef, useState } from "react";
 import { Lyrics, getLyrics } from "../api";
 import { QueueItem, player } from "../player";
-import { useStore } from "../store";
+import { RecentlyUsed, useStore } from "../store";
 import { Message, scrollIntoCentre } from "./common";
 
 /** The full-screen lyrics page (registered in index.tsx). */
 export const LYRICS_ROUTE = "/musicdeck/lyrics";
 
-/** Lyrics per track, kept for the session so flipping tabs doesn't refetch. null = the track has none. */
-const lyricsCache = new Map<string, Lyrics | null>();
+/** Lyrics of the last 100 tracks, so flipping tabs doesn't refetch. null = the track has none. */
+const lyricsCache = new RecentlyUsed<Lyrics | null>(100);
 
 /** undefined while loading, null when the track has none, { error } when they couldn't be looked up. */
 export type LyricsResult = Lyrics | null | undefined | { error: string };
@@ -193,7 +193,7 @@ export const LyricsView: FC = () => {
       </PanelSectionRow>
       {lyrics.source && (
         <PanelSectionRow>
-          <div style={{ fontSize: 11, opacity: 0.4, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>
+          <div style={{ fontSize: 12, opacity: 0.5, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>
         </PanelSectionRow>
       )}
     </PanelSection>

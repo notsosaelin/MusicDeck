@@ -1,6 +1,6 @@
 import { Collection, Result, Track, playedCollection } from "./api";
 import { player } from "./player";
-import { Store } from "./store";
+import { RecentlyUsed, Store } from "./store";
 
 /**
  * Panel navigation state, kept outside React so it survives the QAM closing, and in its own module
@@ -50,8 +50,11 @@ export const openInLibrary = (collection: Collection) => {
   panelTab.set({ tab: "library" });
 };
 
-/** Results are cached per view, so going back doesn't refetch. Cleared when switching service. */
-export const resultCache = new Map<string, Result<any>>();
+/**
+ * Results kept per view, so going back doesn't refetch; cleared when switching service. The 40 most
+ * recently used are kept (a long playlist's page is a few hundred KB).
+ */
+export const resultCache = new RecentlyUsed<Result<any>>(40);
 /** Bumped on invalidation so views that are open refetch instead of showing stale data. */
 export const dataVersion = new Store<{ v: number }>({ v: 0 });
 /** Plays a page's tracks and puts the page first in its source's "Jump back in" row. */

@@ -50,7 +50,7 @@ const EqCurve: FC<{ gains: number[]; enabled: boolean }> = ({ gains, enabled }) 
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 4, fontSize: 10, opacity: 0.6, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 4, fontSize: 11, opacity: 0.6, marginTop: 4 }}>
         {EQ_BANDS.map((hz) => (
           <div key={hz} style={{ flex: 1, textAlign: "center" }}>
             {formatBand(hz)}

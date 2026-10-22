@@ -26,6 +26,36 @@ export class Store<T> {
   };
 }
 
+/**
+ * A Map that keeps only the `limit` most recently used entries, for caches that would otherwise
+ * grow for as long as Steam runs.
+ */
+export class RecentlyUsed<V> {
+  private entries = new Map<string, V>();
+
+  constructor(private limit: number) {}
+
+  has = (key: string) => this.entries.has(key);
+
+  get(key: string): V | undefined {
+    if (!this.entries.has(key)) return undefined;
+    const value = this.entries.get(key)!;
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    return value;
+  }
+
+  set(key: string, value: V) {
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    while (this.entries.size > this.limit) this.entries.delete(this.entries.keys().next().value!);
+  }
+
+  delete = (key: string) => this.entries.delete(key);
+
+  clear = () => this.entries.clear();
+}
+
 export function useStore<T>(store: Store<T>): T {
   return useSyncExternalStore(store.subscribe, store.get);
 }

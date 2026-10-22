@@ -14,7 +14,6 @@ import asyncio
 import random
 import re
 import ssl
-import time
 from datetime import date
 from typing import Any, Optional
 from urllib.parse import quote
@@ -22,6 +21,7 @@ from urllib.parse import quote
 import aiohttp
 import certifi
 
+from ..cache import Cache
 from .. import models
 from .base import MusicService, ServiceError, StreamSource
 
@@ -36,6 +36,7 @@ BANDS = "collection:etree AND mediatype:collection"
 FORMATS = ["VBR MP3", "MP3", "64Kbps MP3", "Ogg Vorbis", "Flac"]
 METADATA_TTL = 3600
 LIST_TTL = 30 * 60
+KEPT = 200  # shows and lists kept in memory
 # archive.org identifiers: letters, digits, dots, dashes, underscores; starting with a letter or digit
 # (so ".." can't climb out of /download/<item>/)
 SAFE_ID = re.compile(r"^[A-Za-z0-9][\w.\-]*$")
@@ -78,10 +79,10 @@ class LiveMusicService(MusicService):
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.session: Optional[aiohttp.ClientSession] = None
-        self.shows: dict[str, tuple[float, dict[str, Any]]] = {}
-        self.lists: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self.shows: Cache[dict[str, Any]] = Cache(METADATA_TTL, KEPT)
+        self.lists: Cache[list[dict[str, Any]]] = Cache(LIST_TTL, KEPT)
         # how many results each list query had in all (a page shows the first `rows`)
-        self.totals: dict[str, int] = {}
+        self.totals: Cache[int] = Cache(LIST_TTL, KEPT)
 
     async def start(self) -> None:
         self.session = _session()
@@ -105,25 +106,23 @@ class LiveMusicService(MusicService):
     async def _search(self, query: str, sort: str, rows: int, cache: bool = True) -> list[dict[str, Any]]:
         key = f"{query}|{sort}|{rows}"
         hit = self.lists.get(key)
-        if cache and hit and time.time() - hit[0] < LIST_TTL:
-            return hit[1]
+        if cache and hit is not None:
+            return hit
         fields = ["identifier", "title", "creator", "date", "venue", "coverage", "item_count", "collection"]
         params = [("q", query), ("sort[]", sort), ("rows", rows), ("output", "json")] + [("fl[]", f) for f in fields]
         data = await self._json(SEARCH, params)
         docs = (data.get("response") or {}).get("docs") or []
-        self.lists[key] = (time.time(), docs)
-        self.totals[key] = (data.get("response") or {}).get("numFound") or len(docs)
-        return docs
+        self.totals.put(key, (data.get("response") or {}).get("numFound") or len(docs))
+        return self.lists.put(key, docs)
 
     async def _metadata(self, item: str) -> dict[str, Any]:
         hit = self.shows.get(item)
-        if hit and time.time() - hit[0] < METADATA_TTL:
-            return hit[1]
+        if hit:
+            return hit
         data = await self._json(METADATA.format(id=item))
         if not data or not data.get("metadata"):
             raise ServiceError("This show isn't on archive.org any more")
-        self.shows[item] = (time.time(), data)
-        return data
+        return self.shows.put(item, data)
 
     # --- mapping ---
 

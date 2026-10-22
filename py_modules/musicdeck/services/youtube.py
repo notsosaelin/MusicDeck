@@ -25,6 +25,7 @@ import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
+from ..cache import Cache
 from .. import debuglog, models, ytdlp_update
 from .base import MusicService, ServiceError, StreamSource
 
@@ -33,6 +34,8 @@ PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."
 QJS_NAME = "qjs"
 # Once the fast path has failed, go straight to QuickJS for a while instead of paying twice
 NEEDS_JS_FOR = 6 * 3600
+LYRICS_IDS_TTL = 6 * 3600
+LYRICS_IDS_KEPT = 1000
 # opus (itag 251, ~160 kbps) first, then AAC; both play natively in Steam's Chromium
 AUDIO_FORMAT = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio"
 
@@ -207,7 +210,8 @@ class YouTubeService(MusicService):
         self._ytm = None
         self._ytm_lock = threading.Lock()
         self._needs_js_until = 0.0
-        self._lyrics_ids: dict[str, Optional[str]] = {}
+        # where each track's lyrics are (None: it has none), learnt from its watch playlist
+        self._lyrics_ids: Cache[Optional[str]] = Cache(LYRICS_IDS_TTL, LYRICS_IDS_KEPT)
         self.worker = YtdlpWorker(runtime_dir)
         self.update_status = ""
         self.qjs_path = next((p for p in (os.path.join(runtime_dir, "bin", QJS_NAME),
@@ -428,14 +432,14 @@ class YouTubeService(MusicService):
 
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
         data = await self._run(self.ytm.get_watch_playlist, videoId=track["id"], radio=True, limit=50)
-        self._lyrics_ids[track["id"]] = data.get("lyrics")
+        self._lyrics_ids.put(track["id"], data.get("lyrics"))
         return [t for t in self._tracks(data.get("tracks")) if t["id"] != track["id"]]
 
     async def lyrics(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
         browse_id = self._lyrics_ids.get(track["id"])
         if track["id"] not in self._lyrics_ids:
             data = await self._run(self.ytm.get_watch_playlist, videoId=track["id"], limit=1)
-            browse_id = self._lyrics_ids[track["id"]] = data.get("lyrics")
+            browse_id = self._lyrics_ids.put(track["id"], data.get("lyrics"))
         if not browse_id:
             return None
         found = None

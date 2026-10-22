@@ -16,6 +16,7 @@ from urllib.parse import urljoin, urlparse
 import aiohttp
 import certifi
 
+from ..cache import Cache
 from .. import lyrics, models
 from .base import MusicService, ServiceError, StreamSource
 
@@ -30,6 +31,7 @@ GENRES = [("electronic", "Electronic"), ("rock", "Rock"), ("hip-hop-rap", "Hip-h
           ("metal", "Metal"), ("ambient", "Ambient"), ("jazz", "Jazz"), ("folk", "Folk")]
 HOME_GENRES = 4
 PAGE_TTL = 15 * 60  # stream links in album data are signed and expire; re-read pages after this
+PAGES_KEPT = 200
 TRALBUM = re.compile(r'data-tralbum="([^"]+)"')
 ENTITY = re.compile(r"&(#x[0-9a-fA-F]+|#\d+|quot|amp|lt|gt|apos);")
 NAMED = {"quot": '"', "amp": "&", "lt": "<", "gt": ">", "apos": "'"}
@@ -69,7 +71,7 @@ class BandcampService(MusicService):
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.session: Optional[aiohttp.ClientSession] = None
-        self.pages: dict[str, tuple[float, dict[str, Any]]] = {}
+        self.pages: Cache[dict[str, Any]] = Cache(PAGE_TTL, PAGES_KEPT)
 
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
@@ -108,17 +110,14 @@ class BandcampService(MusicService):
         """The album (or single track) data Bandcamp's own player uses, from its page."""
         url = _clean_url(url)
         hit = self.pages.get(url)
-        if hit and time.time() - hit[0] < PAGE_TTL:
-            return hit[1]
+        if hit:
+            return hit
         match = TRALBUM.search(await self._text(url))
         if not match:
             raise ServiceError("Bandcamp changed its page layout; MusicDeck needs an update")
         data = json.loads(_unescape(match.group(1)))
         data["url"] = url
-        if len(self.pages) > 200:
-            self.pages.clear()
-        self.pages[url] = (time.time(), data)
-        return data
+        return self.pages.put(url, data)
 
     # --- mapping ---
 

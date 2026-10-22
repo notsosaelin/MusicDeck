@@ -61,8 +61,17 @@ out, as NewPipe does: nothing ties your listening to an identity, and there's no
 using an unofficial client. Your playlists and favourites for those stay on the Deck.
 
 **Passwords are never stored.** Navidrome passwords become Subsonic tokens and Jellyfin, Emby and
-Audiobookshelf passwords become access tokens on save (or skip the password with Jellyfin's Quick Connect). Plex signs in with a code
-entered at plex.tv/link. Qobuz, TIDAL and Spotify sign in on their own websites, in Steam's browser, and MusicDeck only receives the resulting tokens.
+Audiobookshelf passwords become access tokens on save (or skip the password with Jellyfin's Quick Connect).
+Plex signs in with a code entered at plex.tv/link. Qobuz, TIDAL and Spotify sign in on their own websites, in
+Steam's browser, and MusicDeck only receives the resulting tokens.
+
+**Where those tokens live.** In MusicDeck's settings file, which only your user account can read (mode 600),
+and not encrypted: SteamOS's game mode has no system keyring to lock them with, and a key kept beside them
+would protect nothing. Anything running as your user, or someone signed in to your Deck (SSH included), can
+read them, as with every other app's saved sign-ins. They never reach the Steam UI, and backups leave them out.
+Removing a source deletes its tokens; signing out on the service's website revokes them.
+
+**English only.** The interface isn't translated yet; text from the sources (titles, lyrics) shows as they send it.
 
 **Spotify tip:** Spotify's public Web API app is shared by every client that uses it and is often
 rate-limited. Most of MusicDeck's Spotify browsing avoids it, but search and your listening history use it.

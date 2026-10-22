@@ -958,7 +958,7 @@ async def run():
         await icy_site.start()
         icy_port = icy_site._server.sockets[0].getsockname()[1]
         await rs.start()
-        rs.stations["s1"] = (time.time(), {"stationuuid": "s1", "url_resolved": f"http://127.0.0.1:{icy_port}/stream"})
+        rs.stations.put("s1", {"stationuuid": "s1", "url_resolved": f"http://127.0.0.1:{icy_port}/stream"})
         check(await rs.on_air("s1") == {"text": "Artist – Song", "title": "Song", "artist": "Artist", "art": None},
               "song on air read from ICY metadata")
         from musicdeck.services.radio import parse_on_air
@@ -982,9 +982,9 @@ async def run():
               == "NICKI MINAJ – Super Bass", "title= and artist= tags")
         check(parse_on_air('title="Z100 Preset 4",artist="",url="song_spot="F" MediaBaseId="0"') is None,
               "a jingle behind an unclosed url= tag isn't a song")
-        rs.stations["s3"] = (time.time(), {"stationuuid": "s3", "url_resolved": f"http://127.0.0.1:{icy_port}/stream?enc=latin1"})
+        rs.stations.put("s3", {"stationuuid": "s3", "url_resolved": f"http://127.0.0.1:{icy_port}/stream?enc=latin1"})
         check((await rs.on_air("s3"))["artist"] == "Brüllová", "Latin-1 titles read as Latin-1")
-        rs.stations["s2"] = (time.time(), {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})
+        rs.stations.put("s2", {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})
         check(await rs.on_air("s2") is None, "HLS stations have no ICY title")
         await rs.stop()
         await icy_runner.cleanup()
@@ -1821,6 +1821,21 @@ async def run():
         bad = await plugin.test_service(saved["data"]["id"])
         check(not bad["ok"], f"unreachable server reports an error: {bad.get('error')}")
 
+        print("cache")
+        from musicdeck.cache import Cache
+        c = Cache(ttl=60, size=3)
+        for k in "abc":
+            c.put(k, k.upper())
+        c.get("a")  # now the most recently used
+        c.put("d", "D")
+        check("b" not in c and c.get("a") == "A" and len(c) == 3, "past its size, the least recently used goes")
+        c.put("none", None)
+        check("none" in c and c.get("none", "missing") is None, "None is a value, told apart from missing")
+        c.put("short", 1, ttl=-1)
+        check("short" not in c and c.get("short") is None, "an entry past its own lifetime is gone")
+        c.drop(lambda k: k in ("a", "d"))
+        check("a" not in c and "d" not in c, "dropping what a change made stale")
+
         print("backups")
         sub_id = saved["data"]["id"]
         mix = await plugin.create_playlist(sub_id, "Road trip", [{"id": "s1", "title": "One", "artist": "A"}])
@@ -1860,7 +1875,7 @@ async def run():
         again = await plugin.import_backup(exported["data"])
         check(again["ok"] and again["data"].startswith("0 sources and 0 playlists")
               and sum(1 for s in plugin.settings.services() if s["id"] == sub_id) == 1, "restoring twice adds nothing")
-        resigned = await plugin.save_service({"id": sub_id, "type": "subsonic", "name": "Home",
+        await plugin.save_service({"id": sub_id, "type": "subsonic", "name": "Home",
                                               "config": {"url": "http://127.0.0.1:9", "username": "me", "password": "pw"}})
         check("sign_in_again" not in next(s for s in plugin.settings.services() if s["id"] == sub_id)["config"],
               "signing in again clears the mark")

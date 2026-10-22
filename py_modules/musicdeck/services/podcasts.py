@@ -24,6 +24,7 @@ from typing import Any, Optional
 import aiohttp
 import certifi
 
+from ..cache import Cache
 from .. import models
 from ..feeds import parse_feed
 from ..settings import load_json, save_json
@@ -34,6 +35,7 @@ LOOKUP = "https://itunes.apple.com/lookup"
 CHARTS = "https://rss.marketingtools.apple.com/api/v2/{country}/podcasts/top/{count}/podcasts.json"
 USER_AGENT = "MusicDeck/0.1.0"
 FEED_TTL = 30 * 60
+FEEDS_KEPT = 100  # a parsed feed can be large (hundreds of episodes)
 CHARTS_TTL = 6 * 3600
 CHARTS_SIZE = 25
 NEW_EPISODES = 20
@@ -91,7 +93,7 @@ class PodcastService(MusicService):
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.session: Optional[aiohttp.ClientSession] = None
-        self.feeds: dict[str, tuple[float, dict[str, Any]]] = {}
+        self.feeds: Cache[dict[str, Any]] = Cache(FEED_TTL, FEEDS_KEPT)
         self.charts: tuple[float, list[dict[str, Any]]] = (0, [])
         self.progress_path = os.path.join(runtime_dir, f"podcasts-{instance_id}-progress.json")
         self.progress: dict[str, dict[str, Any]] = load_json(self.progress_path)
@@ -129,8 +131,8 @@ class PodcastService(MusicService):
 
     async def _feed(self, url: str) -> dict[str, Any]:
         hit = self.feeds.get(url)
-        if hit and time.time() - hit[0] < FEED_TTL:
-            return hit[1]
+        if hit:
+            return hit
         assert self.session
         try:
             async with self.session.get(url) as resp:
@@ -141,8 +143,7 @@ class PodcastService(MusicService):
             raise ServiceError("Couldn't reach this podcast's feed") from e
         except ValueError as e:
             raise ServiceError("That address isn't a podcast feed") from e
-        self.feeds[url] = (time.time(), podcast)
-        return podcast
+        return self.feeds.put(url, podcast)
 
     async def _charts(self) -> list[dict[str, Any]]:
         if time.time() - self.charts[0] < CHARTS_TTL:

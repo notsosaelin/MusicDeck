@@ -17,6 +17,7 @@ from typing import Any, Optional
 import aiohttp
 import certifi
 
+from ..cache import Cache
 from .. import debuglog, models
 from .base import MusicService, ServiceError, StreamSource
 
@@ -24,6 +25,7 @@ DIRECTORY = "https://all.api.radio-browser.info"
 USER_AGENT = "MusicDeck/0.1.0"  # Radio Browser asks clients to identify themselves
 SERVER_TTL = 6 * 3600
 STATION_TTL = 3600
+STATIONS_KEPT = 1000
 LIST_SIZE = 50
 STREAM_TITLE = re.compile(rb"StreamTitle='(.*?)';", re.S)
 STREAM_URL = re.compile(rb"StreamUrl='(.*?)';", re.S)
@@ -85,7 +87,7 @@ class RadioService(MusicService):
         self.session: Optional[aiohttp.ClientSession] = None
         self.server = ""
         self.server_at = 0.0
-        self.stations: dict[str, tuple[float, dict[str, Any]]] = {}
+        self.stations: Cache[dict[str, Any]] = Cache(STATION_TTL, STATIONS_KEPT)
 
     @classmethod
     def prepare_config(cls, config: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -131,20 +133,18 @@ class RadioService(MusicService):
 
     async def _stations(self, path: str, **params: Any) -> list[dict[str, Any]]:
         stations = await self._get(path, limit=params.pop("limit", LIST_SIZE), **params)
-        now = time.time()
         for s in stations or []:
-            self.stations[s["stationuuid"]] = (now, s)
+            self.stations.put(s["stationuuid"], s)
         return [self._station(s) for s in stations or [] if s.get("url_resolved") or s.get("url")]
 
     async def _station_info(self, uuid: str) -> dict[str, Any]:
         hit = self.stations.get(uuid)
-        if hit and time.time() - hit[0] < STATION_TTL:
-            return hit[1]
+        if hit:
+            return hit
         found = await self._get("/json/stations/byuuid", uuids=uuid)
         if not found:
             raise ServiceError("This station is no longer listed")
-        self.stations[uuid] = (time.time(), found[0])
-        return found[0]
+        return self.stations.put(uuid, found[0])
 
     # --- mapping ---
 
