@@ -1,0 +1,11 @@
+{
+  "name": "MusicDeck",
+  "author": "notsosaelin",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["music", "audio", "navidrome", "soundtracks"],
+    "description": "Play music from local files, Navidrome/Subsonic servers and streaming services from the Soundtracks tab of the Quick Access Menu.",
+    "image": ""
+  }
+}

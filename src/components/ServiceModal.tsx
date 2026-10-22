@@ -1,0 +1,383 @@
+import { openFilePicker } from "@decky/api";
+import { notify } from "../notify";
+import {
+  DialogBody,
+  DialogButton,
+  DialogHeader,
+  DropdownItem,
+  Focusable,
+  ModalRoot,
+  TextField,
+  ToggleField,
+  showModal,
+} from "@decky/ui";
+import { browseThenReturn, readClipboard, signIn } from "../signIn";
+import { FC, useState } from "react";
+import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
+import { DialogActions } from "./common";
+import { ServiceDraft, ServiceInfo, saveService, testService } from "../api";
+import { pluginState, refreshState } from "../store";
+import { invalidateBrowserCache } from "../nav";
+
+// FileSelectionType.FOLDER from @decky/api (a const enum, which isolated builds can't import)
+const SELECT_FOLDER = 1;
+
+const Field: FC<{ label: string; children: any }> = ({ label, children }) => (
+  <div style={{ marginBottom: 12 }}>
+    <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>{label}</div>
+    {children}
+  </div>
+);
+
+const LocalFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+}> = ({ draft, setConfig }) => {
+  const paths: string[] = draft.config.paths ?? [];
+  const addFolder = async () => {
+    try {
+      // start in the user's home: not every distro's user is "deck"
+      const home = pluginState.get()?.user_home || "/home";
+      const res = await openFilePicker(SELECT_FOLDER, paths[paths.length - 1] ?? home, false, true);
+      if (res?.realpath && !paths.includes(res.realpath))
+        setConfig({ ...draft.config, paths: [...paths, res.realpath] });
+    } catch {
+      // picker cancelled
+    }
+  };
+  return (
+    <Field label="Music folders (scanned recursively)">
+      {paths.map((p) => (
+        <Focusable
+          key={p}
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginBottom: 4,
+          }}
+          flow-children="horizontal"
+        >
+          <div
+            style={{
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {p}
+          </div>
+          <DialogButton
+            style={{ minWidth: 0, width: 40, padding: "6px 0" }}
+            onClick={() =>
+              setConfig({
+                ...draft.config,
+                paths: paths.filter((x) => x !== p),
+              })
+            }
+          >
+            <FaTimes />
+          </DialogButton>
+        </Focusable>
+      ))}
+      <DialogButton onClick={addFolder}>
+        <FaFolderPlus style={{ marginRight: 8 }} /> Add folder
+      </DialogButton>
+    </Field>
+  );
+};
+
+const TIDAL_QUALITIES = [
+  { data: "LOW", label: "AAC 96 kbps" },
+  { data: "HIGH", label: "AAC 320 kbps" },
+  { data: "LOSSLESS", label: "FLAC 16-bit / 44.1 kHz (CD)" },
+];
+
+/** TIDAL: device login, approved on link.tidal.com in Steam's browser. */
+const TidalFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  signedIn: boolean;
+  closeModal?: () => void;
+}> = ({ draft, setConfig, signedIn, closeModal }) => (
+  <>
+    <Field label="Account">
+      <DialogButton
+        onClick={() => {
+          closeModal?.();
+          signIn("tidal", draft);
+        }}
+      >
+        {signedIn
+          ? `Signed in${draft.config.username ? ` as ${draft.config.username}` : ""} · sign in again`
+          : "Sign in with TIDAL"}
+      </DialogButton>
+      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+        Opens TIDAL's page to approve this device and comes back here by itself. MusicDeck never sees your password.
+      </div>
+    </Field>
+    <DropdownItem
+      label="Streaming quality"
+      rgOptions={TIDAL_QUALITIES}
+      selectedOption={draft.config.quality ?? "LOSSLESS"}
+      onChange={(o) => setConfig({ ...draft.config, quality: o.data })}
+    />
+  </>
+);
+
+const QOBUZ_QUALITIES = [
+  { data: 5, label: "MP3 320 kbps" },
+  { data: 6, label: "FLAC 16-bit / 44.1 kHz (CD)" },
+  { data: 7, label: "FLAC 24-bit / 96 kHz" },
+  { data: 27, label: "FLAC 24-bit / 192 kHz" },
+];
+
+/**
+ * Qobuz signs in on qobuz.com itself (OAuth) in Steam's browser, so the password never passes
+ * through MusicDeck. The dialog closes right away; signInToQobuz brings the user back when done.
+ */
+const QobuzFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  signedIn: boolean;
+  closeModal?: () => void;
+}> = ({ draft, setConfig, signedIn, closeModal }) => (
+  <>
+    <Field label="Account">
+      <DialogButton
+        onClick={() => {
+          closeModal?.();
+          signIn("qobuz", draft);
+        }}
+      >
+        {signedIn
+          ? `Signed in${draft.config.email ? ` as ${draft.config.email}` : ""} · sign in again`
+          : "Sign in with Qobuz"}
+      </DialogButton>
+      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+        Opens Qobuz's sign-in page and comes back here by itself. MusicDeck never sees your password.
+      </div>
+    </Field>
+    <DropdownItem
+      label="Streaming quality"
+      rgOptions={QOBUZ_QUALITIES}
+      selectedOption={draft.config.quality ?? 6}
+      onChange={(o) => setConfig({ ...draft.config, quality: o.data })}
+    />
+  </>
+);
+
+const SPOTIFY_SHARED_APP = "d420a117a32841c2b3474932e49fb54b";
+const SPOTIFY_DASHBOARD = "https://developer.spotify.com/dashboard";
+/** A Spotify client ID: 32 hex digits, wherever it sits in what was copied. */
+const findClientId = (text: string | null) => text?.match(/\b[0-9a-f]{32}\b/i)?.[0].toLowerCase() ?? null;
+
+const SPOTIFY_BITRATES = [
+  { data: 96, label: "Low (96 kbps)" },
+  { data: 160, label: "Normal (160 kbps)" },
+  { data: 320, label: "Very high (320 kbps)" },
+];
+
+/** Spotify: two consents on Spotify's own pages (playback, then library), handled as one sign-in. */
+const SpotifyFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  signedIn: boolean;
+  closeModal?: () => void;
+  openDashboard: () => void;
+}> = ({ draft, setConfig, signedIn, closeModal, openDashboard }) => {
+  const clientId = (draft.config.client_id ?? "").trim();
+  // a refresh token only works with the app that issued it
+  const appChanged = signedIn && (clientId || SPOTIFY_SHARED_APP) !== (draft.config.signed_with ?? SPOTIFY_SHARED_APP);
+  return (
+    <>
+      <Field label="Client ID (optional)">
+        <TextField
+          value={draft.config.client_id ?? ""}
+          placeholder="Shared app"
+          // a paste can bring text along with the ID; keep just the ID
+          onChange={(e) => setConfig({ ...draft.config, client_id: findClientId(e.target.value) ?? e.target.value })}
+        />
+        <div style={{ fontSize: 12, opacity: 0.6, margin: "6px 0 10px" }}>
+          Your own app gets its own rate limit instead of sharing one. Create an app with the redirect URI{" "}
+          <b>http://127.0.0.1:8989/login</b> and Web API access, copy its Client ID and paste it here, then sign in
+          again.
+        </div>
+        <DialogButton onClick={openDashboard}>
+          <FaExternalLinkAlt style={{ marginRight: 8 }} /> Open Spotify Developer Dashboard
+        </DialogButton>
+      </Field>
+      <Field label="Account">
+        <DialogButton
+          onClick={() => {
+            closeModal?.();
+            signIn("spotify", draft);
+          }}
+        >
+          {appChanged
+            ? "Sign in again to use this app"
+            : signedIn
+              ? `Signed in${draft.config.display_name ? ` as ${draft.config.display_name}` : ""} · sign in again`
+              : "Sign in with Spotify"}
+        </DialogButton>
+        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+          Opens Spotify's sign-in pages and comes back here by itself. Needs Spotify Premium. MusicDeck never sees your
+          password.
+        </div>
+      </Field>
+      <DropdownItem
+        label="Streaming quality"
+        rgOptions={SPOTIFY_BITRATES}
+        selectedOption={draft.config.bitrate ?? 320}
+        onChange={(o) => setConfig({ ...draft.config, bitrate: o.data })}
+      />
+    </>
+  );
+};
+
+const SubsonicFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  hasCredentials: boolean;
+}> = ({ draft, setConfig, hasCredentials }) => (
+  <>
+    <Field label="Server URL">
+      <TextField
+        value={draft.config.url ?? ""}
+        placeholder="https://music.example.com"
+        onChange={(e) => setConfig({ ...draft.config, url: e.target.value })}
+      />
+    </Field>
+    <Field label="Username">
+      <TextField
+        value={draft.config.username ?? ""}
+        onChange={(e) => setConfig({ ...draft.config, username: e.target.value })}
+      />
+    </Field>
+    <Field label="Password">
+      <TextField
+        bIsPassword
+        value={draft.config.password ?? ""}
+        placeholder={hasCredentials ? "Unchanged" : ""}
+        onChange={(e) => setConfig({ ...draft.config, password: e.target.value })}
+      />
+    </Field>
+  </>
+);
+
+export const ServiceModal: FC<{
+  closeModal?: () => void;
+  type: string;
+  typeName: string;
+  existing?: ServiceInfo;
+  /** the form as it was, when coming back from the browser */
+  initialDraft?: ServiceDraft;
+}> = ({ closeModal, type, typeName, existing, initialDraft }) => {
+  const [draft, setDraft] = useState<ServiceDraft>(
+    initialDraft ??
+      (existing
+        ? {
+            id: existing.id,
+            type,
+            name: existing.name,
+            config: { ...existing.config },
+          }
+        : { type, name: "", config: type === "local" ? { paths: [] } : {} }),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const setConfig = (config: Record<string, any>) => setDraft({ ...draft, config });
+
+  // The dialog would sit over the browser, so it closes and comes back, as filled in, afterwards.
+  // A client ID copied in the browser is picked up from the clipboard on the way back.
+  const openDashboard = () => {
+    closeModal?.();
+    browseThenReturn(SPOTIFY_DASHBOARD, async () => {
+      let back = draft;
+      const id = !draft.config.client_id && findClientId(await readClipboard());
+      if (id) {
+        back = { ...draft, config: { ...draft.config, client_id: id } };
+        notify("Spotify", "Client ID pasted from the clipboard");
+      }
+      showModal(<ServiceModal type={type} typeName={typeName} existing={existing} initialDraft={back} />);
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await saveService(draft);
+      if (!saved.ok) return setError(saved.error);
+      const test = await testService(saved.data.id);
+      await refreshState();
+      invalidateBrowserCache();
+      notify(saved.data.name, test.ok ? test.data : `Saved, but: ${test.error}`);
+      closeModal?.();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogHeader>{existing ? `Edit ${existing.name}` : `Add ${typeName}`}</DialogHeader>
+      <DialogBody>
+        <Field label="Name">
+          <TextField
+            value={draft.name}
+            placeholder={typeName}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          />
+        </Field>
+        {type === "local" && <LocalFields draft={draft} setConfig={setConfig} />}
+        {type === "subsonic" && (
+          <SubsonicFields draft={draft} setConfig={setConfig} hasCredentials={!!existing?.has_credentials} />
+        )}
+        {type === "qobuz" && (
+          <QobuzFields
+            draft={draft}
+            setConfig={setConfig}
+            signedIn={!!existing?.has_credentials}
+            closeModal={closeModal}
+          />
+        )}
+        {type === "tidal" && (
+          <TidalFields
+            draft={draft}
+            setConfig={setConfig}
+            signedIn={!!existing?.has_credentials}
+            closeModal={closeModal}
+          />
+        )}
+        {type === "spotify" && (
+          <SpotifyFields
+            draft={draft}
+            setConfig={setConfig}
+            signedIn={!!existing?.has_credentials}
+            closeModal={closeModal}
+            openDashboard={openDashboard}
+          />
+        )}
+        {type === "youtube" && (
+          <ToggleField
+            label="Include all YouTube videos in search"
+            description="Also finds uploads YouTube Music doesn't label as music. No account needed."
+            checked={draft.config.include_videos !== false}
+            onChange={(on) => setConfig({ ...draft.config, include_videos: on })}
+          />
+        )}
+        {error && <div style={{ color: "#ff6b6b", marginTop: 12 }}>{error}</div>}
+      </DialogBody>
+      <DialogActions
+        primary={saving ? "Saving…" : "Save"}
+        onPrimary={save}
+        primaryDisabled={saving}
+        onCancel={closeModal}
+      />
+    </ModalRoot>
+  );
+};

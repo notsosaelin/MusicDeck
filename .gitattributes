@@ -1,0 +1,4 @@
+# Everything runs on Linux (SteamOS): keep LF line endings on every platform
+* text=auto eol=lf
+*.png binary
+*.jpg binary
