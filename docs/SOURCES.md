@@ -41,7 +41,7 @@ source (`MusicService.remove`).
   mutagen. The index is cached in `local-<id>.json` and rebuilt when `INDEX_VERSION` changes or the
   user rescans; files whose size and mtime are unchanged are not re-read.
 - **Art**: embedded pictures (extracted to `art-cache/`) or `cover.jpg`-style files next to the music.
-- **Lyrics**: `.lrc` next to the file, embedded lyric tags, then LRCLIB.
+- **Lyrics**: `.lrc` next to the file, embedded lyric tags, then the lyrics sites (see below).
 - **Playlists**: `.m3u`/`.m3u8` files in the library (relative paths resolved against the playlist).
 - **Favourites**: `local-<id>-favourites.json` on the Deck. **Radio**: same artist and same genre
   first, then the rest of the library, shuffled.
@@ -125,7 +125,7 @@ source (`MusicService.remove`).
   - playlist queries aren't filtered with `MediaTypes=Audio` (`PLAYLIST_FILTER`): Emby treats it as
     "or" and returns every item in the library;
   - no Quick Connect (username and password only, `SIGN_IN_HINT`);
-  - `/Audio/{id}/Lyrics` errors, so lyrics come from LRCLIB.
+  - `/Audio/{id}/Lyrics` errors, so lyrics come from the lyrics sites.
 - **Art**: Emby only has art it found (a `cover.jpg`/`folder.jpg` next to the files, or embedded
   pictures); an album without either shows the placeholder, as it does in Emby's own apps.
 - Tested against Emby Server 4.10.2 in a container, with a music library and a playlist.
@@ -317,6 +317,25 @@ These were investigated and can't be supported without DRM circumvention:
 - **Apple Music**: Widevine-only streams; Steam's browser engine has no CDM. Cider and Sidra are
   separate CastLabs Electron apps for this reason.
 - **Deezer, Amazon Music**: same situation.
+
+## Lyrics sites (`lyrics.py`)
+
+Asked for any source without lyrics of its own (or with none for the track); neither needs an
+account. Both are asked at once; LRCLIB's synced lyrics win, then NetEase's, then LRCLIB's unsynced.
+
+- **LRCLIB** (lrclib.net): `/api/get` (exact title, artist, album, ±2 s), then `/api/search`. One
+  retry after a server error or dropped connection; not after 429 (rate limited).
+- **NetEase Cloud Music**: `/api/search/get`, then `/api/song/lyric` (as the
+  [syncedlyrics](https://github.com/moehmeni/syncedlyrics) library does). NetEase lists a song many
+  times, so matches (title, artist, length within 3 s; not instrumental/karaoke) are ranked and the
+  best three tried. Credit lines are removed (`作词 : …` anywhere; `Label: value` stamped in the
+  first second). `pureMusic` means instrumental: no lyrics. Asked **without cookies**: once its
+  `NMTID` cookie comes back, NetEase cuts results to 10 and the right versions drop out (the shared
+  session uses a `DummyCookieJar`).
+- No lyrics is only reported when every site said so; one that couldn't be asked makes it an
+  error, which the UI doesn't remember, so the next look tries again.
+- Musixmatch was considered and left out: its guest tokens come back blank and its terms forbid
+  this use.
 
 ## Candidates not implemented yet
 

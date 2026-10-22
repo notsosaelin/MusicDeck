@@ -927,41 +927,102 @@ async def run():
         print("lyrics lookups")
         from aiohttp import web as lrweb
         from musicdeck import lyrics as lyrmod
-        answers = {"status": 429}
+        # LRCLIB: "status" for every request, or a list of statuses taken one per request
+        answers = {"status": 429, "plain": False}
+        lrclib_asked = []
+        netease = {"mode": "none", "asked": []}
 
         async def lrclib(request):
-            if answers["status"] == 404 and request.path == "/api/search":
+            lrclib_asked.append(request.path)
+            status = answers["status"].pop(0) if isinstance(answers["status"], list) else answers["status"]
+            if status == 404 and request.path == "/api/search":
                 return lrweb.json_response([])  # how LRCLIB says it found nothing
-            if answers["status"] != 200:
-                return lrweb.Response(status=answers["status"])
+            if status != 200:
+                return lrweb.Response(status=status)
             if request.path == "/api/get":
+                if answers["plain"]:
+                    return lrweb.json_response({"plainLyrics": "Hello\nWorld", "instrumental": False})
                 return lrweb.json_response({"syncedLyrics": "[00:01.00]Hello\n[00:02.50]World", "instrumental": False})
             return lrweb.json_response([])
+
+        async def netease_api(request):
+            netease["asked"].append((request.path, dict(request.query), request.headers.get("Cookie")))
+            mode = netease["mode"]
+            if mode == "down":
+                return lrweb.Response(status=503)
+            if request.path == "/ne/search/get":
+                if mode == "none":
+                    return lrweb.json_response({"result": {"songs": []}})
+                song = lambda id, name, artist, ms: {"id": id, "name": name, "artists": [{"name": artist}], "duration": ms}  # noqa: E731
+                return lrweb.json_response({"result": {"songs": [
+                    song(1, "Song", "Someone Else", 100_000),          # a cover
+                    song(2, "Song (Instrumental)", "Artist", 100_000),  # no singing
+                    song(3, "Song (Live)", "Artist", 160_000),          # too long
+                    song(4, "Song", "Artist", 101_000),                 # the song, but this upload has no lyrics
+                    song(5, "Song", "Artist", 99_000),                  # the song
+                ]}})
+            if mode == "instrumental":
+                return lrweb.json_response({"pureMusic": True, "lrc": {"lyric": ""}})
+            if request.query.get("id") != "5":
+                return lrweb.json_response({"lrc": {"lyric": ""}})
+            return lrweb.json_response({"lrc": {"lyric": "[00:00.00] 作词 : Writer\n[00:00.10]Artist: Band\n[00:00.20]\n"
+                                                         "[00:03.00]Sung: with a colon\n[00:05.00]Last line"}})
         lr_app = lrweb.Application()
         lr_app.router.add_get("/api/get", lrclib)
         lr_app.router.add_get("/api/search", lrclib)
+        lr_app.router.add_get("/ne/search/get", netease_api)
+        lr_app.router.add_get("/ne/song/lyric", netease_api)
         lr_runner = lrweb.AppRunner(lr_app)
         await lr_runner.setup()
         lr_site = lrweb.TCPSite(lr_runner, "127.0.0.1", 0)
         await lr_site.start()
-        real_lrclib = lyrmod.LRCLIB
-        lyrmod.LRCLIB = f"http://127.0.0.1:{lr_site._server.sockets[0].getsockname()[1]}/api"
+        lr_base = f"http://127.0.0.1:{lr_site._server.sockets[0].getsockname()[1]}"
+        real_sites = (lyrmod.LRCLIB, lyrmod.NETEASE, lyrmod.RETRY_DELAY)
+        lyrmod.LRCLIB, lyrmod.NETEASE, lyrmod.RETRY_DELAY = lr_base + "/api", lr_base + "/ne", 0
         song = {"id": "nope", "title": "Song", "artist": "Artist", "duration": 100}
+        texts = lambda r: [line["text"] for line in r["data"]["lines"]]  # noqa: E731
         try:
             r = await plugin.get_lyrics(sid, song)
-            check(not r["ok"] and "429" in r["error"], "LRCLIB refusing (rate limited) is an error, not \"no lyrics\"")
+            check(not r["ok"] and "429" in r["error"] and lrclib_asked.count("/api/get") == 1,
+                  "LRCLIB rate limiting: an error, not \"no lyrics\" (and not asked again straight away)")
             answers["status"] = 404
             r = await plugin.get_lyrics(sid, song)
-            check(r == {"ok": True, "data": None}, "LRCLIB not knowing the song: no lyrics")
+            check(r == {"ok": True, "data": None}, "no site knows the song: no lyrics")
             answers["status"] = 200
             r = await plugin.get_lyrics(sid, song)
-            check(r["ok"] and r["data"]["synced"] and [line["text"] for line in r["data"]["lines"]] == ["Hello", "World"],
-                  "found lyrics are parsed")
+            check(r["ok"] and r["data"]["synced"] and r["data"]["source"] == "LRCLIB" and texts(r) == ["Hello", "World"],
+                  "LRCLIB's synced lyrics are parsed")
+            answers["status"], netease["mode"] = [503, 200, 200], "none"
+            r = await plugin.get_lyrics(sid, song)
+            check(r["ok"] and r["data"]["source"] == "LRCLIB", "a busy LRCLIB (503) is asked once more")
+            answers["status"], netease["mode"] = 503, "lyrics"
+            netease["asked"].clear()
+            r = await plugin.get_lyrics(sid, song)
+            check(r["ok"] and r["data"]["source"] == "NetEase" and r["data"]["synced"]
+                  and texts(r) == ["Sung: with a colon", "Last line"],
+                  "LRCLIB down: NetEase's lyrics, credits taken off the start (a sung colon kept)")
+            lyric_ids = [q.get("id") for path, q, _ in netease["asked"] if path == "/ne/song/lyric"]
+            check(lyric_ids == ["4", "5"],
+                  "NetEase: the cover, instrumental and live take passed over; an upload without lyrics, then the next")
+            check(all(cookie is None for _, _, cookie in netease["asked"]), "NetEase is asked without cookies")
+            answers["status"], answers["plain"] = 200, True
+            r = await plugin.get_lyrics(sid, song)
+            check(r["ok"] and r["data"]["source"] == "NetEase", "LRCLIB only has unsynced lyrics: NetEase's synced ones win")
+            netease["mode"] = "none"
+            r = await plugin.get_lyrics(sid, song)
+            check(r["ok"] and r["data"]["source"] == "LRCLIB" and not r["data"]["synced"],
+                  "...and LRCLIB's unsynced ones when NetEase has none")
+            answers["status"], answers["plain"], netease["mode"] = 404, False, "instrumental"
+            r = await plugin.get_lyrics(sid, song)
+            check(r == {"ok": True, "data": None}, "NetEase knowing it as instrumental: no lyrics")
+            netease["mode"] = "down"
+            r = await plugin.get_lyrics(sid, song)
+            check(not r["ok"], "LRCLIB has none but NetEase can't be asked: an error, so it's tried again later")
             await lr_runner.cleanup()
             r = await plugin.get_lyrics(sid, song)
-            check(not r["ok"] and "reach" in r["error"], "LRCLIB unreachable is an error")
+            check(not r["ok"] and "reach" in r["error"], "neither site reachable: an error")
         finally:
-            lyrmod.LRCLIB = real_lrclib
+            lyrmod.LRCLIB, lyrmod.NETEASE, lyrmod.RETRY_DELAY = real_sites
 
         print("jump back in")
         titles_of = lambda home: [s["title"] for s in home]  # noqa: E731

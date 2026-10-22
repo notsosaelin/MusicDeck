@@ -86,7 +86,9 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
   subscribing, home rows, resuming and marking played, refused ids;
 - the Live Music Archive against a fake archive.org: home rows (on this day really today), shows,
   bands with true counts, radio, query-safe search, ids that try to climb out of an item;
-- lyrics lookups (LRCLIB down or rate limited is an error, not "no lyrics"), "Jump back in" and
+- lyrics lookups against a fake LRCLIB and NetEase (retries, the backup, synced over unsynced,
+  matching past covers and instrumentals, credits stripped; a site that can't be asked is an
+  error, not "no lyrics"), "Jump back in" and
   recent searches, game music;
 - Steam soundtracks against a fake Steam folder: libraries, manifests, DLC soundtracks inside a
   game, duplicate formats, installs finishing, art, the running-game row;

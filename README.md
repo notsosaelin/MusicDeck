@@ -20,8 +20,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   search shows your recent searches.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
   album from a source as your own.
-- **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net), in the Lyrics tab or full
-  screen over the album art.
+- **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net) with NetEase Cloud Music as a
+  backup, following the song in the Lyrics tab or full screen over the album art.
 - **Sound:** 10-band EQ with presets, volume levelling from ReplayGain data, gapless playback, an
   optional crossfade, and endless radio when the queue runs out.
 - **Live radio** with the song on air shown as it plays.
@@ -136,7 +136,7 @@ Built on the work of [librespot](https://github.com/librespot-org/librespot) and
 [ytmusicapi](https://github.com/sigma67/ytmusicapi), [python-tidal](https://github.com/EbbLabs/python-tidal),
 [streamrip](https://github.com/nathom/streamrip), [Qobine](https://github.com/sofusa/qobine),
 [NewPipe](https://github.com/TeamNewPipe/NewPipe), [Radio Browser](https://www.radio-browser.info),
-[LRCLIB](https://lrclib.net) and [hls.js](https://github.com/video-dev/hls.js).
+[LRCLIB](https://lrclib.net), [syncedlyrics](https://github.com/moehmeni/syncedlyrics) and [hls.js](https://github.com/video-dev/hls.js).
 
 ## License
 

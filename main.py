@@ -92,7 +92,10 @@ class Plugin:
         self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path)
         self.http = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
-            timeout=aiohttp.ClientTimeout(total=10))
+            timeout=aiohttp.ClientTimeout(total=10),
+            # none of these sites needs cookies, and NetEase cuts its search results short for a
+            # client that keeps the cookie it sets
+            cookie_jar=aiohttp.DummyCookieJar())
         self.listenbrainz = ListenBrainz(self.http, os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR,
                                                                  "listenbrainz-pending.json"))
         try:
@@ -453,7 +456,7 @@ class Plugin:
                 return None  # podcast episodes: talk, not songs; nothing to look up
             found = await instance.lyrics(track) if instance and "lyrics" in instance.features else None
             if not found and self.http:
-                found = await lyrics.from_lrclib(self.http, track)
+                found = await lyrics.lookup(self.http, track)
             return found
         return await _result(work())
 

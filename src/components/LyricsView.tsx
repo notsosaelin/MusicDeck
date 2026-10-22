@@ -1,10 +1,9 @@
 import { Focusable, Navigation, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
-import { FaExpand } from "react-icons/fa";
 import { Lyrics, getLyrics } from "../api";
 import { QueueItem, player } from "../player";
 import { useStore } from "../store";
-import { ButtonRow, IconButton, Message, scrollIntoCentre } from "./common";
+import { Message, scrollIntoCentre } from "./common";
 
 /** The full-screen lyrics page (registered in index.tsx). */
 export const LYRICS_ROUTE = "/musicdeck/lyrics";
@@ -39,12 +38,13 @@ export function useLyrics(item: QueueItem | undefined): LyricsResult {
 
 /**
  * Lines that follow the song: the current one sits a third of the way down a window of `height` pixels
- * and lines before and after fade out at the edges. Tapping a line jumps there.
+ * and lines before and after fade out at the edges. With `seekable`, tapping a line jumps there.
  */
-export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number }> = ({
+export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number; seekable?: boolean }> = ({
   lyrics,
   height,
   fontSize,
+  seekable = true,
 }) => {
   const { current } = useStore(player.position);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -74,7 +74,7 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
             ref={(node) => {
               lineRefs.current[i] = node;
             }}
-            onClick={() => line.t !== null && player.seek(line.t)}
+            onClick={() => seekable && line.t !== null && player.seek(line.t)}
             style={{
               padding: `${fontSize * 0.3}px 0`,
               fontSize,
@@ -142,7 +142,7 @@ export const openFullScreenLyrics = () => {
 
 /**
  * The Lyrics view in the Quick Access panel. The lyrics themselves are a focus stop, so the d-pad can
- * reach them (and the panel scrolls them wholly into view); A there opens them full screen.
+ * reach them (and the panel scrolls them wholly into view); A or a tap there opens them full screen.
  */
 export const LyricsView: FC = () => {
   const { queue, index } = useStore(player.state);
@@ -165,11 +165,6 @@ export const LyricsView: FC = () => {
   if ("error" in lyrics) return <Message>Couldn't load lyrics: {lyrics.error}</Message>;
   return (
     <PanelSection title="Lyrics">
-      <ButtonRow>
-        <IconButton onClick={openFullScreenLyrics}>
-          <FaExpand /> Full screen
-        </IconButton>
-      </ButtonRow>
       <PanelSectionRow>
         <Focusable
           onActivate={openFullScreenLyrics}
@@ -189,7 +184,8 @@ export const LyricsView: FC = () => {
           }}
         >
           {lyrics.synced ? (
-            <SyncedLyrics lyrics={lyrics} height={300} fontSize={16} />
+            // a tap here opens the full-screen view (where tapping a line seeks)
+            <SyncedLyrics lyrics={lyrics} height={300} fontSize={16} seekable={false} />
           ) : (
             <ScrollingPlainLyrics lyrics={lyrics} height={300} fontSize={14} />
           )}
