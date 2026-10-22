@@ -350,7 +350,15 @@ export const Settings: FC = () => {
         ))}
       </PanelSection>
 
-      <PanelSection title="Game music">
+      <PanelSection title="Games">
+        <PanelSectionRow>
+          <ToggleField
+            label="Pause while playing"
+            description="Pauses the music when a game starts and picks it up again when the game closes. Music set for a game plays instead."
+            checked={!!state.playback.game_pause}
+            onChange={(game_pause) => setPlayback({ game_pause })}
+          />
+        </PanelSectionRow>
         <GameMusicRows state={state} />
       </PanelSection>
 

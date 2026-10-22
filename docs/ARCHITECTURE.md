@@ -142,7 +142,7 @@ Details worth knowing:
 | `signIn.ts` | The browser sign-in flow shared by Qobuz, Spotify and TIDAL; `browseThenReturn` for opening a page and coming back. |
 | `sleep.ts` | Sleep timer. |
 | `steam.ts` | What only Steam's UI knows, for the Steam soundtracks source: owned soundtracks, their games and art, the running game. |
-| `games.ts` | Games starting and stopping: plays the music set for a game (`set_game_music`), pauses it when the game closes, and keeps the Steam source's running game current. Steam's running list decides what started or stopped (its notifications' process ids don't pair a start with its stop). |
+| `games.ts` | Games starting and stopping: plays the music set for a game (`set_game_music`) and pauses it when the game closes; with "Pause while playing" (`playback.game_pause`), pauses the music during games and resumes it after; keeps the Steam source's running game current. Each undoes only what it did itself. Steam's running list decides what started or stopped (its notifications' process ids don't pair a start with its stop). |
 | `eq.ts`, `log.ts`, `notify.tsx` | EQ bands and presets; batched debug logging to the backend; Steam toasts. |
 | `components/MusicPanel.tsx` | The QAM panel: now playing card plus five views (Library, Search, Lyrics, Queue, EQ). |
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |

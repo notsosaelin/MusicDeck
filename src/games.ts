@@ -6,7 +6,8 @@ import { Store, pluginState, refreshState } from "./store";
 
 /**
  * Games starting and stopping, from Steam's app lifetime notifications: they start the music set to
- * play with a game, and keep the Steam soundtracks source's "From <game>" row current.
+ * play with a game, pause what's playing while a game runs (if that's turned on), and keep the Steam
+ * soundtracks source's "From <game>" row current.
  */
 
 // EAppType values that are something you play (tools and runtimes, like Proton, also start and stop)
@@ -32,13 +33,26 @@ export function musicFor(appid: number, instanceId = pluginState.get()?.active_s
   return pluginState.get()?.game_music.find((m) => m.instance_id === instanceId && m.appid === appid);
 }
 
-/** What game music started, so stopping the game can stop it (but not anything chosen since). */
+/**
+ * What games did to playback, so they can undo just that: game music a game started stops with it;
+ * music paused for games resumes once none is running. Not if anything was picked, played or paused by
+ * hand since (the queue or track changed, or it's no longer in the state the game left it in).
+ */
 let started: { appid: number; queue: number } | null = null;
+let paused: { queue: number; index: number } | null = null;
+
+const PAUSE_FADE_SECONDS = 1;
 
 async function onGameStart(appid: number) {
   const live = pluginState.get()?.active_service;
   const music = live ? musicFor(appid, live) : undefined;
-  if (!live || !music) return;
+  if (!live || !music) {
+    if (pluginState.get()?.playback.game_pause && player.state.get().playing) {
+      paused = { queue: player.queueId, index: player.state.get().index };
+      void player.fadeOutAndPause(PAUSE_FADE_SECONDS);
+    }
+    return;
+  }
   const page = await openCollection(live, music.collection.kind, music.collection.id);
   // switched source while it loaded: it isn't the live source's music any more
   if (pluginState.get()?.active_service !== live) return;
@@ -53,9 +67,15 @@ async function onGameStart(appid: number) {
 
 function onGameExit(appid: number) {
   if (started?.appid !== appid) return;
-  // still the game's music (not something picked since): it stops with the game
   if (player.queueId === started.queue && player.state.get().playing) player.toggle();
   started = null;
+}
+
+/** The last game closed: music paused for games picks up again, if it's still as they left it. */
+function onAllGamesClosed() {
+  const { playing, index } = player.state.get();
+  if (paused && player.queueId === paused.queue && index === paused.index && !playing) player.toggle();
+  paused = null;
 }
 
 /** The games running at the last check. */
@@ -74,6 +94,7 @@ export function reconcile(running: number[]) {
   const now = new Set(running.filter(isPlayable));
   for (const appid of now) if (!known.has(appid)) void onGameStart(appid);
   for (const appid of known) if (!now.has(appid)) onGameExit(appid);
+  if (known.size && !now.size) onAllGamesClosed();
   known = now;
   runningGame.set(readRunningGame());
   void refreshRunningGame();

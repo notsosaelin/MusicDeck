@@ -10,8 +10,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   time, chosen in the plugin's Decky page.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
-- **Game music:** pick an album or playlist for a game, and it plays when the game starts (and pauses
-  when it closes).
+- **Games:** pick an album or playlist for a game and it plays when the game starts; or have the music
+  pause while you play and pick up again when the game closes.
 - **Several accounts:** add a service more than once (two Spotify accounts, a second Navidrome user) and
   switch between them like any other source.
 - **Native Quick Access tab:** now playing, Library, Search, Lyrics, Queue and Equalizer, built from Steam's
@@ -71,7 +71,10 @@ Switching the live source stops playback and clears the queue; nothing from the 
 **Game music:** with a game running, open an album or playlist in MusicDeck and press the gamepad button
 next to Play (or choose "Play when … starts" from a row's options). From then on it plays whenever that
 game starts, and pauses when the game closes unless you've picked something else meanwhile. Each source
-keeps its own choices and only the live source's apply; Decky → MusicDeck → Game music lists them all.
+keeps its own choices and only the live source's apply; Decky → MusicDeck → Games lists them all.
+
+**Pause while playing** (Decky → MusicDeck → Games, off by default) pauses the music when a game starts
+and resumes it when the last game closes, unless you played, skipped or changed something meanwhile.
 
 Any service can be added more than once, one account each; MusicDeck refuses the same account twice.
 For a second account of a service that signs in on its website, sign out on that website in Steam's

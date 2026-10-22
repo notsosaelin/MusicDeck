@@ -43,6 +43,8 @@ export interface PlaybackSettings {
   queue_sync: boolean;
   resume: boolean;
   autoplay?: boolean;
+  /** pause while a game runs, resume when it closes */
+  game_pause?: boolean;
 }
 
 export interface Session {

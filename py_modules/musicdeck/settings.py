@@ -15,7 +15,9 @@ DEFAULTS: dict[str, Any] = {
     "debug_log": False,
     "eq": {"enabled": False, "preset": "Flat", "gains": [0.0] * 10, "preamp": 0.0},
     # levelling: "off" | "track" | "album" (ReplayGain); scrobble/queue_sync talk to the source's server
-    "playback": {"levelling": "track", "scrobble": True, "queue_sync": True, "resume": True, "autoplay": True},
+    # game_pause: pause while a game runs (src/games.ts)
+    "playback": {"levelling": "track", "scrobble": True, "queue_sync": True, "resume": True, "autoplay": True,
+                 "game_pause": False},
     # ListenBrainz scrobbling for every source; the token never goes to the frontend
     "listenbrainz": {"token": "", "user": ""},
     # music that starts with a game: [{"instance_id", "appid", "game", "collection": {id, kind, title, art}}],
