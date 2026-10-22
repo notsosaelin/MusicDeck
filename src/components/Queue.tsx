@@ -1,4 +1,4 @@
-import { PanelSection } from "@decky/ui";
+import { ConfirmModal, PanelSection, showModal } from "@decky/ui";
 import { FC, useState } from "react";
 import { FaTrash } from "react-icons/fa";
 import { QueueItem, player } from "../player";
@@ -11,14 +11,19 @@ export const Queue: FC = () => {
   const { queue, index } = useStore(player.state);
   const [moving, setMoving] = useState<QueueItem | null>(null);
   if (!queue.length) return <Message>The queue is empty</Message>;
+  const confirmClear = () =>
+    showModal(
+      <ConfirmModal
+        strTitle="Clear the queue?"
+        strDescription={`${queue.length} track${queue.length === 1 ? "" : "s"}`}
+        strOKButtonText="Clear"
+        bDestructiveWarning
+        onOK={() => player.clear()}
+      />,
+    );
   return (
     <>
       <PanelSection title={`Up next · ${queue.length} track${queue.length === 1 ? "" : "s"}`}>
-        <ButtonRow>
-          <IconButton onClick={() => player.clear()}>
-            <FaTrash /> Clear queue
-          </IconButton>
-        </ButtonRow>
         {player.playOrder.map((i, position) => {
           const item = queue[i];
           if (!item) return null;
@@ -44,6 +49,12 @@ export const Queue: FC = () => {
             />
           );
         })}
+        {/* at the end and asked first: one stray press on the first row must not lose the queue */}
+        <ButtonRow>
+          <IconButton look="plain" label="Clear queue" onClick={confirmClear}>
+            <FaTrash /> Clear queue
+          </IconButton>
+        </ButtonRow>
       </PanelSection>
     </>
   );

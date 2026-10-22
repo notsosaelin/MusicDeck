@@ -66,6 +66,7 @@ import {
   Message,
   RowText,
   ScrollingText,
+  TrackNumber,
   TrackRow,
 } from "./common";
 
@@ -195,8 +196,7 @@ const CollectionList: FC<{
 const HomeView: FC<{ instanceId: string }> = ({ instanceId }) => {
   const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
   if (!result?.ok) return <Loading result={result} />;
-  if (!result.data.length)
-    return <Message>Nothing here yet</Message>;
+  if (!result.data.length) return <Message>Nothing here yet</Message>;
   return (
     <>
       {result.data.map((s) => (
@@ -227,6 +227,12 @@ const KIND_TITLES: Record<CollectionKind, string> = {
 };
 const KIND_ORDER: CollectionKind[] = ["artist", "album", "playlist", "folder", "list"];
 
+function mostCommon(values: string[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
 function groupByKind(items: Collection[]): [CollectionKind, Collection[]][] {
   return KIND_ORDER.map((k) => [k, items.filter((c) => c.kind === k)] as [CollectionKind, Collection[]]).filter(
     ([, list]) => list.length > 0,
@@ -244,11 +250,15 @@ const TrackList: FC<{
   showArt?: boolean;
   /** the album or playlist page these tracks are, so playing from it counts as playing it */
   from?: Collection;
-}> = ({ instanceId, title, tracks, limit, showAlbum = true, playlistId, showArt = true, from }) => {
+  /** one album's tracks: numbered, and its artist not repeated on each */
+  album?: boolean;
+}> = ({ instanceId, title, tracks, limit, showAlbum = true, playlistId, showArt = true, from, album }) => {
   const [expanded, setExpanded] = useState(false);
   const { queue, index } = useStore(player.state);
   const current = queue[index];
   const shown = limit && !expanded ? tracks.slice(0, limit) : tracks;
+  // the artist most of the album's tracks have; the rest are guests, shown on their rows
+  const albumArtist = album ? mostCommon(tracks.map((t) => t.artist)) : undefined;
   return (
     <PanelSection title={title}>
       {shown.map((t, i) => (
@@ -256,6 +266,16 @@ const TrackList: FC<{
           key={t.id + i}
           track={t}
           showAlbum={showAlbum}
+          albumArtist={albumArtist}
+          leading={
+            album ? (
+              <TrackNumber
+                n={i + 1}
+                digits={String(tracks.length).length}
+                active={current?.instanceId === instanceId && current.track.id === t.id}
+              />
+            ) : undefined
+          }
           artInstanceId={showArt ? instanceId : undefined}
           active={current?.instanceId === instanceId && current.track.id === t.id}
           onPlay={() => (from ? playFrom(instanceId, from, tracks, i) : player.playList(instanceId, tracks, i))}
@@ -313,6 +333,8 @@ const PageBody: FC<{
           showArt={showAlbum}
           playlistId={playlistId}
           from={from}
+          // an album's own tracks (not a podcast's episodes, whose second line is their date)
+          album={from?.kind === "album" && !showAlbum && !mixed && !hasFeature(instanceId, "progress")}
           // full lists (albums, playlists) show everything; mixed pages keep each part short
           limit={mixed ? 8 : undefined}
         />
@@ -343,15 +365,18 @@ const Header: FC<{
   art?: string | null;
   children?: ReactNode;
 }> = ({ instanceId, title, subtitle, art, children }) => (
-  <PanelSection>
-    <PanelSectionRow>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "4px 0 8px" }}>
-        {art !== undefined && <Art instanceId={instanceId} art={art} size={56} />}
-        <RowText size="large" scroll="always" title={title} subtitle={subtitle} />
-      </div>
-    </PanelSectionRow>
-    {children}
-  </PanelSection>
+  // md-header: the header and the list under it are one page, not two sections (see PLAYER_CSS)
+  <div className="md-header">
+    <PanelSection>
+      <PanelSectionRow>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "4px 0 8px" }}>
+          {art !== undefined && <Art instanceId={instanceId} art={art} size={56} />}
+          <RowText size="large" scroll="always" title={title} subtitle={subtitle} />
+        </div>
+      </PanelSectionRow>
+      {children}
+    </PanelSection>
+  </div>
 );
 
 /** A page's button that asks the source to do something (e.g. subscribe); the page reloads after. */
@@ -606,7 +631,8 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
             </DialogButton>
           </Focusable>
         </PanelSectionRow>
-        {query && (
+        {/* only when the field no longer says what the results are for */}
+        {query && draft.trim() !== query && (
           <PanelSectionRow>
             <ScrollingText play text={`Results for “${query}”`} style={{ fontSize: 12, opacity: 0.6, paddingTop: 6 }} />
           </PanelSectionRow>
@@ -638,7 +664,8 @@ export const Browser: FC<{ instanceId: string; stack: StackName }> = ({ instance
   }, [instanceId, navInstance]);
 
   const views = stacks[stack];
-  const view = views[views.length - 1];
+  // a history is never empty, but if it were the tab would go blank: its start view instead
+  const view = views[views.length - 1] ?? ROOTS[stack];
   if (navInstance !== instanceId || !view) return null;
 
   if (view.type === "home") return <HomeView instanceId={instanceId} />;

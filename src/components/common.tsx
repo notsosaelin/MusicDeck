@@ -328,6 +328,24 @@ export const CollectionRow: FC<{
   />
 );
 
+/** An album track's number, in a fixed column so titles line up (accent while it plays). */
+export const TrackNumber: FC<{ n: number; digits: number; active?: boolean }> = ({ n, digits, active }) => (
+  <span
+    style={{
+      // as wide as the album's longest number, so the column hugs the left edge
+      width: `${digits}ch`,
+      flexShrink: 0,
+      textAlign: "right",
+      fontSize: 13,
+      fontVariantNumeric: "tabular-nums",
+      opacity: active ? 1 : 0.5,
+      color: active ? ACCENT : undefined,
+    }}
+  >
+    {n}
+  </span>
+);
+
 const Heart: FC = () => <FaHeart style={{ color: ACCENT, fontSize: 11, flexShrink: 0 }} />;
 
 export const TrackRow: FC<
@@ -339,13 +357,15 @@ export const TrackRow: FC<
     showAlbum?: boolean;
     /** show the track's own artwork (lists mixing albums: home, search, playlists) */
     artInstanceId?: string;
+    /** the album's artist: not repeated on its own tracks (an album page), only guests show */
+    albumArtist?: string;
     moving?: RowMoving;
   }
-> = ({ track, active, onPlay, leading, showAlbum = true, artInstanceId, ...actions }) => (
+> = ({ track, active, onPlay, leading, showAlbum = true, artInstanceId, albumArtist, ...actions }) => (
   <ListRow
     leading={leading ?? (artInstanceId ? <Art instanceId={artInstanceId} art={track.art} size={40} /> : undefined)}
     title={track.title}
-    subtitle={[track.artist, showAlbum ? track.album : ""].filter(Boolean).join(" · ")}
+    subtitle={[track.artist !== albumArtist && track.artist, showAlbum && track.album].filter(Boolean).join(" · ")}
     trailing={
       <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {track.starred && <Heart />}
@@ -411,6 +431,7 @@ export const PLAYER_CSS = `
 button.DialogButton.md-plain:not(.gpfocus):not(:hover):not(:active) { background: transparent !important; }
 button.DialogButton.md-round { border-radius: 50% !important; flex: 0 0 44px !important; width: 44px; height: 44px !important; }
 .md-mini { border-radius: 4px; }
+.md-header > * { margin-bottom: 8px !important; }
 .md-mini.gpfocus, .md-mini:hover { background: rgba(255, 255, 255, 0.1); }
 `;
 
