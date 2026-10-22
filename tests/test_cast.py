@@ -416,7 +416,32 @@ async def manager_tests(http, path):
         fake.server.close()
 
 
+# standard modules Decky's frozen Python leaves out; importing one stops the whole backend loading
+MISSING_IN_DECKY = ("xml.etree", "xml.dom", "sqlite3", "tkinter")
+
+
+def decky_python_tests():
+    print("decky's python")
+    offenders = []
+    for folder in (os.path.join(ROOT, "py_modules", "musicdeck"), ROOT):
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            if os.path.isdir(path) and name != "__pycache__" and folder != ROOT:
+                files = [os.path.join(path, f) for f in os.listdir(path) if f.endswith(".py")]
+            elif name.endswith(".py"):
+                files = [path]
+            else:
+                continue
+            for file in files:
+                with open(file, encoding="utf-8") as f:
+                    for line in f:
+                        if line.lstrip().startswith(("import ", "from ")) and any(m in line for m in MISSING_IN_DECKY):
+                            offenders.append(f"{os.path.relpath(file, ROOT)}: {line.strip()}")
+    check(not offenders, f"nothing imports a module Decky's Python doesn't have: {offenders}")
+
+
 async def run():
+    decky_python_tests()
     mdns_tests()
     await castv2_tests()
     tmp = tempfile.mkdtemp(prefix="musicdeck-cast-")

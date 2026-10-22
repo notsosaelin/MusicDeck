@@ -172,6 +172,8 @@ export const NowPlaying: FC = () => {
         <PanelSectionRow>
           <SliderField
             icon={volumeIcon}
+            // casting: the device's own volume, and where the music is
+            label={state.castingTo ? state.castingTo.name : undefined}
             value={Math.round(state.volume * 100)}
             min={0}
             max={100}
@@ -179,6 +181,7 @@ export const NowPlaying: FC = () => {
             bottomSeparator="none"
             onChange={(v) => {
               player.setVolume(v / 100);
+              if (state.castingTo) return;
               window.clearTimeout(volumeSaveTimer);
               volumeSaveTimer = window.setTimeout(() => setSetting("volume", v / 100), 1000);
             }}

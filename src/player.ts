@@ -1,5 +1,7 @@
 import Hls from "hls.js/dist/hls.light.min.js";
 import {
+  CastDevice,
+  CastStatus,
   EqSettings,
   Feature,
   PlaybackSettings,
@@ -11,7 +13,10 @@ import {
   scrobble,
   forgetStream,
   streamInfo,
+  castStart,
+  castStop,
 } from "./api";
+import { RemoteAudio, onCastStatus } from "./cast";
 import { dlog } from "./log";
 import { notify } from "./notify";
 import { EQ_BANDS } from "./eq";
@@ -59,6 +64,8 @@ export interface PlayerState {
   shuffle: boolean;
   repeat: RepeatMode;
   volume: number;
+  /** The speaker or TV playing instead of the Deck, if any */
+  castingTo: { name: string; kind: CastDevice["kind"] } | null;
 }
 
 export interface Position {
@@ -72,7 +79,6 @@ export interface Position {
  * (crossfade).
  */
 class Deck {
-  readonly audio = new Audio();
   /** hls.js instance while an HLS source (SoundCloud, TIDAL DASH, some radio) is attached */
   hls?: Hls;
   /** Its track's loudness (ReplayGain) */
@@ -84,7 +90,8 @@ class Deck {
   /** The track loaded ahead of time, for which queue, so it's only played if it's still what's next */
   preloaded?: { index: number; item: QueueItem; queue: number; gain?: Track["gain"] };
 
-  constructor() {
+  /** `audio` is an element, or while casting a RemoteAudio standing in for one */
+  constructor(readonly audio: HTMLAudioElement = new Audio()) {
     // Required for the Web Audio graph to read samples from the loopback stream server
     this.audio.crossOrigin = "anonymous";
     this.audio.preload = "auto";
@@ -129,10 +136,16 @@ export class Player {
     shuffle: false,
     repeat: "off",
     volume: 0.8,
+    castingTo: null,
   });
   readonly position = new Store<Position>({ current: 0, duration: 0 });
 
   private readonly decks = [new Deck(), new Deck()];
+  /** While casting, the "deck" that plays: the device, behind an element-like RemoteAudio */
+  private readonly remote = new RemoteAudio();
+  private readonly castDeck = new Deck(this.remote as unknown as HTMLAudioElement);
+  /** The Deck's own volume, put back when casting ends */
+  private localVolume = 0.8;
   /** The deck that's playing */
   private deck = this.decks[0];
   private ctx?: AudioContext;
@@ -174,7 +187,8 @@ export class Player {
   private lastProgress = { time: 0, at: 0 };
 
   constructor() {
-    this.decks.forEach((deck) => this.listen(deck));
+    [...this.decks, this.castDeck].forEach((deck) => this.listen(deck));
+    this.remote.onVolume = (volume) => this.state.update({ volume });
     this.stallWatch = window.setInterval(() => this.checkStall(), 2000);
   }
 
@@ -185,6 +199,11 @@ export class Player {
 
   private get hls() {
     return this.deck.hls;
+  }
+
+  /** Playing on a speaker or TV: no Web Audio, so no EQ, levelling, crossfade or gapless. */
+  get casting() {
+    return this.deck === this.castDeck;
   }
 
   private get idleDeck() {
@@ -257,6 +276,7 @@ export class Player {
     window.clearInterval(this.sessionTimer);
     window.clearInterval(this.stallWatch);
     this.persistSession();
+    if (this.casting) void this.stopCasting();
     this.cancelFade();
     this.decks.forEach((d) => d.empty());
     this.ctx?.close();
@@ -395,7 +415,7 @@ export class Player {
     this.loadToken++;
     this.queueGeneration++;
     this.cancelFade();
-    this.decks.forEach((d) => d.empty());
+    [...this.decks, this.castDeck].forEach((d) => d.empty());
     this.order = [];
     this.state.update({ queue: [], index: -1, playing: false, loading: false });
     this.position.set({ current: 0, duration: 0 });
@@ -459,8 +479,64 @@ export class Player {
 
   setVolume(volume: number) {
     if (!Number.isFinite(volume)) return;
-    for (const deck of this.decks) deck.audio.volume = Math.min(1, Math.max(0, volume));
+    for (const deck of this.casting ? [this.castDeck] : this.decks) deck.audio.volume = Math.min(1, Math.max(0, volume));
     this.state.update({ volume: this.audio.volume });
+  }
+
+  // --- casting ---
+
+  /** Moves playback to a speaker or TV, at the same place; an error message if it couldn't. */
+  async castTo(device: CastDevice): Promise<string | null> {
+    const started = await castStart(device.id).catch((e) => ({ ok: false as const, error: String(e) }));
+    if (!started.ok) return started.error;
+    const wasPlaying = !this.audio.paused;
+    const at = this.audio.currentTime || this.position.get().current;
+    dlog("cast start", { kind: started.data.kind, at, wasPlaying });
+    if (!this.casting) this.localVolume = this.state.get().volume;
+    this.cancelFade();
+    this.loadToken++;
+    this.decks.forEach((d) => d.empty());
+    this.remote.reset(started.data.volume);
+    this.remote.loop = this.state.get().repeat === "one";
+    this.deck = this.castDeck;
+    onCastStatus((status) => this.onCastStatus(status));
+    this.state.update({
+      castingTo: { name: started.data.name, kind: started.data.kind },
+      volume: started.data.volume,
+      playing: false,
+    });
+    if (this.current) void this.prepare(this.state.get().index, wasPlaying, at);
+    return null;
+  }
+
+  /** Brings playback back to the Deck, at the same place (and playing if it was). */
+  async stopCasting() {
+    if (!this.casting) return;
+    const wasPlaying = !this.remote.paused;
+    this.backToDeck();
+    await castStop().catch(() => {});
+    if (this.current) void this.prepare(this.state.get().index, wasPlaying, this.position.get().current);
+  }
+
+  private backToDeck() {
+    this.position.update({ current: this.remote.currentTime });
+    this.loadToken++;
+    onCastStatus(undefined);
+    this.remote.detach();
+    this.deck = this.decks[0];
+    for (const deck of this.decks) deck.audio.volume = this.localVolume;
+    this.state.update({ castingTo: null, playing: false, loading: false, volume: this.localVolume });
+  }
+
+  private onCastStatus(status: CastStatus) {
+    if (!status.gone) return this.remote.onStatus(status);
+    // the device went away, or something else plays on it: back on the Deck but paused, so the
+    // music doesn't suddenly come out of the Deck's speakers
+    const name = this.state.get().castingTo?.name ?? "the device";
+    dlog("cast gone", { reason: status.gone });
+    this.backToDeck();
+    notify(`Stopped playing on ${name}`, status.gone, this.current);
+    if (this.current) void this.prepare(this.state.get().index, false, this.position.get().current);
   }
 
   setShuffle(shuffle: boolean) {
@@ -471,7 +547,7 @@ export class Player {
   cycleRepeat() {
     const modes: RepeatMode[] = ["off", "all", "one"];
     const repeat = modes[(modes.indexOf(this.state.get().repeat) + 1) % modes.length];
-    this.audio.loop = repeat === "one";
+    for (const deck of [...this.decks, this.castDeck]) deck.audio.loop = repeat === "one";
     this.state.update({ repeat });
   }
 
@@ -590,6 +666,11 @@ export class Player {
     this.lastProgress = { time: startAt, at: Date.now() };
     // loudness that only shows up when resolving the stream (Spotify keeps it in the file header)
     if (info.data.gain && !item.track.gain) this.updateTrack(item.instanceId, item.track.id, { gain: info.data.gain });
+    if (this.casting) {
+      // the device fetches the track itself, from where it should start
+      this.remote.open(item, startAt, autoplay);
+      return;
+    }
     this.pendingSeek = startAt > 0 ? startAt : undefined;
     this.attach(this.deck, url, info.data.hls, startAt, token);
     this.applyLevelling();
@@ -654,6 +735,7 @@ export class Player {
     const next = this.upcoming();
     // while a crossfade runs, the idle deck is the one still fading out
     if (
+      this.casting ||
       next === undefined ||
       this.preloading ||
       this.fading ||
@@ -686,7 +768,7 @@ export class Player {
   /** With crossfade on, starts the next track that many seconds before this one ends. */
   private maybeCrossfade() {
     const seconds = this.playback.crossfade ?? 0;
-    if (!seconds || this.fading || this.audio.paused) return;
+    if (!seconds || this.fading || this.casting || this.audio.paused) return;
     const duration = this.audio.duration;
     const remaining = duration - this.audio.currentTime;
     // a track barely longer than two fades would be mostly fade: let it end normally
@@ -861,7 +943,7 @@ export class Player {
   }
 
   private play() {
-    this.ensureGraph();
+    if (!this.casting) this.ensureGraph();
     if (this.ctx?.state === "suspended") this.ctx.resume();
     this.audio.play().catch((e) => {
       // AbortError just means a newer load() interrupted this one

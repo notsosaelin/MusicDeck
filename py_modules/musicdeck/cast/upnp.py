@@ -11,7 +11,7 @@ import socket
 import time
 from typing import Any, Callable, Optional
 from urllib.parse import urljoin, urlparse
-from xml.etree import ElementTree
+from xml.parsers import expat
 from xml.sax.saxutils import escape
 
 import aiohttp
@@ -35,15 +35,51 @@ def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _xml(text: bytes) -> ElementTree.Element:
+class Element:
+    """The little of ElementTree used here (Decky's Python has expat, but not xml.etree)."""
+
+    def __init__(self, tag: str):
+        self.tag, self.text, self.children = tag, "", []
+
+    def __iter__(self):
+        return iter(self.children)
+
+    def __len__(self):
+        return len(self.children)
+
+    def iter(self):
+        yield self
+        for child in self.children:
+            yield from child.iter()
+
+
+def _xml(text: bytes) -> Element:
     if len(text) > MAX_XML:
         raise UpnpError("The device's reply was too large")
     if b"<!DOCTYPE" in text or b"<!ENTITY" in text:
         raise UpnpError("The device's reply wasn't plain XML")  # no entity tricks from the network
+    parser = expat.ParserCreate(namespace_separator="}")
+    stack: list[Element] = [Element("")]
+
+    def start(tag, _attrs):
+        element = Element("{" + tag if "}" in tag else tag)
+        stack[-1].children.append(element)
+        stack.append(element)
+
+    def end(_tag):
+        stack.pop()
+
+    def data(chunk):
+        stack[-1].text += chunk
+
+    parser.StartElementHandler, parser.EndElementHandler, parser.CharacterDataHandler = start, end, data
     try:
-        return ElementTree.fromstring(text)
-    except ElementTree.ParseError:
+        parser.Parse(text, True)
+    except expat.ExpatError:
         raise UpnpError("The device's reply wasn't valid XML")
+    if not stack[0].children:
+        raise UpnpError("The device's reply was empty")
+    return stack[0].children[0]
 
 
 class _Searcher(asyncio.DatagramProtocol):
