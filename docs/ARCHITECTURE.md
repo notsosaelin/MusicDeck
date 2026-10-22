@@ -154,8 +154,9 @@ Details worth knowing:
 | `components/MusicPanel.tsx` | The QAM panel: now playing card plus five views (Library, Search, Lyrics, Queue, EQ). |
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
 | `components/NowPlaying.tsx` | Now playing card, seek bar (or LIVE bar), transport, volume. |
+| `components/Queue.tsx` | The queue in play order, with moving tracks (menu items, or "Move…" mode on the d-pad; see `RowMoving` in common.tsx). |
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |
-| `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, ListenBrainz, troubleshooting. |
+| `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, games, ListenBrainz, troubleshooting. |
 | `components/ServiceModal.tsx` | Add/edit dialog for a source, with a fields component per source type. |
 | `components/common.tsx` | Shared rows, artwork, dialog footer, and `ScrollingText`: a line that ends in "…" and scrolls (Steam's marquee) while its row is focused, or always in headers and the now-playing card. |
 

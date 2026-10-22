@@ -338,10 +338,40 @@ export class Player {
     this.order = order;
   }
 
+  /** The queue in the order it plays (shuffled or not), as indices into `queue`. */
+  get playOrder(): readonly number[] {
+    return this.order;
+  }
+
+  /**
+   * Moves a track from play position `from` to `to` (positions as the Queue view lists them); false
+   * if either isn't a position. Unshuffled, the queue itself is reordered; shuffled, only the play
+   * order is, so turning shuffle off still gives back the queue as it was.
+   */
+  move(from: number, to: number): boolean {
+    const { queue, index, shuffle } = this.state.get();
+    const n = this.order.length;
+    const valid = (pos: number) => Number.isInteger(pos) && pos >= 0 && pos < n;
+    if (from === to || !valid(from) || !valid(to)) return false;
+    if (shuffle) {
+      const order = [...this.order];
+      order.splice(to, 0, ...order.splice(from, 1));
+      this.order = order;
+      this.state.update({}); // the order isn't part of the state; this redraws the queue
+    } else {
+      const reordered = [...queue];
+      reordered.splice(to, 0, ...reordered.splice(from, 1));
+      this.order = reordered.map((_, i) => i);
+      this.state.update({ queue: reordered, index: reordered.indexOf(queue[index]) });
+    }
+    this.persistSession();
+    return true;
+  }
+
   /** Removes a queued track; removing the one playing moves on to what was due next. */
   removeAt(i: number) {
     const { queue, index } = this.state.get();
-    if (i < 0 || i >= queue.length) return;
+    if (!Number.isInteger(i) || i < 0 || i >= queue.length) return;
     if (queue.length === 1) return this.clear();
     const pos = this.order.indexOf(i);
     this.order = this.order.filter((j) => j !== i).map((j) => (j > i ? j - 1 : j));

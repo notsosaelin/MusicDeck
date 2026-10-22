@@ -102,6 +102,42 @@ async function showPlaylistPicker(item: Item, parent: EventTarget) {
 export interface MenuContext {
   /** the MusicDeck playlist being viewed, if any */
   playlistId?: string;
+  /** a track in the Queue: where it plays, and how to pick it up and move it with the d-pad */
+  queue?: { position: number; startMoving: () => void };
+}
+
+/** Moving a queued track (positions in play order, as the Queue lists them). */
+function queueItems(position: number, startMoving: () => void) {
+  const order = player.playOrder;
+  const current = order.indexOf(player.state.get().index);
+  const last = order.length - 1;
+  // right after the playing track (removing it from above that track shifts the target up by one)
+  const next = position > current ? current + 1 : current;
+  return [
+    <MenuItem key="move" onSelected={startMoving}>
+      Move…
+    </MenuItem>,
+    position !== current && position !== next && (
+      <MenuItem key="next" onSelected={() => player.move(position, next)}>
+        Play next
+      </MenuItem>
+    ),
+    position > 0 && (
+      <MenuItem key="up" onSelected={() => player.move(position, position - 1)}>
+        Move up
+      </MenuItem>
+    ),
+    position < last && (
+      <MenuItem key="down" onSelected={() => player.move(position, position + 1)}>
+        Move down
+      </MenuItem>
+    ),
+    position < last && (
+      <MenuItem key="end" onSelected={() => player.move(position, last)}>
+        Move to the end
+      </MenuItem>
+    ),
+  ];
 }
 
 /**
@@ -144,7 +180,9 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
   const browsable = pluginState.get()?.active_service === instanceId;
   showContextMenu(
     <Menu label={track.title}>
-      {!isCurrent && (
+      {/* in the Queue these move the track; elsewhere they add it */}
+      {ctx.queue && queueItems(ctx.queue.position, ctx.queue.startMoving)}
+      {!isCurrent && !ctx.queue && (
         <MenuItem
           onSelected={() => {
             player.enqueue(instanceId, [track], true);
@@ -154,7 +192,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
           Play next
         </MenuItem>
       )}
-      {!isCurrent && (
+      {!isCurrent && !ctx.queue && (
         <MenuItem
           onSelected={() => {
             player.enqueue(instanceId, [track]);

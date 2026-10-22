@@ -5,12 +5,14 @@ import {
   DialogFooter,
   Field,
   Focusable,
+  GamepadButton,
+  GamepadEvent,
   Marquee,
   PanelSection,
   PanelSectionRow,
 } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
-import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaUser } from "react-icons/fa";
+import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaSort, FaUser } from "react-icons/fa";
 import { Collection, CollectionKind, Track } from "../api";
 import { mediaUrl } from "../store";
 
@@ -198,8 +200,26 @@ interface RowActions {
  * A full-width list row built on Steam's Field, so focus highlight, padding and separators match
  * native Quick Access lists. Extra actions are bound to controller buttons and shown in the footer.
  */
+/**
+ * Move mode for a row (the Queue's "Move…"): up and down on the d-pad carry it along, A or B puts it
+ * down. The list keeps its rows in place and redraws their content (moving the focused element itself
+ * would lose Steam's focus), then steps the focus to the row now showing the moved track.
+ */
+export interface RowMoving {
+  /** false at either end of the list, where it can't move */
+  onMove: (step: -1 | 1) => boolean;
+  onDone: () => void;
+}
+
 const ListRow: FC<
-  RowActions & { leading?: ReactNode; title: string; subtitle?: string; trailing?: ReactNode; active?: boolean }
+  RowActions & {
+    leading?: ReactNode;
+    title: string;
+    subtitle?: string;
+    trailing?: ReactNode;
+    active?: boolean;
+    moving?: RowMoving;
+  }
 > = ({
   leading,
   title,
@@ -211,28 +231,54 @@ const ListRow: FC<
   secondaryLabel,
   onOptions,
   optionsLabel,
-}) => (
-  <PanelSectionRow>
-    <Field
-      focusable
-      highlightOnFocus
-      bottomSeparator="standard"
-      childrenLayout="below"
-      onActivate={onActivate}
-      onClick={onActivate}
-      onSecondaryButton={onSecondary}
-      onSecondaryActionDescription={onSecondary ? secondaryLabel : undefined}
-      onOptionsButton={onOptions}
-      onOptionsActionDescription={onOptions ? optionsLabel : undefined}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-        {leading}
-        <RowText title={title} subtitle={subtitle} active={active} />
-        {trailing ? <div style={{ fontSize: 12, opacity: 0.6, flexShrink: 0 }}>{trailing}</div> : null}
-      </div>
-    </Field>
-  </PanelSectionRow>
-);
+  moving,
+}) => {
+  const direction = (e: GamepadEvent) => {
+    const step = e.detail.button === GamepadButton.DIR_UP ? -1 : e.detail.button === GamepadButton.DIR_DOWN ? 1 : 0;
+    if (!moving || !step) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!moving.onMove(step)) return; // either end of the list
+    // once redrawn, the same press again: this row isn't moving any more, so it's an ordinary focus
+    // step, onto the row now showing the moved track (FocusNavController is Steam's own navigation)
+    const button = e.detail.button;
+    window.setTimeout(() => (window as any).FocusNavController?.DispatchVirtualButtonClick?.(button), 0);
+  };
+  const done = (e?: any) => {
+    e?.stopPropagation?.();
+    moving?.onDone();
+  };
+  return (
+    <PanelSectionRow>
+      <Field
+        focusable
+        highlightOnFocus
+        bottomSeparator="standard"
+        childrenLayout="below"
+        onActivate={moving ? done : onActivate}
+        onClick={moving ? done : onActivate}
+        onOKActionDescription={moving ? "Done" : undefined}
+        onCancelButton={moving ? done : undefined}
+        onCancelActionDescription={moving ? "Done" : undefined}
+        onGamepadDirection={moving ? direction : undefined}
+        onSecondaryButton={moving ? undefined : onSecondary}
+        onSecondaryActionDescription={onSecondary && !moving ? secondaryLabel : undefined}
+        onOptionsButton={moving ? undefined : onOptions}
+        onOptionsActionDescription={onOptions && !moving ? optionsLabel : undefined}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {leading}
+          <RowText title={title} subtitle={subtitle} active={active || !!moving} />
+          {moving ? (
+            <FaSort style={{ color: ACCENT, flexShrink: 0 }} />
+          ) : trailing ? (
+            <div style={{ fontSize: 12, opacity: 0.6, flexShrink: 0 }}>{trailing}</div>
+          ) : null}
+        </div>
+      </Field>
+    </PanelSectionRow>
+  );
+};
 
 export const CollectionRow: FC<{
   instanceId: string;
@@ -273,6 +319,7 @@ export const TrackRow: FC<
     showAlbum?: boolean;
     /** show the track's own artwork (lists mixing albums: home, search, playlists) */
     artInstanceId?: string;
+    moving?: RowMoving;
   }
 > = ({ track, active, onPlay, leading, showAlbum = true, artInstanceId, ...actions }) => (
   <ListRow
