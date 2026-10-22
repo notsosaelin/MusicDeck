@@ -41,6 +41,7 @@ from mutagen.id3 import APIC, TALB, TIT2, TPE1, TPE2, TRCK, TXXX, USLT  # noqa: 
 from mutagen.wave import WAVE  # noqa: E402
 
 import main  # noqa: E402
+from musicdeck.services.base import ServiceError as ServiceErrorForTest  # noqa: E402
 from musicdeck.services.subsonic import SubsonicService  # noqa: E402
 
 JPEG = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffd9")
@@ -68,6 +69,10 @@ def make_wav(path, title, artist, album, track, art=False, gain=None, lyrics=Non
     if lyrics:
         audio.tags.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
     audio.save()
+
+
+async def _raise(error):
+    raise error
 
 
 def check(condition, message):
@@ -1874,6 +1879,60 @@ async def run():
                 os.environ.pop("MUSICDECK_PYTHON", None)
             else:
                 os.environ["MUSICDECK_PYTHON"] = real[3]
+
+        print("redaction")
+        from musicdeck.debuglog import redact
+        check(redact("http://nd:4533/rest/stream?u=me&t=abc&s=salt") == "http://nd:4533/rest/stream?…",
+              "addresses lose their query (Subsonic tokens, signed links, the stream key)")
+        check("tok123" not in redact('Token="tok123"') and "eyJhbGciOiJIUzI1NiJ9" not in redact("Bearer eyJhbGciOiJIUzI1NiJ9.x.y"),
+              "header-style credentials are masked")
+        check(redact("Played the Token Ring song") == "Played the Token Ring song" and redact("Bearer of bad news") == "Bearer of bad news",
+              "ordinary words that look like credential names are left alone")
+        check(redact({"token": "x", "n": ["https://a/b?k=1"]}) == {"token": "…", "n": ["https://a/b?…"]},
+              "inside dicts and lists too")
+        plugin.settings.set("debug_log", True)
+        from musicdeck import debuglog as dl
+        dl.configure(decky.DECKY_PLUGIN_LOG_DIR, True)
+        dl.debug("proxy", "upstream error", url="http://h/rest/stream?t=SECRETTOKEN", headers={"X-Plex-Token": "PLEXSECRET"})
+        await plugin.log_events([{"t": 1, "event": "audio src", "data": {"src": "http://127.0.0.1:1/stream/a/b?k=STREAMKEY"}}])
+        dl.configure(decky.DECKY_PLUGIN_LOG_DIR, False)
+        plugin.settings.set("debug_log", False)
+        written = open(dl.path, encoding="utf-8").read()
+        check(not any(x in written for x in ("SECRETTOKEN", "PLEXSECRET", "STREAMKEY")), "nothing secret reaches the debug log")
+        failing = await main._result(_raise(ServiceErrorForTest("Could not reach http://h/x?t=SECRET")))
+        check("SECRET" not in failing["error"], "nor an error message the UI shows")
+
+        print("download limits")
+        import io
+        from musicdeck import offline as offlim
+        real_limits = (offlim.MAX_FILE, offlim.MIN_FREE, offlim.CHUNK)
+        try:
+            offlim.MAX_FILE, offlim.CHUNK = 10, 4
+            sink = offlim._Sink(io.BytesIO(), tmp)
+            sink.write(b"12345")
+            try:
+                sink.write(b"678901")
+                stopped = ""
+            except ServiceErrorForTest as e:
+                stopped = str(e)
+            check("more than a song" in stopped, "a source sending endless data is cut off")
+            offlim.MAX_FILE, offlim.MIN_FREE = 1 << 40, 1 << 62
+            sink = offlim._Sink(io.BytesIO(), tmp)
+            try:
+                sink.write(b"x" * 8)
+                stopped = ""
+            except ServiceErrorForTest as e:
+                stopped = str(e)
+            check(stopped == "Not enough free space", "a download stops when the disk is filling up, not just between songs")
+        finally:
+            offlim.MAX_FILE, offlim.MIN_FREE, offlim.CHUNK = real_limits
+
+        print("private folders")
+        if os.name == "posix":
+            check(all(os.stat(d).st_mode & 0o077 == 0 for d in (decky.DECKY_PLUGIN_SETTINGS_DIR, decky.DECKY_PLUGIN_RUNTIME_DIR,
+                                                               decky.DECKY_PLUGIN_LOG_DIR)),
+                  "settings, data and logs are readable by this user only")
+        check(any(isinstance(f, main.debuglog.Redacting) for f in decky.logger.filters), "the main log is redacted")
 
         print("cache")
         from musicdeck.cache import Cache

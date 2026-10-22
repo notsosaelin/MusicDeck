@@ -18,6 +18,7 @@ Protocol: one JSON object per line on stdin -> one per line on stdout, matched b
   failures                                                                 -> {"id", "error": "..."}
 """
 import json
+import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -33,6 +34,8 @@ def reply(message: dict) -> None:
 
 def extract(req: dict) -> dict:
     import yt_dlp
+    if not re.fullmatch(r"[\w-]{11}", req["video_id"]):
+        raise ValueError("not a video id")
     runtimes = {"quickjs": {"path": req["js_path"]}} if req.get("js_path") else {}
     opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
             "format": req["format"], "js_runtimes": runtimes, "cachedir": req["cachedir"]}
@@ -54,6 +57,8 @@ def search(req: dict) -> list:
 def channel(req: dict) -> dict:
     """A YouTube channel's latest uploads (for uploaders that aren't YouTube Music artists)."""
     import yt_dlp
+    if not re.fullmatch(r"UC[\w-]{22}", req["channel_id"]):
+        raise ValueError("not a channel id")
     opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "skip_download": True,
             "playlistend": int(req.get("count", 60))}
     with yt_dlp.YoutubeDL(opts) as ydl:

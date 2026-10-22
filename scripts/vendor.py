@@ -3,7 +3,8 @@
 * pure-Python packages into py_modules/ (Decky adds it to sys.path), and
 * the QuickJS-NG binary into bin/qjs, the JavaScript engine yt-dlp uses for YouTube's challenges.
 
-aiohttp and certifi are not installed: Decky Loader bundles them.
+aiohttp and certifi are not installed: Decky Loader bundles them. Every package is pinned to a
+version and the hash of its file on PyPI (requirements.txt), and pip refuses anything else.
 Run before packaging:  python scripts/vendor.py
 """
 import hashlib
@@ -28,7 +29,7 @@ QJS_SHA256 = "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5"
 subprocess.check_call([
     sys.executable, "-m", "pip", "install",
     "--target", str(PY_MODULES),
-    "--upgrade", "--no-deps", "--no-compile",
+    "--upgrade", "--no-deps", "--no-compile", "--require-hashes",
     "--only-binary=:all:", "--platform", "any", "--implementation", "py", "--abi", "none",
     "-r", str(REQUIREMENTS),
 ])

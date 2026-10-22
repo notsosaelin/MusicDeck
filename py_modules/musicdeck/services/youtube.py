@@ -37,6 +37,9 @@ QJS_NAME = "qjs"
 NEEDS_JS_FOR = 6 * 3600
 # the worker stops after this long without a request (it takes ~80 MB while running)
 IDLE_STOP = 5 * 60
+# what YouTube's ids look like; nothing else is put into a YouTube address for yt-dlp
+VIDEO_ID = re.compile(r"^[\w-]{11}$")
+CHANNEL_ID = re.compile(r"^UC[\w-]{22}$")
 LYRICS_IDS_TTL = 6 * 3600
 LYRICS_IDS_KEPT = 1000
 # opus (itag 251, ~160 kbps) first, then AAC; both play natively in Steam's Chromium
@@ -400,6 +403,8 @@ class YouTubeService(MusicService):
                            extra=[{"title": "Videos", "tracks": videos}], tracks_first=True)
 
     async def _channel_page(self, channel_id: str) -> dict[str, Any]:
+        if not CHANNEL_ID.match(channel_id):
+            raise ServiceError("That isn't a YouTube channel")
         data = await self.worker.call("channel", channel_id=channel_id, count=60, timeout=45)
         return models.page(data.get("title") or "Channel", "YouTube channel", _thumb(data.get("thumbnails")),
                            tracks=self._flat_videos(data.get("entries") or []))
@@ -451,6 +456,8 @@ class YouTubeService(MusicService):
     # --- media ---
 
     async def _extract(self, video_id: str, use_js: bool) -> dict[str, Any]:
+        if not VIDEO_ID.match(video_id):
+            raise ServiceError("That isn't a YouTube video")
         return await self.worker.call(
             "extract", video_id=video_id, js_path=self.qjs_path if use_js else None, format=AUDIO_FORMAT,
             cachedir=os.path.join(self.runtime_dir, "yt-dlp-cache"), timeout=90 if use_js else 30)

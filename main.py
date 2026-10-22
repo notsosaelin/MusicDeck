@@ -38,12 +38,12 @@ async def _result(work: Awaitable[Any]) -> dict[str, Any]:
     try:
         return {"ok": True, "data": await work}
     except ServiceError as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": debuglog.redact(str(e))}
     except NotImplementedError:
         return {"ok": False, "error": "Not supported by this service"}
     except Exception as e:
         decky.logger.exception("Unexpected error")
-        return {"ok": False, "error": f"Unexpected error: {e}"}
+        return {"ok": False, "error": debuglog.redact(f"Unexpected error: {e}")}
 
 
 def _when_ready(method):
@@ -86,6 +86,15 @@ class Plugin:
     # --- lifecycle ---
 
     async def _main(self):
+        decky.logger.addFilter(debuglog.Redacting())
+        # sign-ins, Spotify's stored credentials, listening history and logs: this user's only, even
+        # on distros whose home folders others can read
+        for folder in (decky.DECKY_PLUGIN_SETTINGS_DIR, decky.DECKY_PLUGIN_RUNTIME_DIR, decky.DECKY_PLUGIN_LOG_DIR):
+            try:
+                os.makedirs(folder, exist_ok=True)
+                os.chmod(folder, 0o700)
+            except OSError as e:
+                decky.logger.warning(f"Couldn't make {folder} private: {e}")
         self.settings = Settings(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.playlists = PlaylistStore(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.recents = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)

@@ -495,6 +495,8 @@ class SteamService(MusicService):
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     def _open_soundtrack(self, appid: str) -> dict[str, Any]:
+        if not appid.isdigit():
+            raise ServiceError("Soundtrack not found")
         if appid in self._playable():
             c = self._collection(appid)
             return models.page(c["title"], c["subtitle"], c["art"],

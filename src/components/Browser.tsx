@@ -361,9 +361,14 @@ async function callAction(instanceId: string, c: Collection, call: string) {
   if (result.ok) invalidateBrowserCache();
 }
 
-/** A page's header button: steam:// URLs are Steam's own actions (its install dialog shows in the
- * main window, so the menu closes); anything else opens in Steam's browser. */
+/**
+ * A page's header button: installing a soundtrack runs Steam's own install dialog (in the main window,
+ * so the menu closes); web pages open in Steam's browser. No other steam:// command is run, whatever
+ * a page asks for.
+ */
+const STEAM_INSTALL = /^steam:\/\/install\/\d+$/;
 const runAction = (url: string) => {
+  if (url.startsWith("steam://") ? !STEAM_INSTALL.test(url) : !/^https:\/\//.test(url)) return;
   Navigation.CloseSideMenus();
   // (@decky/ui's typings mistake SteamClient.URL for the DOM's URL class)
   if (url.startsWith("steam://"))

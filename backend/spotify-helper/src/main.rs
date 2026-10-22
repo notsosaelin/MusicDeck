@@ -16,6 +16,9 @@
 //! The first line printed is {"ready": true, "port": N}; audio is served at
 //!   GET http://127.0.0.1:N/track/<base62 id>?bitrate=96|160|320
 //!   GET http://127.0.0.1:N/info/<base62 id>   -> {"format", "length", "gain": {...}}
+//! Every request must carry the X-MusicDeck-Key header with the key MusicDeck started the helper
+//! with (env MUSICDECK_HELPER_KEY): without it, any program on the device, or a web page guessing
+//! the port, could play through the signed-in account.
 
 mod reads;
 
@@ -52,6 +55,8 @@ struct Resolved {
 struct Helper {
     rt: Runtime,
     cache_dir: PathBuf,
+    /// what every audio request must present (see the top of this file)
+    key: String,
     session: Mutex<Option<Session>>,
     /// track + bitrate -> file and key, so byte-range requests after the first are cheap
     resolved: Mutex<HashMap<String, Arc<Resolved>>>,
@@ -256,7 +261,22 @@ fn serve(helper: &Helper, kind: &str, id: &str, bitrate: u32, range: Option<&str
     }
 }
 
+/// Compares in time independent of where the inputs differ, so the key can't be guessed byte by byte.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 fn handle(helper: &Helper, request: tiny_http::Request) {
+    let given = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("X-MusicDeck-Key"))
+        .map(|h| h.value.as_str().to_string())
+        .unwrap_or_default();
+    if helper.key.is_empty() || !same(given.as_bytes(), helper.key.as_bytes()) {
+        let _ = request.respond(error(403, "Forbidden"));
+        return;
+    }
     let url = request.url().to_string();
     let (path, query) = url.split_once('?').unwrap_or((&url, ""));
     let bitrate = query
@@ -314,7 +334,9 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
-    let helper = Arc::new(Helper { rt, cache_dir, session: Mutex::new(None), resolved: Mutex::new(HashMap::new()) });
+    // no key, no audio: a helper started without one refuses every request
+    let key = std::env::var("MUSICDECK_HELPER_KEY").unwrap_or_default();
+    let helper = Arc::new(Helper { rt, cache_dir, key, session: Mutex::new(None), resolved: Mutex::new(HashMap::new()) });
     let stdout = Arc::new(Mutex::new(io::stdout()));
 
     let server = Server::http("127.0.0.1:0").expect("bind loopback");

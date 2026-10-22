@@ -1,10 +1,18 @@
 # Pure-Python dependencies vendored into py_modules/ by scripts/vendor.py
-mutagen==1.47.0
+mutagen==1.47.0 \
+    --hash=sha256:edd96f50c5907a9539d8e5bba7245f62c9f520aef333d13392a79a4f70aca719
 # YouTube: streams (yt-dlp + its JS challenge solver scripts) and YouTube Music browsing
-yt-dlp==2026.10.21
-yt-dlp-ejs==0.8.0
-ytmusicapi==1.12.3
-requests==2.34.2
-urllib3==2.8.0
-idna==3.20
-charset-normalizer==3.5.2
+yt-dlp==2026.10.21 \
+    --hash=sha256:94a3a3e2c423129d0bbd2f1be000c4171fa1226c29e251c84aff868f2851c247
+yt-dlp-ejs==0.8.0 \
+    --hash=sha256:79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4
+ytmusicapi==1.12.3 \
+    --hash=sha256:f65db840907a43ca23b29bd563951a1e390fbe2089d7aa4ddbe2043824b2acd9
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+charset-normalizer==3.5.2 \
+    --hash=sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685

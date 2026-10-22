@@ -1,4 +1,5 @@
 import { openFilePicker } from "@decky/api";
+import { unencryptedWarning } from "../addresses";
 import { notify } from "../notify";
 import {
   DialogBody,
@@ -289,7 +290,7 @@ const ServerFields: FC<{
   passwordHint?: string;
 }> = ({ draft, setConfig, hasCredentials, placeholder, passwordHint }) => (
   <>
-    <Field label="Server URL">
+    <Field label="Server URL" hint={unencryptedWarning(draft.config.url)}>
       <TextField
         value={draft.config.url ?? ""}
         placeholder={placeholder}
@@ -393,7 +394,7 @@ const JellyfinFields: FC<{
   closeModal?: () => void;
 }> = ({ draft, setConfig, hasCredentials, closeModal }) => (
   <>
-    <Field label="Server address">
+    <Field label="Server address" hint={unencryptedWarning(draft.config.url)}>
       <TextField
         value={draft.config.url ?? ""}
         placeholder="https://jellyfin.example.com"

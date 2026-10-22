@@ -139,6 +139,13 @@ class SpotifyHelper:
         self.next_id = 1
         self.lock = asyncio.Lock()
         self.reader: Optional[asyncio.Task] = None
+        # every request to the helper's audio server carries this (a new one per start)
+        self.key = ""
+
+    def headers(self) -> dict[str, str]:
+        """What requests to the helper's audio server must carry; the stream server adds it, so it
+        never appears in a URL."""
+        return {"X-MusicDeck-Key": self.key}
 
     async def ensure(self) -> None:
         async with self.lock:
@@ -152,6 +159,7 @@ class SpotifyHelper:
             os.makedirs(self.cache_dir, exist_ok=True)
             env = dict(os.environ)
             env.pop("LD_LIBRARY_PATH", None)  # static binary; never pick up Decky's bundled libraries
+            self.key = env["MUSICDECK_HELPER_KEY"] = secrets.token_urlsafe(24)
             self.proc = await asyncio.create_subprocess_exec(
                 binary, "--cache", self.cache_dir, stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env,
@@ -633,17 +641,19 @@ class SpotifyService(MusicService):
         assert self.http
         try:
             # opens the file once: reads Spotify's loudness data and warms the helper's key cache
-            async with self.http.get(f"{base}/info/{track_id}", params={"bitrate": bitrate}) as resp:
+            async with self.http.get(f"{base}/info/{track_id}", params={"bitrate": bitrate},
+                                     headers=self.helper.headers()) as resp:
                 info = await resp.json(content_type=None) if resp.status == 200 else None
                 if resp.status != 200:
                     raise ServiceError((await resp.text())[:200] or f"Spotify helper HTTP {resp.status}")
             gain = info.get("gain") if info else None
         except aiohttp.ClientError as e:
             raise ServiceError(f"Spotify helper unreachable: {e}") from e
-        return StreamSource(url=f"{base}/track/{track_id}?bitrate={bitrate}", gain=models.gain(
-            gain.get("track"), gain.get("album"), gain.get("track_peak"), gain.get("album_peak")) if gain else None,
-            # loopback URL never expires, but the helper may restart on a new port
-            expires=time.time() + 600)
+        level = models.gain(gain.get("track"), gain.get("album"), gain.get("track_peak"),
+                            gain.get("album_peak")) if gain else None
+        # the loopback URL never expires, but the helper may restart on a new port (and key)
+        return StreamSource(url=f"{base}/track/{track_id}?bitrate={bitrate}", headers=self.helper.headers(),
+                            gain=level, expires=time.time() + 600)
 
     async def art(self, art_id: str) -> StreamSource:
         if not art_id.startswith("https://"):

@@ -34,6 +34,8 @@ from .settings import load_json
 CHUNK = 8 * 1024 * 1024
 # downloads stop rather than fill the disk
 MIN_FREE = 1024 ** 3
+# no single song, episode or book part is bigger; a source sending more is refused
+MAX_FILE = 4 * 1024 ** 3
 # after this many failures in a row (no network, say), the rest wait for the next sync
 GIVE_UP_AFTER = 3
 EXTENSIONS = {"audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/aac": ".aac", "audio/flac": ".flac",
@@ -52,6 +54,24 @@ def _name(key: str, content_type: str) -> str:
     """A file name for a track or picture: ids can hold anything, so it's a hash."""
     ext = EXTENSIONS.get(content_type.split(";")[0].strip().lower(), "")
     return hashlib.sha256(key.encode()).hexdigest()[:32] + ext
+
+
+class _Sink:
+    """A file being downloaded into, which stops the download when it grows past MAX_FILE or the
+    disk gets down to half of MIN_FREE (free space is checked every CHUNK bytes)."""
+
+    def __init__(self, file, folder: str):
+        self.file, self.folder, self.size, self.checked = file, folder, 0, 0
+
+    def write(self, piece: bytes) -> None:
+        self.size += len(piece)
+        if self.size > MAX_FILE:
+            raise ServiceError("The source sent more than a song could be")
+        if self.size - self.checked >= CHUNK:
+            self.checked = self.size
+            if shutil.disk_usage(self.folder).free < MIN_FREE // 2:
+                raise ServiceError("Not enough free space")
+        self.file.write(piece)
 
 
 def _partial(key: str) -> str:
@@ -176,6 +196,9 @@ class OfflineStore:
                 debuglog.debug("offline", "failed", track=track.get("id"), error=str(e)[:200])
                 self.failed[key] = message
                 failures += 1
+                if message == "Not enough free space":
+                    self.stopped_for = message
+                    break
                 if failures >= GIVE_UP_AFTER:
                     self.stopped_for = "Couldn't reach the source"
                     break
@@ -203,7 +226,8 @@ class OfflineStore:
         """Saves the source's bytes; returns its index entry. Nothing is left behind on failure."""
         partial = os.path.join(self.dir, _partial(key))
         try:
-            with open(partial, "wb") as out:
+            with open(partial, "wb") as file:
+                out = _Sink(file, self.dir)
                 if source.playlist is not None:
                     raise ServiceError("This track's stream can't be saved")
                 if source.hls:
