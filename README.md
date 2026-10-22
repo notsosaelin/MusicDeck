@@ -86,7 +86,8 @@ Add your own free app's Client ID in the Spotify source (the dialog links to Spo
 
 Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the Queue) or plays an album or
 playlist without opening it, **Y** opens a
-track's or playlist's options (including the sleep timer for the playing track), **B** goes back.
+track's or playlist's options (including the sleep timer for the playing track), **B** goes back, **L1**/**R1**
+switch tabs.
 Re-selecting Library or Search returns to its start. The Queue lists tracks in the order they'll play
 (shuffled or not); **Y** on a queued track moves it (play next, up, down, to the end), and **Move…** picks it
 up so the d-pad carries it until **A** or **B** puts it down.

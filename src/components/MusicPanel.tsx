@@ -19,6 +19,22 @@ const TABS: { id: PanelTab; label: string; icon: ReactNode }[] = [
   { id: "eq", label: "Equalizer", icon: <FaSlidersH /> },
 ];
 
+// GamepadButton.BUMPER_LEFT / BUMPER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
+const L1 = 5;
+const R1 = 6;
+
+/**
+ * L1 and R1 step through the tabs, wrapping round, as in Steam's own tabbed pages. Focus moves to
+ * the new tab's button: what had it may be gone with the old tab, and Steam would spend the next
+ * press finding focus again.
+ */
+function stepTab(by: number, panel: HTMLElement | null) {
+  const at = TABS.findIndex((t) => t.id === panelTab.get().tab);
+  const next = (at + by + TABS.length) % TABS.length;
+  panelTab.set({ tab: TABS[next].id });
+  window.requestAnimationFrame(() => panel?.querySelectorAll<HTMLElement>(".md-tabs button")[next]?.focus());
+}
+
 /** The tab strip at the top of the panel: plain icons over one line, the open tab underlined. */
 const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
   // in a section, for the same side margins as everything below it
@@ -26,13 +42,14 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
     <PanelSectionRow>
       <Focusable
         flow-children="row"
+        className="md-tabs"
         style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255, 255, 255, 0.1)", marginBottom: 8 }}
       >
         {TABS.map((t) => (
           <IconButton
             key={t.id}
             look="plain"
-            label={t.label}
+            label={`${t.label} (L1/R1)`}
             active={tab === t.id}
             style={{
               height: 40,
@@ -70,6 +87,13 @@ export const MusicPanel: FC = () => {
   return (
     <Focusable
       // B steps back through library/search history before it closes the menu
+      onButtonDown={(e: any) => {
+        const button = e?.detail?.button;
+        if (button === L1 || button === R1) {
+          stepTab(button === L1 ? -1 : 1, e.currentTarget);
+          e.stopPropagation?.();
+        }
+      }}
       onCancelButton={(e: any) => {
         const t = panelTab.get().tab;
         if ((t === "library" || t === "search") && popView(t)) e?.stopPropagation?.();
