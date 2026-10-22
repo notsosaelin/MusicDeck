@@ -9,7 +9,7 @@ import { ACCENT } from "./common";
 let saveTimer: number | undefined;
 
 /** Applies immediately to the audio graph; persists to the backend once the user stops moving. */
-export function updateEq(eq: EqSettings) {
+function updateEq(eq: EqSettings) {
   const state = pluginState.get();
   if (state) pluginState.set({ ...state, eq });
   player.setEq(eq);

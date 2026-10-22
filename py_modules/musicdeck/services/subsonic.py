@@ -1,3 +1,8 @@
+"""
+Navidrome or any Subsonic-compatible server, through the Subsonic REST API (1.16.1) and the
+OpenSubsonic extensions where the server has them (lyrics, ReplayGain). The password is turned into
+the spec's salted token on save and never stored. Audio is the original file (format=raw).
+"""
 import hashlib
 import secrets
 import ssl

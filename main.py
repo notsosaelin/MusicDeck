@@ -4,6 +4,7 @@ import json
 import os
 import ssl
 import time
+from datetime import datetime
 from typing import Any, Awaitable, Optional
 
 import aiohttp
@@ -19,11 +20,12 @@ from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError
 from musicdeck.settings import Settings
 
-# Config keys never sent to the frontend
+# Config keys never sent to the frontend; a service storing a secret under another name adds it here
 SECRET_KEYS = {"password", "token", "refresh_token", "salt", "secret", "cookies", "auth"}
-# Settings the frontend may write directly
-SCROBBLE_DEDUPE = 90
+# Settings the frontend may write directly (set_setting); everything else has its own endpoint
 FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log"}
+# The same play report for the same track within this many seconds is a duplicate (see scrobble)
+SCROBBLE_DEDUPE = 90
 
 
 async def _result(work: Awaitable[Any]) -> dict[str, Any]:
@@ -49,6 +51,14 @@ def _when_ready(method):
 
 
 class Plugin:
+    """MusicDeck's backend. Decky calls _main/_unload; every other public method is an endpoint the
+    frontend calls through `callable()` (typed in src/api.ts).
+
+    Conventions: endpoints that can fail for reasons the user should see return
+    {"ok": True, "data": ...} or {"ok": False, "error": message} via _result; everything waits for
+    start-up via @_when_ready. Sources are `MusicService` instances keyed by their instance id.
+    """
+
     settings: Settings
     server: StreamServer
     playlists: PlaylistStore
@@ -103,9 +113,8 @@ class Plugin:
             decky.logger.warning(f"Skipping service of unknown type {service['type']}")
             return
         instance = cls(service["id"], service["config"], decky.DECKY_PLUGIN_RUNTIME_DIR)
-        if hasattr(instance, "save_config"):
-            # services whose credentials rotate (Spotify refresh tokens) persist them through this
-            instance.save_config = lambda config, sid=service["id"]: self._persist_config(sid, config)
+        # lets a service persist config it changes itself (rotated tokens, favourite stations)
+        instance.save_config = lambda config, sid=service["id"]: self._persist_config(sid, config)
         try:
             await instance.start()
         except Exception:
@@ -264,6 +273,8 @@ class Plugin:
         debuglog.debug("stream", "forget", instance=instance_id, track=track_id)
         self.server.forget(instance_id, track_id)
 
+    # --- sign-in (OAuth pages, device codes; see services/base.py:SignIn) ---
+
     @_when_ready
     async def sign_in_start(self, service_type: str, options: dict[str, Any]) -> dict[str, Any]:
         """Starts a sign-in for sources that don't take a password in the form (see SignIn). The
@@ -304,6 +315,8 @@ class Plugin:
         if attempt:
             await attempt.close()
 
+    # --- source-specific ---
+
     @_when_ready
     async def youtube_update(self, instance_id: str) -> dict[str, Any]:
         """Updates yt-dlp for YouTube sources (see musicdeck/ytdlp_update.py)."""
@@ -314,12 +327,6 @@ class Plugin:
             return await instance.update_ytdlp()
         return await _result(work())
 
-    # --- per-track features ---
-
-    @_when_ready
-    async def star(self, instance_id: str, track_id: str, starred: bool) -> dict[str, Any]:
-        return await _result(self._call(instance_id, lambda s: s.star(track_id, starred)))
-
     @_when_ready
     async def on_air(self, instance_id: str, track_id: str) -> dict[str, Any]:
         """What a live station is playing right now (radio), or None."""
@@ -327,6 +334,12 @@ class Plugin:
             instance = self._instance(instance_id)
             return await instance.on_air(track_id) if hasattr(instance, "on_air") else None
         return await _result(work())
+
+    # --- per-track features ---
+
+    @_when_ready
+    async def star(self, instance_id: str, track_id: str, starred: bool) -> dict[str, Any]:
+        return await _result(self._call(instance_id, lambda s: s.star(track_id, starred)))
 
     @_when_ready
     async def scrobble(self, instance_id: str, track_id: str, submission: bool,
@@ -447,7 +460,6 @@ class Plugin:
             return None
         return local
 
-
     # --- MusicDeck playlists (stored on the device, per source) ---
 
     @_when_ready
@@ -499,9 +511,9 @@ class Plugin:
 
 
 def _parse_time(value: Optional[str]) -> Optional[float]:
+    """An ISO 8601 time (as Subsonic servers send it) as epoch seconds, or None."""
     if not value:
         return None
-    from datetime import datetime
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:

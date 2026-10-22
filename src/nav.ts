@@ -10,9 +10,7 @@ export type PanelTab = "library" | "search" | "lyrics" | "queue" | "eq";
 export const panelTab = new Store<{ tab: PanelTab }>({ tab: "library" });
 
 export type View =
-  | { type: "home" }
-  | { type: "search"; query: string }
-  | { type: "collection"; collection: Collection };
+  { type: "home" } | { type: "search"; query: string } | { type: "collection"; collection: Collection };
 
 export type StackName = "library" | "search";
 

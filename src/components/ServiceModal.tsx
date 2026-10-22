@@ -14,7 +14,7 @@ import {
 import { browseThenReturn, readClipboard, signIn } from "../signIn";
 import { FC, useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
-import { DialogActions } from "./common";
+import { DialogActions, countryName } from "./common";
 import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart, saveService, testService } from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
@@ -94,14 +94,6 @@ const RADIO_COUNTRIES = [
   "US", "GB", "CA", "AU", "DE", "FR", "NL", "ES", "IT", "BR", "MX", "JP", "KR", "SE", "NO", "PL",
   "IE", "NZ", "AT", "CH", "BE", "DK", "FI", "PT", "AR", "IN", "RU", "TR", "ZA",
 ];
-
-export const countryName = (code: string) => {
-  try {
-    return new Intl.DisplayNames(["en"], { type: "region" }).of(code) ?? code;
-  } catch {
-    return code;
-  }
-};
 
 /** Internet radio: no account; a country only adds "Popular near you" to the home view. */
 const RadioFields: FC<{ draft: ServiceDraft; setConfig: (c: Record<string, any>) => void }> = ({

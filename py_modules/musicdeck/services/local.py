@@ -1,3 +1,10 @@
+"""
+Music files on the device. The folders chosen in the dialog are scanned recursively; tags, lengths,
+ReplayGain and embedded art are read with mutagen and cached in an index (local-<id>.json), so a
+rescan only re-reads files whose size or modification time changed. Files are served straight from
+disk by the stream server. Favourites are kept in local-<id>-favourites.json; nothing leaves the
+Deck except LRCLIB lyrics lookups.
+"""
 import asyncio
 import hashlib
 import json

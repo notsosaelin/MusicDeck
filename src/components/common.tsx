@@ -16,6 +16,15 @@ import { mediaUrl } from "../store";
 
 export const ACCENT = "#1a9fff";
 
+/** A country's name from its ISO code, in English (the browser's own list). */
+export const countryName = (code: string) => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+};
+
 export const formatTime = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
   const s = Math.floor(seconds % 60);
@@ -156,7 +165,7 @@ interface RowActions {
  * A full-width list row built on Steam's Field, so focus highlight, padding and separators match
  * native Quick Access lists. Extra actions are bound to controller buttons and shown in the footer.
  */
-export const ListRow: FC<
+const ListRow: FC<
   RowActions & { leading?: ReactNode; title: ReactNode; subtitle?: ReactNode; trailing?: ReactNode; active?: boolean }
 > = ({
   leading,

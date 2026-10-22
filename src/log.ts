@@ -16,7 +16,7 @@ export function dlog(event: string, data?: Record<string, unknown>) {
   }
 }
 
-export function flush() {
+function flush() {
   window.clearTimeout(timer);
   timer = undefined;
   if (!buffer.length) return;

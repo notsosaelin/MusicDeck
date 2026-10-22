@@ -35,8 +35,8 @@ import { deleteSource, switchSource } from "../sources";
 import { player } from "../player";
 import { pluginState, refreshState, useStore } from "../store";
 import { invalidateBrowserCache } from "../nav";
-import { ACCENT } from "./common";
-import { ServiceModal, countryName } from "./ServiceModal";
+import { ACCENT, countryName } from "./common";
+import { ServiceModal } from "./ServiceModal";
 
 const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,

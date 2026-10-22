@@ -1,6 +1,6 @@
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 class ServiceError(Exception):
@@ -80,6 +80,9 @@ class MusicService:
         self.instance_id = instance_id
         self.config = config
         self.runtime_dir = runtime_dir
+        # Set by the plugin: call with the (changed) config to persist it, e.g. a rotated refresh
+        # token or a favourite added. Without the plugin (tests) changes simply aren't saved.
+        self.save_config: Optional[Callable[[dict[str, Any]], None]] = None
 
     @classmethod
     def prepare_config(cls, config: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:

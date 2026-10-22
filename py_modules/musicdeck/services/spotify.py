@@ -22,7 +22,7 @@ import os
 import secrets
 import ssl
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from urllib.parse import urlencode
 
 import aiohttp
@@ -214,8 +214,6 @@ class SpotifyService(MusicService):
         self.gate = _Gate.of(self.client_id)
         self.cache: dict[str, tuple[float, Any]] = {}
         self.liked: dict[str, bool] = {}
-        # set by the plugin: persists config changes (Spotify rotates refresh tokens)
-        self.save_config: Optional[Callable[[dict[str, Any]], None]] = None
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:

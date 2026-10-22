@@ -3,7 +3,7 @@ import { ReactNode } from "react";
 import { QamMode } from "./api";
 
 /** EQuickAccessTab.Soundtrack in Steam's client (see @decky/ui globals/stores/steamuistore/menu). */
-export const SOUNDTRACK_TAB = 7;
+const SOUNDTRACK_TAB = 7;
 const OWN_TAB_KEY = "musicdeck";
 
 interface QamTab {

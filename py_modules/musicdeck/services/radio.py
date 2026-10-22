@@ -12,7 +12,7 @@ import random
 import re
 import ssl
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import aiohttp
 import certifi
@@ -48,8 +48,6 @@ class RadioService(MusicService):
         self.server = ""
         self.server_at = 0.0
         self.stations: dict[str, tuple[float, dict[str, Any]]] = {}
-        # set by the plugin: persists config changes (favourite stations)
-        self.save_config: Optional[Callable[[dict[str, Any]], None]] = None
 
     @classmethod
     def prepare_config(cls, config: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:

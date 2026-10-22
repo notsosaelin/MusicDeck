@@ -4,8 +4,15 @@
   "flags": [],
   "api_version": 1,
   "publish": {
-    "tags": ["music", "audio", "navidrome", "soundtracks"],
-    "description": "Play music from local files, Navidrome/Subsonic servers and streaming services from the Soundtracks tab of the Quick Access Menu.",
+    "tags": [
+      "music",
+      "audio",
+      "navidrome",
+      "jellyfin",
+      "radio",
+      "soundtracks"
+    ],
+    "description": "Play music from local files, Navidrome, Jellyfin, SoundCloud, YouTube Music, Bandcamp, internet radio, Qobuz, TIDAL and Spotify in the Soundtracks tab of the Quick Access Menu.",
     "image": ""
   }
 }
