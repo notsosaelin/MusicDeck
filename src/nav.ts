@@ -1,3 +1,4 @@
+import { Navigation } from "@decky/ui";
 import { Collection, Result, Track, playedCollection } from "./api";
 import { player } from "./player";
 import { RecentlyUsed, Store } from "./store";
@@ -85,3 +86,11 @@ export const invalidateBrowserCache = () => {
   resultCache.clear();
   dataVersion.set({ v: dataVersion.get().v + 1 });
 };
+
+/** The full-screen player (components/FullPlayer.tsx), in Steam's main window. */
+export const PLAYER_ROUTE = "/musicdeck/player";
+
+export function openFullPlayer() {
+  Navigation.CloseSideMenus();
+  Navigation.Navigate(PLAYER_ROUTE);
+}

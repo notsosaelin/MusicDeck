@@ -25,7 +25,6 @@ import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../game
 import { hasFeature, player } from "../player";
 import { pluginState } from "../store";
 import { NameModal } from "./NameModal";
-import { canCast, showCastMenu } from "./CastMenu";
 
 type Item = { instanceId: string; track: Track };
 
@@ -243,11 +242,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
           {sleepTimerLabel() ? `Sleep timer · ${sleepTimerLabel()}` : "Sleep timer…"}
         </MenuItem>
       )}
-      {isCurrent && canCast(instanceId) && (
-        <MenuItem onSelected={() => showCastMenu(target)}>
-          {player.state.get().castingTo ? `Playing on ${player.state.get().castingTo!.name}` : "Play on…"}
-        </MenuItem>
-      )}
+
       {browsable && (track.album_id || track.artist_id) && <MenuSeparator />}
       {browsable && track.album_id && (
         <MenuItem

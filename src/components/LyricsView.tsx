@@ -1,12 +1,12 @@
-import { Focusable, Navigation, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
+import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
 import { Lyrics, getLyrics } from "../api";
+import { openFullPlayer } from "../nav";
 import { QueueItem, player } from "../player";
 import { RecentlyUsed, useStore } from "../store";
 import { Message, scrollIntoCentre } from "./common";
 
 /** The full-screen lyrics page (registered in index.tsx). */
-export const LYRICS_ROUTE = "/musicdeck/lyrics";
 
 /** Lyrics of the last 100 tracks, so flipping tabs doesn't refetch. null = the track has none. */
 const lyricsCache = new RecentlyUsed<Lyrics | null>(100);
@@ -135,10 +135,6 @@ export const ScrollingPlainLyrics: FC<{ lyrics: Lyrics; height: number; fontSize
   );
 };
 
-export const openFullScreenLyrics = () => {
-  Navigation.CloseSideMenus();
-  Navigation.Navigate(LYRICS_ROUTE);
-};
 
 /**
  * The Lyrics view in the Quick Access panel. The lyrics themselves are a focus stop, so the d-pad can
@@ -167,7 +163,7 @@ export const LyricsView: FC = () => {
     <PanelSection title={lyrics.title ?? "Lyrics"}>
       <PanelSectionRow>
         <Focusable
-          onActivate={openFullScreenLyrics}
+          onActivate={openFullPlayer}
           onOKActionDescription="Full screen"
           onGamepadFocus={(e: any) => {
             setFocused(true);

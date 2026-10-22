@@ -16,6 +16,7 @@ import { MdRepeatOne } from "react-icons/md";
 import { OnAir, onAir, setSetting } from "../api";
 import { QueueItem, hasFeature, player } from "../player";
 import { showTrackMenu, toggleStar } from "./TrackMenu";
+import { canCast, showCastMenu } from "./CastMenu";
 import { useStore } from "../store";
 import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime, scrollPanelToTop } from "./common";
 
@@ -170,22 +171,28 @@ export const NowPlaying: FC = () => {
       )}
       {item && (
         <PanelSectionRow>
-          <SliderField
-            icon={volumeIcon}
-            // casting: the device's own volume, and where the music is
-            label={state.castingTo ? state.castingTo.name : undefined}
-            value={Math.round(state.volume * 100)}
-            min={0}
-            max={100}
-            step={5}
-            bottomSeparator="none"
-            onChange={(v) => {
-              player.setVolume(v / 100);
-              if (state.castingTo) return;
-              window.clearTimeout(volumeSaveTimer);
-              volumeSaveTimer = window.setTimeout(() => setSetting("volume", v / 100), 1000);
-            }}
-          />
+          {/* X on the volume slider picks where the music plays (this Deck, a speaker, a TV) */}
+          <Focusable
+            onSecondaryButton={(e: any) => canCast(item.instanceId) && showCastMenu(e?.currentTarget)}
+            onSecondaryActionDescription={canCast(item.instanceId) ? "Cast" : undefined}
+          >
+            <SliderField
+              icon={volumeIcon}
+              // casting: the device's own volume, and where the music is
+              label={state.castingTo ? state.castingTo.name : undefined}
+              value={Math.round(state.volume * 100)}
+              min={0}
+              max={100}
+              step={5}
+              bottomSeparator="none"
+              onChange={(v) => {
+                player.setVolume(v / 100);
+                if (state.castingTo) return;
+                window.clearTimeout(volumeSaveTimer);
+                volumeSaveTimer = window.setTimeout(() => setSetting("volume", v / 100), 1000);
+              }}
+            />
+          </Focusable>
         </PanelSectionRow>
       )}
     </PanelSection>

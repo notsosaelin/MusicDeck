@@ -401,9 +401,24 @@ export const IconButton: FC<{
   /** X: a second action on the same button, named in the hint bar */
   onSecondary?: () => void;
   secondaryLabel?: string;
-}> = ({ onClick, active, disabled, label, children, grow = 1, look = "box", style, onSecondary, secondaryLabel }) => (
+  /** takes the controller's focus when it appears (a page's main button) */
+  preferredFocus?: boolean;
+}> = ({
+  onClick,
+  active,
+  disabled,
+  label,
+  children,
+  grow = 1,
+  look = "box",
+  style,
+  onSecondary,
+  secondaryLabel,
+  preferredFocus,
+}) => (
   <DialogButton
     onClick={onClick}
+    preferredFocus={preferredFocus}
     disabled={disabled}
     onOKActionDescription={label}
     onSecondaryButton={onSecondary}
