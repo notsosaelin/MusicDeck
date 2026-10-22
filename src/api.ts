@@ -235,6 +235,8 @@ export const setPlaylistOffline = callable<[playlistId: string, on: boolean], Re
 export const playlistOffline = callable<[id: string, playlistId: string], OfflineState | null>("playlist_offline");
 export const retryDownloads = callable<[], void>("retry_downloads");
 export const removeDownloads = callable<[], void>("remove_downloads");
+export const exportBackup = callable<[], Result<string>>("export_backup");
+export const importBackup = callable<[path: string], Result<string>>("import_backup");
 export const playlistSetArt = callable<[playlistId: string, imagePath: string], Result<null>>("playlist_set_art");
 export const playlistClearArt = callable<[playlistId: string], void>("playlist_clear_art");
 export const isLocalPlaylist = (id: string) => id.startsWith("md:");

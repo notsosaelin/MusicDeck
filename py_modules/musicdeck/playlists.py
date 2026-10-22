@@ -93,9 +93,18 @@ class PlaylistStore:
 
     @staticmethod
     def _clean(track: dict[str, Any]) -> dict[str, Any]:
-        # keep the model fields only; never persist UI-only state like "starred"
-        keys = ("id", "title", "artist", "album", "duration", "art", "album_id", "artist_id", "gain")
-        return {k: track.get(k) for k in keys}
+        """The model fields only, each of its own kind (tracks arrive from the UI and from backup
+        files); never UI-only state like "starred"."""
+        def text(key: str, optional: bool = False) -> Optional[str]:
+            value = track.get(key)
+            return value[:500] if isinstance(value, str) else (None if optional else "")
+        duration = track.get("duration")
+        gain = track.get("gain")
+        return {"id": track["id"], "title": text("title"), "artist": text("artist"), "album": text("album"),
+                "duration": duration if isinstance(duration, (int, float)) and not isinstance(duration, bool) else 0,
+                "art": text("art", True), "album_id": text("album_id", True), "artist_id": text("artist_id", True),
+                "gain": {k: v for k, v in gain.items() if isinstance(k, str) and isinstance(v, (int, float))}
+                if isinstance(gain, dict) else None}
 
     @classmethod
     def _fresh(cls, have: list[dict[str, Any]], tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -103,7 +112,7 @@ class PlaylistStore:
         seen = {t["id"] for t in have}
         fresh = []
         for t in tracks:
-            if isinstance(t, dict) and t.get("id") and t["id"] not in seen:
+            if isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"] and t["id"] not in seen:
                 seen.add(t["id"])
                 fresh.append(cls._clean(t))
         return fresh
@@ -198,6 +207,24 @@ class PlaylistStore:
         if p is None:
             return False
         p["offline"] = on
+        self._save()
+        return True
+
+    def restore(self, p: dict[str, Any], art: Optional[tuple[str, bytes]]) -> bool:
+        """Adds a playlist from a backup (checked by backup.valid_playlist) unless one with its id is
+        here already; `art` is its picture as (extension, bytes). Returns whether it was added."""
+        if self._get(p["id"]) is not None:
+            return False
+        restored = {"id": p["id"], "instance_id": p["instance_id"], "name": p["name"][:200] or "Playlist",
+                    "tracks": self._fresh([], p["tracks"]), "created": p.get("created") or time.time(),
+                    "updated": time.time(), "source": p.get("source") if isinstance(p.get("source"), dict) else None,
+                    "offline": p.get("offline") is True}
+        if art and art[0] in ART_TYPES and len(art[1]) <= MAX_ART_BYTES:
+            os.makedirs(self.art_dir, exist_ok=True)
+            with open(os.path.join(self.art_dir, p["id"] + art[0]), "wb") as f:
+                f.write(art[1])
+            restored["art_file"], restored["art_set"] = p["id"] + art[0], time.time()
+        self.playlists.append(restored)
         self._save()
         return True
 

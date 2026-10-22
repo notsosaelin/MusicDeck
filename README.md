@@ -29,6 +29,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   optional crossfade, and endless radio when the queue runs out.
 - **Live radio** with the song on air shown as it plays.
 - **ListenBrainz scrobbling** for every source, including plays made offline.
+- **Backup and restore:** your sources, playlists (with their pictures), favourites and settings in one
+  file, for a new Deck or a fresh start. Backups never hold sign-ins, so they're safe to copy anywhere.
 - **Sleep timer:** pause after 15–90 minutes with a fade-out, or at the end of the track.
 - **Picks up where you left off:** the queue survives restarts, and with Navidrome it follows you between
   devices.

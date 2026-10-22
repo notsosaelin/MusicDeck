@@ -1,3 +1,4 @@
+import { openFilePicker } from "@decky/api";
 import {
   ButtonItem,
   ConfirmModal,
@@ -35,6 +36,8 @@ import {
 import { SiAudiobookshelf, SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-icons/si";
 import {
   DownloadStatus,
+  exportBackup,
+  importBackup,
   GameMusic,
   PlaybackSettings,
   PluginState,
@@ -76,6 +79,8 @@ const TYPE_ICONS: Record<string, ReactNode> = {
 };
 
 const describeStatus = (s: ServiceInfo) => {
+  // restored from a backup, which holds no sign-ins
+  if (s.config.sign_in_again) return "Sign in again: edit this source";
   if (s.type === "youtube") {
     if (s.status.update) return s.status.update;
     return s.status.ytdlp ? `yt-dlp ${s.status.ytdlp} · no account` : "No account";
@@ -109,6 +114,51 @@ const describeStatus = (s: ServiceInfo) => {
   if (s.status.error) return `Scan failed: ${s.status.error}`;
   const n = s.status.tracks ?? 0;
   return `${n} track${n === 1 ? "" : "s"}`;
+};
+
+// FileSelectionType.FILE from @decky/api (a const enum, which isolated builds can't import)
+const SELECT_FILE = 0;
+
+/**
+ * Backing up to a file in Documents, and restoring from one. Backups hold no sign-ins, so they're
+ * safe to copy anywhere; sources with accounts need signing in again after a restore.
+ */
+const BackupRows: FC = () => {
+  const backUp = async () => {
+    const saved = await exportBackup();
+    notify(saved.ok ? "Backed up" : "Couldn't back up", saved.ok ? saved.data : saved.error);
+  };
+  const restore = async () => {
+    let path: string;
+    try {
+      const home = pluginState.get()?.user_home || "/home";
+      path = (await openFilePicker(SELECT_FILE, home, true, true, undefined, ["json"])).realpath;
+    } catch {
+      return; // picker cancelled
+    }
+    const restored = await importBackup(path);
+    notify(restored.ok ? "Restored" : "Couldn't restore", restored.ok ? restored.data : restored.error);
+    invalidateBrowserCache();
+    await refreshState();
+  };
+  return (
+    <>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          description="Your sources, playlists and settings, to Documents. Sign-ins are left out."
+          onClick={backUp}
+        >
+          Back up
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" description="Adds what this Deck doesn't have yet." onClick={restore}>
+          Restore from a backup…
+        </ButtonItem>
+      </PanelSectionRow>
+    </>
+  );
 };
 
 const megabytes = (bytes: number) =>
@@ -497,6 +547,10 @@ export const Settings: FC = () => {
             }}
           />
         </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Backup">
+        <BackupRows />
       </PanelSection>
 
       <PanelSection title="Troubleshooting">

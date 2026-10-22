@@ -1820,6 +1820,88 @@ async def run():
               "credentials never sent to the frontend")
         bad = await plugin.test_service(saved["data"]["id"])
         check(not bad["ok"], f"unreachable server reports an error: {bad.get('error')}")
+
+        print("backups")
+        sub_id = saved["data"]["id"]
+        mix = await plugin.create_playlist(sub_id, "Road trip", [{"id": "s1", "title": "One", "artist": "A"}])
+        picture = os.path.join(tmp, "cover.png")
+        with open(picture, "wb") as f:
+            f.write(b"\x89PNG fake")
+        await plugin.playlist_set_art(mix["id"], picture)
+        await plugin.set_listenbrainz("")
+        exported = await plugin.export_backup()
+        check(exported["ok"] and exported["data"].startswith(tmp) and exported["data"].endswith(".json"),
+              "a backup is written to the user's folder")
+        text = open(exported["data"], encoding="utf-8").read()
+        stored = next(s for s in plugin.settings.services() if s["id"] == sub_id)["config"]
+        check(stored["token"] not in text and stored["salt"] not in text and '"token"' not in text,
+              "no sign-in reaches the backup")
+        if os.name == "posix":
+            check(os.stat(exported["data"]).st_mode & 0o077 == 0, "only its owner can read it")
+        data = json.loads(text)
+        check(data["playlist_art"][mix["id"][3:]]["ext"] == ".png" and any(s["id"] == sub_id and s["signed_in"] for s in data["sources"]),
+              "playlist pictures go in it, and which sources were signed in")
+        # this Deck loses the source (and with it the playlist); the backup brings both back
+        volume_before = plugin.settings.get("volume")
+        await plugin.remove_service(sub_id)
+        restored = await plugin.import_backup(exported["data"])
+        check(restored["ok"] and "1 playlist" in restored["data"] and "sign in again to Home" in restored["data"],
+              f"restoring says what came back and what needs signing in: {restored.get('data')}")
+        back = next(s for s in plugin.settings.services() if s["id"] == sub_id)
+        check(back["config"]["url"] == "http://127.0.0.1:9" and "token" not in back["config"] and back["config"]["sign_in_again"],
+              "a source with an account comes back signed out, marked as such")
+        state = await plugin.get_state()
+        check(next(s for s in state["services"] if s["id"] == sub_id)["config"]["sign_in_again"], "the UI can say so")
+        page = (await plugin.open_collection(sub_id, "playlist", mix["id"]))["data"]
+        check(page["title"] == "Road trip" and [t["id"] for t in page["tracks"]] == ["s1"]
+              and plugin.playlists.art_path(page["art"]) and open(plugin.playlists.art_path(page["art"]), "rb").read() == b"\x89PNG fake",
+              "the playlist and its picture are back")
+        check(plugin.settings.get("volume") == volume_before, "preferences on a Deck already set up stay as they are")
+        again = await plugin.import_backup(exported["data"])
+        check(again["ok"] and again["data"].startswith("0 sources and 0 playlists")
+              and sum(1 for s in plugin.settings.services() if s["id"] == sub_id) == 1, "restoring twice adds nothing")
+        resigned = await plugin.save_service({"id": sub_id, "type": "subsonic", "name": "Home",
+                                              "config": {"url": "http://127.0.0.1:9", "username": "me", "password": "pw"}})
+        check("sign_in_again" not in next(s for s in plugin.settings.services() if s["id"] == sub_id)["config"],
+              "signing in again clears the mark")
+
+        def write_backup(name, content):
+            path = os.path.join(tmp, name)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content if isinstance(content, str) else json.dumps(content))
+            return path
+
+        check(not (await plugin.import_backup(write_backup("x.json", "not json")))["ok"], "a file that isn't JSON is refused")
+        check(not (await plugin.import_backup(write_backup("y.json", {"hello": 1})))["ok"], "JSON that isn't a backup is refused")
+        check(not (await plugin.import_backup(write_backup("z.json", {"musicdeck_backup": 1, "sources": {}})))["ok"],
+              "a damaged backup is refused whole")
+        check(not (await plugin.import_backup(os.path.join(tmp, "missing.json")))["ok"], "a missing file is an error")
+        hostile = {"musicdeck_backup": 1, "settings": {"eq": {"gains": "loud"}, "volume": 7},
+                   "sources": [{"id": "../../etc", "type": "local", "name": "x", "config": {}},
+                               {"id": "aaaaaaaaaaaa", "type": "nonsense", "name": "x", "config": {}},
+                               {"id": "bbbbbbbbbbbb", "type": "radio", "name": "Radio again", "config": {"token": "leak", "country": "NL"}}],
+                   "playlists": [{"id": "cccccccccccc", "instance_id": "nowhere", "name": "Orphan", "tracks": []},
+                                 {"id": "../escape", "instance_id": "bbbbbbbbbbbb", "name": "Bad id", "tracks": []},
+                                 {"id": "dddddddddddd", "instance_id": "bbbbbbbbbbbb", "name": "Kept", "tracks": [{"id": "t"}, "junk"]},
+                                 {"id": "eeeeeeeeeeee", "instance_id": "bbbbbbbbbbbb", "name": "Script art", "tracks": [{"id": "t"}]}],
+                   "playlist_art": {"eeeeeeeeeeee": {"ext": ".sh", "data": base64.b64encode(b"#!/bin/sh").decode()}},
+                   "files": {"../../evil.json": {"x": 1}, "radio-bbbbbbbbbbbb-favourites.json": {"x": 1},
+                             "recents.json": {"collections": {}}}}
+        result = await plugin.import_backup(write_backup("hostile.json", hostile))
+        check(result["ok"] and result["data"].startswith("1 source and 2 playlists"),
+              f"from a hostile backup only the valid source and playlists are taken: {result.get('data')}")
+        radio = next(s for s in plugin.settings.services() if s["id"] == "bbbbbbbbbbbb")
+        check("token" not in radio["config"] and "sign_in_again" not in radio["config"], "secrets in a backup are dropped, never stored")
+        check(not os.path.exists(os.path.join(tmp, "evil.json")) and not os.path.exists(os.path.join(tmp, "runtime", "radio-bbbbbbbbbbbb-favourites.json")),
+              "only MusicDeck's own data files are restored, inside its folder")
+        ids = {p["id"] for p in plugin.playlists.playlists}
+        check("cccccccccccc" not in ids and not any("escape" in i for i in ids)
+              and [t["id"] for t in plugin.playlists.find("dddddddddddd")["tracks"]] == ["t"],
+              "playlists of sources that aren't here, odd ids and broken tracks are left out")
+        check(not any(f.endswith(".sh") for f in os.listdir(plugin.playlists.art_dir)), "a picture that isn't an image isn't written")
+        check(plugin.settings.get("volume") == volume_before and isinstance(plugin.settings.get("eq")["gains"], list),
+              "invalid preferences are ignored")
+        await plugin.remove_service("bbbbbbbbbbbb")
     finally:
         await plugin._unload()
     print("all backend checks passed")

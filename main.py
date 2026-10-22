@@ -13,17 +13,19 @@ import certifi
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import debuglog, lyrics
+from musicdeck import backup, debuglog, lyrics
 from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.offline import OfflineStore
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError, StreamSource
 from musicdeck.recents import Recents
-from musicdeck.settings import DEFAULTS, Settings
+from musicdeck.settings import DEFAULTS, Settings, save_json
 
 # Config keys never sent to the frontend; a service storing a secret under another name adds it here
 SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "secret", "cookies", "auth"}
+# Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
+RESTORED_SIGNED_OUT = "sign_in_again"
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
 FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log"}
 # What can be set to play with a game: things with a track list of their own
@@ -211,6 +213,7 @@ class Plugin:
             previous_config = previous["config"] if previous else None
             config = cls.prepare_config(dict(service.get("config", {})), previous_config)
             config = await cls.authenticate(config, previous_config, decky.DECKY_PLUGIN_RUNTIME_DIR)
+            config.pop(RESTORED_SIGNED_OUT, None)
             others = [s for s in self.settings.services() if s["type"] == cls.type and s["id"] != service.get("id")]
             account = cls.account(config)
             twin = next((s for s in others if account and cls.account(s["config"]) == account), None)
@@ -651,6 +654,80 @@ class Plugin:
         self._sync_offline()
         await _announce_change()
 
+    # --- backups (backup.py) ---
+
+    @_when_ready
+    async def export_backup(self) -> dict[str, Any]:
+        """Writes a backup (no sign-ins in it) to Documents, or home; returns where."""
+        async def work():
+            data = backup.build(self.settings.data, self.playlists.playlists, self.playlists.art_dir,
+                                decky.DECKY_PLUGIN_RUNTIME_DIR, SECRET_KEYS)
+            for source, stored in zip(data["sources"], self.settings.services()):
+                source["signed_in"] = any(k in SECRET_KEYS for k in stored["config"])
+            documents = os.path.join(decky.DECKY_USER_HOME, "Documents")
+            folder = documents if os.path.isdir(documents) else decky.DECKY_USER_HOME
+            path = os.path.join(folder, f"MusicDeck backup {datetime.now():%Y-%m-%d %H%M}.json")
+            try:
+                save_json(path, data)
+                os.chmod(path, 0o600)  # server addresses and listening history are nobody else's business
+            except OSError as e:
+                raise ServiceError(f"Couldn't write the backup: {e.strerror}")
+            return path
+        return await _result(work())
+
+    @_when_ready
+    async def import_backup(self, path: str) -> dict[str, Any]:
+        """Adds what a backup has and this Deck doesn't; returns a sentence about what came back."""
+        async def work():
+            try:
+                data = backup.read(path)
+            except backup.BackupError as e:
+                raise ServiceError(str(e))
+            fresh = not self.settings.services()
+            have = {s["id"] for s in self.settings.services()}
+            added, signed_out = [], []
+            for s in data.get("sources", []):
+                if not backup.valid_source(s, SERVICE_TYPES) or s["id"] in have:
+                    continue
+                config = {k: v for k, v in s["config"].items() if k not in SECRET_KEYS and k != RESTORED_SIGNED_OUT}
+                if s.get("signed_in") is True:
+                    config[RESTORED_SIGNED_OUT] = True
+                    signed_out.append(s["name"])
+                saved = self.settings.upsert_service({"id": s["id"], "type": s["type"], "name": s["name"][:100],
+                                                     "config": config})
+                await self._start_instance(saved)
+                added.append(s["id"])
+            sources = {s["id"] for s in self.settings.services()}
+            playlists = 0
+            for p in data.get("playlists", []):
+                if backup.valid_playlist(p, sources) and self.playlists.restore(
+                        p, backup.art_bytes(data.get("playlist_art", {}).get(p["id"]))):
+                    playlists += 1
+            for name in backup.file_names(added):
+                target = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, name)
+                if name in data.get("files", {}) and not os.path.exists(target):
+                    save_json(target, data["files"][name])
+            settings = data.get("settings", {})
+            if fresh:
+                for key in backup.PREFERENCES:
+                    if key in settings and _valid_setting(key, settings[key]):
+                        self.settings.set(key, settings[key])
+                if settings.get("active_service") in sources:
+                    self.settings.set("active_service", settings["active_service"])
+            games = {(m["instance_id"], m["appid"]) for m in self.settings.get("game_music")}
+            restored_games = [m for m in settings.get("game_music") or []
+                              if isinstance(m, dict) and m.get("instance_id") in sources and isinstance(m.get("appid"), int)
+                              and isinstance(m.get("collection"), dict) and (m["instance_id"], m["appid"]) not in games]
+            if restored_games:
+                self.settings.set("game_music", self.settings.get("game_music") + restored_games)
+            self._sync_offline()  # downloaded playlists download again
+            await _announce_change()
+            summary = f"{backup.count(len(added), 'source')} and {backup.count(playlists, 'playlist')} restored"
+            if signed_out:
+                summary += f"; sign in again to {', '.join(signed_out)}"
+            return summary
+        return await _result(work())
+
     @_when_ready
     async def collection_action(self, instance_id: str, kind: str, collection_id: str, call: str) -> dict[str, Any]:
         """A page's own button (Page.action with "call"), e.g. subscribing to a podcast; returns what
@@ -748,6 +825,21 @@ def _valid_setting(key: str, value: Any) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
     if key == "qam_mode":
         return value in ("replace", "separate")
+    if isinstance(default, dict):
+        # only known fields, each of its default's kind (EQ gains: as many numbers as there are bands)
+        return isinstance(value, dict) and all(k in default and _same_kind(v, default[k]) for k, v in value.items())
+    return isinstance(value, type(default))
+
+
+def _same_kind(value: Any, default: Any) -> bool:
+    number = (int, float)
+    if isinstance(default, bool):
+        return isinstance(value, bool)
+    if isinstance(default, number):
+        return isinstance(value, number) and not isinstance(value, bool)
+    if isinstance(default, list):
+        return (isinstance(value, list) and len(value) == len(default)
+                and all(_same_kind(v, d) for v, d in zip(value, default)))
     return isinstance(value, type(default))
 
 

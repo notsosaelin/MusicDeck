@@ -89,6 +89,9 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
   fragmented-MP4 and MP3 HLS (master playlists followed), encrypted and generated streams refused;
   playing, seeking and artwork with the source gone; one copy for two playlists; files deleted with
   the last playlist holding them; giving up when unreachable; stopping before the disk fills;
+- backups: no sign-in in the file, restoring a removed source (signed out, marked) and its playlist
+  and picture, restoring twice, refused files, and a hostile backup (odd ids, unknown types, smuggled
+  tokens, paths out of the data folder, a script as a picture, bad preferences);
 - podcasts against a fake directory and feed: the XML reader (CDATA, entities, broken markup),
   subscribing, home rows, resuming and marking played, refused ids;
 - the Live Music Archive against a fake archive.org: home rows (on this day really today), shows,
