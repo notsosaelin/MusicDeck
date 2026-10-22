@@ -685,6 +685,160 @@ async def run():
         await plugin.log_events([{"t": 1, "event": "audio pause", "data": {"at": 12.5, "event": "x", "source": "y"}}])
         check(True, "events with their own at/event/source fields are accepted")
 
+        print("abuse: nothing a confused user (or a stale UI) does may crash an endpoint")
+        failures = []
+
+        async def survives(label, coro):
+            """Awaits a call that should fail politely (an error result or nothing), never raise."""
+            try:
+                return await coro
+            except Exception as e:  # noqa: BLE001 - recording any crash is the point
+                failures.append(f"{label}: {type(e).__name__}: {e}")
+                return None
+
+        gone = "000000000000"
+        track = {"id": "x", "title": "T", "artist": "A", "album": "B", "duration": 1}
+        for name, call in [
+            ("home", plugin.home(gone)), ("open", plugin.open_collection(gone, "album", "1")),
+            ("search", plugin.search(gone, "q")), ("stream_info", plugin.stream_info(gone, "1")),
+            ("forget_stream", plugin.forget_stream(gone, "1")), ("star", plugin.star(gone, "1", True)),
+            ("radio", plugin.radio(gone, track)), ("user_playlists", plugin.user_playlists(gone)),
+            ("add_to_playlist", plugin.add_to_playlist(gone, "p", ["1"])), ("lyrics", plugin.get_lyrics(gone, track)),
+            ("on_air", plugin.on_air(gone, "1")), ("test", plugin.test_service(gone)), ("rescan", plugin.rescan(gone)),
+            ("steam_library", plugin.steam_library(gone, [], None)), ("youtube_update", plugin.youtube_update(gone)),
+            ("set_active", plugin.set_active_service(gone)), ("remove", plugin.remove_service(gone)),
+            ("scrobble", plugin.scrobble(gone, "1", True, track)), ("scrobble no track", plugin.scrobble(sid, "1", False)),
+            ("save_as_playlist", plugin.save_as_playlist(gone, "album", "1")),
+            ("sign_in_poll", plugin.sign_in_poll("nope", {})), ("sign_in_cancel", plugin.sign_in_cancel("nope")),
+            ("sign_in_start", plugin.sign_in_start("nope", {})),
+        ]:
+            await survives(f"unknown source: {name}", call)
+        check(plugin.settings.get("active_service") == sid, "switching to a source that doesn't exist changes nothing")
+
+        for q in ["", " ", "a" * 5000, "🎵💀", "%00'\";--", "../../etc/passwd"]:
+            r = await survives(f"search {q[:10]!r}", plugin.search(sid, q))
+            if r is not None and not isinstance(r, dict):
+                failures.append(f"search {q[:10]!r} returned {r!r}")
+        for kind, cid in [("nope", "1"), ("album", ""), ("album", "../../x"), ("folder", "/"), ("folder", "../.."),
+                          ("artist", "\x00"), ("playlist", "mdpl:missing")]:
+            await survives(f"open {kind} {cid!r}", plugin.open_collection(sid, kind, cid))
+        await survives("stream of a track that isn't there", plugin.stream_info(sid, "nope"))
+
+        for draft in [{"type": "nope"}, {"type": "local"}, {"type": "local", "config": None},
+                      {"type": "local", "name": "x" * 1000, "config": {"paths": []}},
+                      {"type": "local", "config": {"paths": ["/definitely/not/here", "", "/"]}},
+                      {"type": "subsonic", "config": {"url": "::::", "username": "", "password": ""}},
+                      {"type": "local", "id": "doesnotexist", "config": {"paths": [lib]}},
+                      {"type": "radio", "config": {"country": 42}}]:
+            r = await survives(f"save_service {str(draft)[:60]}", plugin.save_service(draft))
+            if r and r.get("ok"):
+                await plugin.remove_service(r["data"]["id"])
+        names = [s["name"] for s in plugin.settings.services()]
+        check(len(names) == len(set(names)), f"no two sources end up with the same name {names}")
+
+        # double- and triple-taps: the same save, switch or removal several times at once
+        doubled = await asyncio.gather(*[plugin.save_service({"type": "radio", "name": "", "config": {}}) for _ in range(3)])
+        radios = [s for s in plugin.settings.services() if s["type"] == "radio"]
+        check(all(r["ok"] for r in doubled) and len({s["name"] for s in radios}) == len(radios),
+              "a triple-tapped Save adds sources with distinct names, and nothing breaks")
+        await asyncio.gather(*[survives("double remove", plugin.remove_service(radios[0]["id"])) for _ in range(3)])
+        check(radios[0]["id"] not in plugin.instances and not plugin.settings.find_service(radios[0]["id"]),
+              "removing a source three times at once removes it once")
+        await asyncio.gather(*[plugin.set_active_service(s["id"]) for s in radios[1:]] + [plugin.set_active_service(sid)])
+        check(plugin.settings.get("active_service") in plugin.instances, "racing switches leave a real source live")
+        for s in radios[1:]:
+            await plugin.remove_service(s["id"])
+        await plugin.set_active_service(sid)
+        await asyncio.gather(*[survives("rescan spam", plugin.rescan(sid)) for _ in range(5)],
+                             *[survives("search during rescan", plugin.search(sid, "song")) for _ in range(5)])
+        await plugin.instances[sid].scan_task
+        check((await plugin.get_state())["services"][0]["status"]["tracks"] >= 1, "rescans tapped five times settle")
+
+        # playlists: gone, doubled, garbage
+        album_id = album_one["id"]
+        earlier = plugin.playlists.find_copy(sid, {"kind": "album", "id": album_id})
+        if earlier:  # saved by the playlists section above
+            await plugin.playlist_delete("md:" + earlier["id"])
+        saves = await asyncio.gather(*[plugin.save_as_playlist(sid, "album", album_id) for _ in range(3)])
+        check(sum(r["ok"] for r in saves) == 1 and "Already in your playlists" in next(r["error"] for r in saves if not r["ok"]),
+              "saving the same album three times at once keeps one copy")
+        await plugin.playlist_delete(next(r["data"]["id"] for r in saves if r["ok"]))
+        made = await plugin.create_playlist(sid, "   ", [])
+        check(made["title"] == "New playlist", "a blank playlist name gets a default")
+        long = await plugin.create_playlist(sid, "🎵" * 300, [track, track, {"id": "y"}])
+        check(len((await plugin.open_collection(sid, "playlist", long["id"]))["data"]["tracks"]) == 2,
+              "the same track twice in a new playlist is kept once")
+        await plugin.playlist_delete(long["id"])
+        for name, call in [("add", plugin.playlist_add(long["id"], [track])), ("remove", plugin.playlist_remove(long["id"], "x")),
+                           ("rename", plugin.playlist_rename(long["id"], "n")), ("clear art", plugin.playlist_clear_art(long["id"])),
+                           ("set art", plugin.playlist_set_art(long["id"], "/nope.jpg")), ("delete again", plugin.playlist_delete(long["id"])),
+                           ("add garbage", plugin.playlist_add(made["id"], [{"title": "no id"}])),
+                           ("open deleted", plugin.open_collection(sid, "playlist", long["id"]))]:
+            await survives(f"deleted playlist: {name}", call)
+        for path in ["/nope.jpg", lib, os.path.join(lib, "mix.m3u")]:
+            r = await survives(f"art from {path}", plugin.playlist_set_art(made["id"], path))
+            if r is not None and r.get("ok"):
+                failures.append(f"art from {path} was accepted")
+        art = os.path.join(tmp, "cover.png")
+        write(art)
+        await plugin.playlist_set_art(made["id"], art)
+        art_dir = plugin.playlists.art_dir
+        throwaway = await plugin.save_service({"type": "radio", "name": "Throwaway", "config": {}})
+        doomed = await plugin.create_playlist(throwaway["data"]["id"], "Doomed", [])
+        await plugin.playlist_set_art(doomed["id"], art)
+        await plugin.remove_service(throwaway["data"]["id"])
+        pictures = os.listdir(art_dir)
+        check(made["id"][len("md:"):] + ".png" in pictures and doomed["id"][len("md:"):] + ".png" not in pictures,
+              "removing a source deletes its playlists' pictures too")
+        await plugin.playlist_delete(made["id"])
+
+        # the saved queue: garbage in, nothing out
+        for session in [{}, {"queue": None}, {"queue": [{"track": track}]}, {"queue": "abc", "index": "x"},
+                        {"queue": [{"instanceId": sid, "track": track}], "index": 99, "position": -5}]:
+            await survives(f"save_session {str(session)[:40]}", plugin.save_session(session))
+            await survives("load_session after it", plugin.load_session())
+        with open(plugin._session_path(), "w") as f:
+            f.write("{not json")
+        check(await survives("corrupt session", plugin.load_session()) is None, "a corrupt saved queue is ignored")
+        await survives("garbage events", plugin.log_events([None, 1, "x", {"event": None, "data": "nope"}]))
+        await survives("no events", plugin.log_events(None))
+        await survives("garbage setting", plugin.set_setting("volume", "loud"))
+        check(isinstance(plugin.settings.get("volume"), (int, float)), "a volume that isn't a number is refused")
+
+        check(not failures, "no endpoint crashed:\n      " + "\n      ".join(failures))
+
+        base, key = plugin.server.base_url, plugin.server.key
+        some = next(iter(plugin.instances[sid].tracks))
+        statuses = {}
+        async with aiohttp.ClientSession() as http:
+            for label, url, headers in [
+                ("wrong key", f"{base}/stream/{sid}/{some}?k=nope", {}),
+                ("art, no key", f"{base}/art/{sid}/t:{some}", {}),
+                ("fetch, no key", f"{base}/fetch?u=aHR0cHM6Ly9leGFtcGxlLmNvbQ", {}),
+                ("path tricks", f"{base}/stream/{sid}/..%2F..%2Fetc%2Fpasswd?k={key}", {}),
+                ("art path tricks", f"{base}/art/{sid}/t:../../etc/passwd?k={key}", {}),
+                ("unknown source", f"{base}/stream/{gone}/{some}?k={key}", {}),
+                ("fetch a file", f"{base}/fetch?k={key}&u=ZmlsZTovLy9ldGMvcGFzc3dk", {}),
+                ("fetch garbage", f"{base}/fetch?k={key}&u=%%%", {}),
+                ("nonsense range", f"{base}/stream/{sid}/{some}?k={key}", {"Range": "bytes=abc-def"}),
+                ("range past the end", f"{base}/stream/{sid}/{some}?k={key}", {"Range": "bytes=999999999-"}),
+            ]:
+                async with http.get(url, headers=headers) as r:
+                    statuses[label] = r.status
+        check(all(400 <= v < 500 for v in statuses.values()),
+              f"the stream server refuses bad requests, never with a server error {statuses}")
+
+        from musicdeck.settings import Settings as SettingsStore
+        from musicdeck.playlists import PlaylistStore as Playlists
+        broken = os.path.join(tmp, "broken")
+        write(os.path.join(broken, "settings.json"), '{"services": [{"id": "a", "type": "loc')
+        write(os.path.join(broken, "playlists.json"), "\x00\x00")
+        fresh, lists = SettingsStore(broken), Playlists(broken)
+        check(fresh.services() == [] and lists.playlists == []
+              and os.path.isfile(os.path.join(broken, "settings.json.corrupt"))
+              and os.path.isfile(os.path.join(broken, "playlists.json.corrupt")),
+              "a cut-short settings or playlists file is kept aside, not overwritten by the next save")
+
         print("decky's python")
         import re as _re
         # Decky's frozen interpreter ships without these; a top-level import stops the whole plugin loading

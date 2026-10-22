@@ -18,7 +18,7 @@ from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError
-from musicdeck.settings import Settings
+from musicdeck.settings import DEFAULTS, Settings
 
 # Config keys never sent to the frontend; a service storing a secret under another name adds it here
 SECRET_KEYS = {"password", "token", "refresh_token", "salt", "secret", "cookies", "auth"}
@@ -178,6 +178,9 @@ class Plugin:
     async def set_setting(self, key: str, value: Any) -> None:
         if key not in FRONTEND_SETTINGS:
             raise ValueError(f"Setting {key} is not writable")
+        if not _valid_setting(key, value):
+            decky.logger.warning(f"Ignored an invalid value for {key}: {value!r}")
+            return
         self.settings.set(key, value)
         if key == "debug_log":
             debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(value))
@@ -270,9 +273,12 @@ class Plugin:
     @_when_ready
     async def log_events(self, entries: list[dict[str, Any]]) -> None:
         """Batched frontend events for the debug log: [{"t": ms, "event": str, "data": {...}}]."""
-        for entry in entries[:200]:
+        for entry in (entries if isinstance(entries, list) else [])[:200]:
+            if not isinstance(entry, dict):
+                continue
+            data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
             # "t" is when it happened; the event's own fields can't clash with debug()'s parameters
-            fields = {"t": entry.get("t"), **(entry.get("data") or {})}
+            fields = {"t": entry.get("t"), **data}
             fields = {k: v for k, v in fields.items() if k not in ("source", "event")}
             debuglog.debug("player", str(entry.get("event", "?")), **fields)
 
@@ -442,7 +448,7 @@ class Plugin:
     @_when_ready
     async def save_session(self, session: dict[str, Any]) -> None:
         """Stores the queue locally (every source) and on the server when it supports queue sync."""
-        session = {**session, "saved_at": time.time()}
+        session = {**_clean_session(session), "saved_at": time.time()}
         os.makedirs(decky.DECKY_PLUGIN_RUNTIME_DIR, exist_ok=True)
         tmp = self._session_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -466,7 +472,7 @@ class Plugin:
         local: Optional[dict[str, Any]] = None
         try:
             with open(self._session_path(), "r", encoding="utf-8") as f:
-                local = json.load(f)
+                local = _clean_session(json.load(f))
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         active = self.instances.get(self.settings.get("active_service") or "")
@@ -482,8 +488,8 @@ class Plugin:
                             "index": remote["index"], "position": remote["position"],
                             "from_device": remote.get("changed_by")}
         # only resume a queue from the source that's live now (no mixing sources)
-        if local and any(item.get("instanceId") != self.settings.get("active_service")
-                         for item in local.get("queue", [])):
+        if not local or not local["queue"] or any(item["instanceId"] != self.settings.get("active_service")
+                                                  for item in local["queue"]):
             return None
         return local
 
@@ -503,8 +509,12 @@ class Plugin:
         and later downloaded)."""
         async def work():
             page = await self._instance(instance_id).open(kind, collection_id)
-            return self.playlists.create(instance_id, page["title"], page["tracks"],
-                                         source={"kind": kind, "id": collection_id})
+            # checked after the (slow) fetch, so a double tap finds the first copy already made
+            source = {"kind": kind, "id": collection_id}
+            copy = self.playlists.find_copy(instance_id, source)
+            if copy:
+                raise ServiceError(f"Already in your playlists as “{copy['name']}”")
+            return self.playlists.create(instance_id, page["title"], page["tracks"], source=source)
         return await _result(work())
 
     @_when_ready
@@ -535,6 +545,35 @@ class Plugin:
     @_when_ready
     async def playlist_delete(self, playlist_id: str) -> None:
         self.playlists.delete(playlist_id)
+
+
+def _clean_session(session: Any) -> dict[str, Any]:
+    """A saved queue with anything malformed dropped: {"queue": [{"instanceId", "track"}], "index",
+    "position", "saved_at"}. The file outlives versions and the frontend, so it's never trusted."""
+    if not isinstance(session, dict):
+        session = {}
+    queue = [item for item in session.get("queue") or [] if isinstance(item, dict)
+             and isinstance(item.get("instanceId"), str) and isinstance(item.get("track"), dict)
+             and item["track"].get("id")] if isinstance(session.get("queue"), list) else []
+
+    def number(key: str) -> float:
+        value = session.get(key)
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+    index = int(number("index"))
+    return {**session, "queue": queue, "index": min(max(index, 0), max(len(queue) - 1, 0)),
+            "position": max(number("position"), 0), "saved_at": number("saved_at")}
+
+
+def _valid_setting(key: str, value: Any) -> bool:
+    """A frontend setting keeps the shape of its default (settings.DEFAULTS), so a bad value can't be
+    saved and then break the next start."""
+    default = DEFAULTS[key]
+    if key == "volume":
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
+    if key == "qam_mode":
+        return value in ("replace", "separate")
+    return isinstance(value, type(default))
 
 
 def _unique_name(base: str, others: list[dict[str, Any]]) -> str:

@@ -18,6 +18,7 @@ import time
 from typing import Any, Optional
 
 from . import models
+from .settings import load_json
 
 PREFIX = "md:"  # collection ids for MusicDeck playlists, so they never collide with service ids
 ART_PREFIX = "mdart:"  # art ids for custom playlist artwork, served from the art folder
@@ -29,12 +30,8 @@ class PlaylistStore:
     def __init__(self, directory: str):
         self.path = os.path.join(directory, "playlists.json")
         self.art_dir = os.path.join(directory, "playlist-art")
-        self.playlists: list[dict[str, Any]] = []
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                self.playlists = json.load(f).get("playlists", [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.playlists = []
+        playlists = load_json(self.path).get("playlists")
+        self.playlists: list[dict[str, Any]] = playlists if isinstance(playlists, list) else []
 
     def _save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -48,11 +45,14 @@ class PlaylistStore:
         return collection_id.startswith(PREFIX)
 
     def _find(self, collection_id: str) -> dict[str, Any]:
+        p = self._get(collection_id)
+        if p is None:
+            raise KeyError(collection_id)
+        return p
+
+    def _get(self, collection_id: str) -> Optional[dict[str, Any]]:
         pid = collection_id[len(PREFIX):] if collection_id.startswith(PREFIX) else collection_id
-        for p in self.playlists:
-            if p["id"] == pid:
-                return p
-        raise KeyError(collection_id)
+        return next((p for p in self.playlists if p["id"] == pid), None)
 
     @staticmethod
     def _collection(p: dict[str, Any]) -> dict[str, Any]:
@@ -77,12 +77,16 @@ class PlaylistStore:
                source: Optional[dict[str, str]] = None) -> dict[str, Any]:
         now = time.time()
         p = {"id": secrets.token_hex(6), "instance_id": instance_id, "name": name.strip() or "New playlist",
-             "tracks": [self._clean(t) for t in tracks or []], "created": now, "updated": now,
+             "tracks": self._fresh([], tracks or []), "created": now, "updated": now,
              # where a saved copy came from ({"kind", "id"}), and the future offline flag
              "source": source, "offline": False}
         self.playlists.append(p)
         self._save()
         return self._collection(p)
+
+    def find_copy(self, instance_id: str, source: dict[str, str]) -> Optional[dict[str, Any]]:
+        """The playlist saved from this source's album or playlist, if there is one."""
+        return next((p for p in self.playlists if p["instance_id"] == instance_id and p.get("source") == source), None)
 
     @staticmethod
     def _clean(track: dict[str, Any]) -> dict[str, Any]:
@@ -90,31 +94,52 @@ class PlaylistStore:
         keys = ("id", "title", "artist", "album", "duration", "art", "album_id", "artist_id", "gain")
         return {k: track.get(k) for k in keys}
 
+    @classmethod
+    def _fresh(cls, have: list[dict[str, Any]], tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The tracks not in `have` yet, once each (anything without an id isn't a track)."""
+        seen = {t["id"] for t in have}
+        fresh = []
+        for t in tracks:
+            if isinstance(t, dict) and t.get("id") and t["id"] not in seen:
+                seen.add(t["id"])
+                fresh.append(cls._clean(t))
+        return fresh
+
     def add(self, collection_id: str, tracks: list[dict[str, Any]]) -> int:
-        """Appends tracks that aren't already in the playlist; returns how many were added."""
-        p = self._find(collection_id)
-        have = {t["id"] for t in p["tracks"]}
-        fresh = [self._clean(t) for t in tracks if t["id"] not in have]
+        """Appends tracks that aren't already in the playlist; returns how many were added (0 when
+        the playlist is gone)."""
+        p = self._get(collection_id)
+        if p is None:
+            return 0
+        fresh = self._fresh(p["tracks"], tracks)
         p["tracks"].extend(fresh)
         p["updated"] = time.time()
         self._save()
         return len(fresh)
 
+    # remove, rename and clear_art do nothing for a playlist that's gone (deleted from another
+    # screen, or by a page left over from a reload); the views refresh afterwards
     def remove(self, collection_id: str, track_id: str) -> None:
-        p = self._find(collection_id)
+        p = self._get(collection_id)
+        if p is None:
+            return
         p["tracks"] = [t for t in p["tracks"] if t["id"] != track_id]
         p["updated"] = time.time()
         self._save()
 
     def rename(self, collection_id: str, name: str) -> None:
-        p = self._find(collection_id)
+        p = self._get(collection_id)
+        if p is None:
+            return
         p["name"] = name.strip() or p["name"]
         p["updated"] = time.time()
         self._save()
 
     def set_art(self, collection_id: str, image_path: str) -> None:
         """Copies the picture into MusicDeck's own folder, so moving or deleting the original is fine."""
-        p = self._find(collection_id)
+        p = self._get(collection_id)
+        if p is None:
+            raise ValueError("That playlist was deleted")
         ext = os.path.splitext(image_path)[1].lower()
         if ext not in ART_TYPES:
             raise ValueError("Pick a JPG, PNG, WebP or GIF image")
@@ -130,7 +155,9 @@ class PlaylistStore:
         self._save()
 
     def clear_art(self, collection_id: str) -> None:
-        p = self._find(collection_id)
+        p = self._get(collection_id)
+        if p is None:
+            return
         self._remove_art_file(p)
         p.pop("art_file", None)
         p["updated"] = time.time()
@@ -163,5 +190,8 @@ class PlaylistStore:
         self._save()
 
     def delete_for_instance(self, instance_id: str) -> None:
+        for p in self.playlists:
+            if p["instance_id"] == instance_id:
+                self._remove_art_file(p)
         self.playlists = [p for p in self.playlists if p["instance_id"] != instance_id]
         self._save()

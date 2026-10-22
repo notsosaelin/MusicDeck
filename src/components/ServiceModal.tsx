@@ -414,7 +414,11 @@ export const ServiceModal: FC<{
     });
   };
 
+  // a ref as well as state: a double tap arrives before the re-render that disables Save
+  const savingNow = useRef(false);
   const save = async () => {
+    if (savingNow.current) return;
+    savingNow.current = true;
     setSaving(true);
     setError(null);
     try {
@@ -432,6 +436,7 @@ export const ServiceModal: FC<{
     } catch (e) {
       setError(String(e));
     } finally {
+      savingNow.current = false;
       setSaving(false);
     }
   };

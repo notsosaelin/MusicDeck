@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -20,6 +21,24 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+def load_json(path: str) -> dict[str, Any]:
+    """A JSON object from disk, or {} when there's none. A file that can't be read (cut short by a
+    crash or a full disk) is moved aside as <name>.corrupt rather than overwritten by the next save,
+    so what was in it can still be recovered by hand."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+    os.replace(path, path + ".corrupt")
+    logging.getLogger("musicdeck").error(f"{path} couldn't be read; moved to {path}.corrupt")
+    return {}
+
+
 class Settings:
     """Small JSON-backed settings store. Writes are atomic so a crash can't truncate the file."""
 
@@ -30,11 +49,7 @@ class Settings:
         self.load()
 
     def load(self) -> None:
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                self.data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.data = {}
+        self.data = load_json(self.path)
         for key, value in DEFAULTS.items():
             self.data.setdefault(key, json.loads(json.dumps(value)))
 

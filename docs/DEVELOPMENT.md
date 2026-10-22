@@ -81,6 +81,9 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
   game, duplicate formats, installs finishing, art, the running-game row;
 - several accounts of one service: naming, duplicates refused, per-account Spotify credentials;
 - the shared sign-in flow, ListenBrainz (offline queue included);
+- abuse: every endpoint called for a source or playlist that's gone, garbage input, double and
+  triple taps run at once (saves, removals, switches, rescans), corrupt saved files, and bad
+  requests to the stream server. Nothing may raise, lose data, or answer with a server error;
 - that no MusicDeck module imports a standard-library package Decky's Python lacks.
 
 Also run `npx tsc --noEmit` (or `pnpm typecheck`) for the frontend.

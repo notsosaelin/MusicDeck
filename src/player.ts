@@ -22,6 +22,8 @@ const SCROBBLE_MAX_SECONDS = 240;
 const SESSION_SAVE_INTERVAL_MS = 20_000;
 /** Playing but the clock hasn't moved for this long: treat as a stall and recover. */
 const STALL_TIMEOUT_MS = 12_000;
+/** A live stream paused longer than this rejoins the broadcast on play instead of resuming the buffer. */
+const LIVE_REJOIN_MS = 30_000;
 
 export const hasFeature = (instanceId: string, feature: Feature) =>
   !!pluginState
@@ -105,6 +107,10 @@ export class Player {
   /** Play order when shuffling: a permutation of queue indices. */
   private order: number[] = [];
   private consecutiveErrors = 0;
+  /** Bumped whenever the queue is replaced or cleared, so slow work for the old one is dropped. */
+  private queueGeneration = 0;
+  /** When a live stream was paused; resuming much later rejoins the broadcast (see toggle) */
+  private livePausedAt = 0;
   /** Recovery attempts for the current track; one fresh re-resolve before giving up */
   private recoveries = 0;
   private stallWatch?: number;
@@ -123,6 +129,7 @@ export class Player {
     });
     this.audio.addEventListener("pause", () => {
       dlog("audio pause", { at: this.audio.currentTime, ended: this.audio.ended });
+      this.livePausedAt = Date.now();
       this.state.update({ playing: false });
       this.persistSession();
     });
@@ -220,38 +227,58 @@ export class Player {
     if (!tracks.length) return;
     const queue = tracks.map((track) => ({ instanceId, track }));
     if (shuffle !== undefined) this.state.update({ shuffle });
+    this.queueGeneration++;
     this.state.update({ queue });
     // "Shuffle play" starts on a random track; picking a track while shuffle is on starts on that one
     this.order = this.buildOrder(queue.length, shuffle ? -1 : start);
     this.load(this.state.get().shuffle ? this.order[0] : start);
   }
 
+  /**
+   * Adds tracks after the current one (`next`, "Play next") or at the end. The play order is kept,
+   * shuffled or not: the new tracks come right after the current one or last, and nothing already
+   * heard comes round again.
+   */
   enqueue(instanceId: string, tracks: Track[], next = false) {
+    if (!tracks.length) return;
     const { queue, index } = this.state.get();
     const items = tracks.map((track) => ({ instanceId, track }));
     const at = next && index >= 0 ? index + 1 : queue.length;
     const updated = [...queue.slice(0, at), ...items, ...queue.slice(at)];
     this.state.update({ queue: updated });
-    this.order = this.buildOrder(updated.length, index);
-    if (index < 0) this.load(0);
-  }
-
-  removeAt(i: number) {
-    const { queue, index } = this.state.get();
-    if (i === index) {
-      if (queue.length === 1) return this.clear();
-      this.state.update({ queue: queue.filter((_, j) => j !== i), index: index - 1 });
-      this.order = this.buildOrder(queue.length - 1, -1);
-      this.load(Math.min(i, queue.length - 2));
+    if (index < 0) {
+      this.queueGeneration++;
+      this.order = this.buildOrder(updated.length, -1);
+      this.load(this.order[0]);
       return;
     }
-    this.state.update({ queue: queue.filter((_, j) => j !== i), index: i < index ? index - 1 : index });
-    this.order = this.buildOrder(queue.length - 1, this.state.get().index);
+    const added = items.map((_, k) => at + k);
+    const order = this.order.map((j) => (j >= at ? j + items.length : j));
+    if (next) order.splice(order.indexOf(index) + 1, 0, ...added);
+    else order.push(...added);
+    this.order = order;
+  }
+
+  /** Removes a queued track; removing the one playing moves on to what was due next. */
+  removeAt(i: number) {
+    const { queue, index } = this.state.get();
+    if (i < 0 || i >= queue.length) return;
+    if (queue.length === 1) return this.clear();
+    const pos = this.order.indexOf(i);
+    this.order = this.order.filter((j) => j !== i).map((j) => (j > i ? j - 1 : j));
+    const remaining = queue.filter((_, j) => j !== i);
+    if (i === index) {
+      this.state.update({ queue: remaining });
+      this.load(this.order[Math.min(pos, this.order.length - 1)]);
+      return;
+    }
+    this.state.update({ queue: remaining, index: i < index ? index - 1 : index });
   }
 
   clear() {
     saveSession({ queue: [], index: -1, position: 0 }).catch(() => {});
     this.loadToken++;
+    this.queueGeneration++;
     this.detachHls();
     this.audio.pause();
     this.audio.removeAttribute("src");
@@ -271,8 +298,12 @@ export class Player {
   toggle() {
     dlog("toggle", { paused: this.audio.paused });
     if (this.state.get().index < 0) return;
-    if (this.audio.paused) this.play();
-    else this.audio.pause();
+    if (!this.audio.paused) return this.audio.pause();
+    // a live stream resumed after a while would play stale buffered audio (or stall): rejoin it now
+    if (this.current?.track.live && Date.now() - this.livePausedAt > LIVE_REJOIN_MS) {
+      return void this.prepare(this.state.get().index, true, 0);
+    }
+    this.play();
   }
 
   next(auto = false) {
@@ -296,7 +327,8 @@ export class Player {
   previous() {
     dlog("previous", { from: this.state.get().index, at: this.audio.currentTime });
     // Restart the track if we're more than a few seconds in, like every hardware player
-    if (this.audio.currentTime > 3) {
+    // (a live stream can't restart: previous is the previous station)
+    if (this.audio.currentTime > 3 && !this.current?.track.live) {
       this.audio.currentTime = 0;
       return;
     }
@@ -310,6 +342,7 @@ export class Player {
   }
 
   setVolume(volume: number) {
+    if (!Number.isFinite(volume)) return;
     this.audio.volume = Math.min(1, Math.max(0, volume));
     this.state.update({ volume: this.audio.volume });
   }
@@ -535,8 +568,11 @@ export class Player {
     const item = this.current;
     if (!item || this.extendingRadio) return;
     this.extendingRadio = true;
+    const generation = this.queueGeneration;
     try {
       const result = await getRadio(item.instanceId, item.track);
+      // another album, a cleared queue or a source switch while waiting: these belong to the old one
+      if (generation !== this.queueGeneration) return;
       const known = new Set(this.state.get().queue.map((q) => q.track.id));
       const fresh = result.ok ? result.data.filter((t) => !known.has(t.id)) : [];
       dlog("radio", { ok: result.ok, fresh: fresh.length, error: result.ok ? undefined : result.error });
