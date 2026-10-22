@@ -277,7 +277,19 @@ class Plugin:
 
     @_when_ready
     async def search(self, instance_id: str, query: str) -> dict[str, Any]:
+        if self.settings.find_service(instance_id):
+            self.recents.add_search(instance_id, query)
         return await _result(self._call(instance_id, lambda s: s.search(query)))
+
+    @_when_ready
+    async def search_history(self, instance_id: str) -> list[str]:
+        """A source's recent searches, newest first."""
+        return self.recents.searches(instance_id)
+
+    @_when_ready
+    async def forget_search(self, instance_id: str, query: str) -> None:
+        """Drops one recent search, or all of them ("")."""
+        self.recents.forget_search(instance_id, query)
 
     # --- playback ---
 

@@ -127,7 +127,7 @@ Details worth knowing:
 | `musicdeck/services/*.py` | One file per source. See [SOURCES.md](SOURCES.md). |
 | `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; range proxying, HLS rewriting, resolved-source cache. |
 | `musicdeck/settings.py` | `Settings`: atomic JSON store for preferences and configured sources (credentials included, so `chmod 600`). |
-| `musicdeck/recents.py` | `Recents`: the albums and playlists played lately per source, for the "Jump back in" row (`played_collection`; recorded by `playFrom` in nav.ts). |
+| `musicdeck/recents.py` | `Recents`: the albums and playlists played lately per source, for the "Jump back in" row (`played_collection`; recorded by `playFrom` in nav.ts), and recent searches (recorded by `search`; `search_history`, `forget_search`). |
 | `musicdeck/playlists.py` | `PlaylistStore`: MusicDeck's own playlists (`md:` ids) with custom artwork (`mdart:` ids), stored on the Deck. |
 | `musicdeck/lyrics.py` | The lyrics shape, LRC parsing, LRCLIB fallback. |
 | `musicdeck/listenbrainz.py` | ListenBrainz client with an on-disk queue for listens made offline. |
@@ -224,7 +224,7 @@ classDiagram
 | `~/homebrew/settings/MusicDeck/` | `settings.json` (mode 600) | Preferences, configured sources and their credentials (tokens, never passwords), ListenBrainz token, game music |
 | | `playlists.json`, `playlist-art/` | MusicDeck playlists and their custom pictures |
 | `~/homebrew/data/MusicDeck/` | `session.json` | The queue, for "Resume where you left off" |
-| `~/homebrew/data/MusicDeck/` | `recents.json` | The last 10 albums and playlists played, per source ("Jump back in") |
+| `~/homebrew/data/MusicDeck/` | `recents.json` | The last 10 albums and playlists played and the last 8 searches, per source |
 | | `local-<id>.json`, `local-<id>-favourites.json`, `art-cache/` | Local library index, favourites, extracted cover art |
 | | `steam-<id>.json`, `steam-<id>-owned.json`, `steam-<id>-favourites.json` | Installed soundtracks index, owned soundtracks (from Steam's UI), favourites |
 | | `qobuz-app.json`, `soundcloud-client.json` | Public app credentials scraped from the services' web players (refreshed when rejected) |

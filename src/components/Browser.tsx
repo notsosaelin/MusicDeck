@@ -9,7 +9,16 @@ import {
   TextField,
 } from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useState } from "react";
-import { FaDownload, FaExternalLinkAlt, FaGamepad, FaPlay, FaPlus, FaRandom, FaSearch } from "react-icons/fa";
+import {
+  FaDownload,
+  FaExternalLinkAlt,
+  FaGamepad,
+  FaHistory,
+  FaPlay,
+  FaPlus,
+  FaRandom,
+  FaSearch,
+} from "react-icons/fa";
 import {
   Collection,
   CollectionKind,
@@ -17,10 +26,12 @@ import {
   Result,
   Section,
   Track,
+  forgetSearch,
   getHome,
   isLocalPlaylist,
   openCollection,
   search,
+  searchHistory,
 } from "../api";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
 import { hasFeature, player } from "../player";
@@ -28,7 +39,17 @@ import { pluginState, useStore } from "../store";
 import { ROOTS, StackName, dataVersion, navigation, playFrom, pushView, resultCache, setStack } from "../nav";
 import { notify } from "../notify";
 import { MenuContext, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
-import { Art, ButtonRow, CollectionRow, IconButton, Message, RowText, ScrollingText, TrackRow } from "./common";
+import {
+  Art,
+  ButtonRow,
+  CollectionRow,
+  IconButton,
+  ListRow,
+  Message,
+  RowText,
+  ScrollingText,
+  TrackRow,
+} from "./common";
 
 function useResult<T>(key: string, load: () => Promise<Result<T>>): Result<T> | null {
   const [result, setResult] = useState<Result<T> | null>(() => resultCache.get(key) ?? null);
@@ -396,11 +417,50 @@ const SearchResults: FC<{ instanceId: string; query: string }> = ({ instanceId, 
   return <PageBody instanceId={instanceId} stack="search" page={result.data} />;
 };
 
+/** Under an empty search field: the source's last searches. A searches again, X forgets one. */
+const RecentSearches: FC<{ instanceId: string; onSearch: (query: string) => void }> = ({ instanceId, onSearch }) => {
+  const [searches, setSearches] = useState<string[]>([]);
+  const load = () =>
+    searchHistory(instanceId)
+      .then(setSearches)
+      .catch(() => {});
+  useEffect(() => {
+    void load();
+  }, [instanceId]);
+  const forget = async (query: string) => {
+    await forgetSearch(instanceId, query);
+    await load();
+  };
+  if (!searches.length) return null;
+  return (
+    <PanelSection title="Recent searches">
+      {searches.map((q) => (
+        <ListRow
+          key={q}
+          leading={<FaHistory style={{ opacity: 0.6, flexShrink: 0 }} />}
+          title={q}
+          onActivate={() => onSearch(q)}
+          onSecondary={() => forget(q)}
+          secondaryLabel="Remove"
+        />
+      ))}
+      <ButtonRow>
+        <IconButton onClick={() => forget("")}>Clear recent searches</IconButton>
+      </ButtonRow>
+    </PanelSection>
+  );
+};
+
 const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, query }) => {
   const [draft, setDraft] = useState(query);
+  const run = (q: string) => {
+    // searching again fetches afresh (and so counts as the latest search), rather than reusing old results
+    resultCache.delete(`${instanceId}:search:${q}`);
+    setStack("search", [{ type: "search", query: q }]);
+  };
   const submit = () => {
     const q = draft.trim();
-    if (q) setStack("search", [{ type: "search", query: q }]);
+    if (q) run(q);
   };
   return (
     <>
@@ -438,7 +498,17 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
           </PanelSectionRow>
         )}
       </PanelSection>
-      {query && <SearchResults instanceId={instanceId} query={query} />}
+      {query ? (
+        <SearchResults instanceId={instanceId} query={query} />
+      ) : (
+        <RecentSearches
+          instanceId={instanceId}
+          onSearch={(q) => {
+            setDraft(q);
+            run(q);
+          }}
+        />
+      )}
     </>
   );
 };

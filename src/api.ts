@@ -216,6 +216,9 @@ export interface OnAir {
   artist: string;
   art: string | null;
 }
+export const searchHistory = callable<[id: string], string[]>("search_history");
+/** query "" forgets them all */
+export const forgetSearch = callable<[id: string, query: string], void>("forget_search");
 export const playedCollection = callable<[id: string, collection: Collection], void>("played_collection");
 export const setGameMusic = callable<
   [id: string, appid: number, game: string, collection: Collection | null],

@@ -745,17 +745,35 @@ async def run():
         for i in range(15):
             await plugin.played_collection(sid, {"id": f"a{i}", "kind": "album", "title": f"A{i}"})
         check(len(plugin.recents.for_instance(sid)) == 10, "the row keeps the last 10")
+        for q in ["lonely", "  Second   Song ", "LONELY", "", "   "]:
+            await plugin.search(sid, q)
+        check(await plugin.search_history(sid) == ["LONELY", "Second Song"],
+              "recent searches: newest first, tidied, once each whatever the case, blanks ignored")
+        for i in range(10):
+            await plugin.search(sid, f"query {i}")
+        check(len(await plugin.search_history(sid)) == 8, "the last 8 searches are kept")
+        await plugin.forget_search(sid, "query 9")
+        check("query 9" not in await plugin.search_history(sid), "one search can be removed")
+        await plugin.forget_search(sid, "")
+        check(await plugin.search_history(sid) == [], "or all of them")
+        await plugin.search(sid, "kept")
         for junk in [None, "x", {}, {"id": "only-id"}, {"kind": "album"}]:
             await plugin.played_collection(sid, junk)
         await plugin.played_collection("no-such-source", album_one)
-        check(len(plugin.recents.for_instance(sid)) == 10 and "no-such-source" not in plugin.recents.data,
+        check(len(plugin.recents.for_instance(sid)) == 10 and "no-such-source" not in plugin.recents.collections,
               "garbage and unknown sources are ignored")
         temp = await plugin.save_service({"type": "radio", "name": "Temp", "config": {}})
         await plugin.played_collection(temp["data"]["id"], {"id": "tag:jazz", "kind": "list", "title": "Jazz"})
+        await plugin.search(temp["data"]["id"], "jazz")
         await plugin.remove_service(temp["data"]["id"])
-        check(temp["data"]["id"] not in plugin.recents.data, "removing a source forgets what it played")
+        check(temp["data"]["id"] not in plugin.recents.collections and temp["data"]["id"] not in plugin.recents.searches_by_instance,
+              "removing a source forgets what it played and searched")
         from musicdeck.recents import Recents
-        check(len(Recents(decky.DECKY_PLUGIN_RUNTIME_DIR).for_instance(sid)) == 10, "kept across restarts")
+        reread = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)
+        check(len(reread.for_instance(sid)) == 10 and reread.searches(sid) == ["kept"], "kept across restarts")
+        first_version = os.path.join(tmp, "recents-v1")
+        write(os.path.join(first_version, "recents.json"), json.dumps({sid: [{"id": "x", "kind": "album", "title": "X"}]}))
+        check([c["title"] for c in Recents(first_version).for_instance(sid)] == ["X"], "the first version's file still reads")
         plugin.recents.forget(instance_id=sid)
 
         print("game music")

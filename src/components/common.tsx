@@ -211,7 +211,7 @@ export interface RowMoving {
   onDone: () => void;
 }
 
-const ListRow: FC<
+export const ListRow: FC<
   RowActions & {
     leading?: ReactNode;
     title: string;

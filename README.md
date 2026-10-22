@@ -16,7 +16,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   switch between them like any other source.
 - **Native Quick Access tab:** now playing, Library, Search, Lyrics, Queue and Equalizer, built from Steam's
   own components and controller conventions.
-- **Jump back in:** each source's home starts with the albums and playlists you played last.
+- **Jump back in:** each source's home starts with the albums and playlists you played last, and an empty
+  search shows your recent searches.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
   album from a source as your own.
 - **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net), in the Lyrics tab or full
