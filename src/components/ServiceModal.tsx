@@ -23,10 +23,11 @@ import { syncSteam } from "../steam";
 // FileSelectionType.FOLDER from @decky/api (a const enum, which isolated builds can't import)
 const SELECT_FOLDER = 1;
 
-const Field: FC<{ label: string; children: any }> = ({ label, children }) => (
+const Field: FC<{ label: string; hint?: string; children: any }> = ({ label, hint, children }) => (
   <div style={{ marginBottom: 12 }}>
     <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>{label}</div>
     {children}
+    {hint && <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>{hint}</div>}
   </div>
 );
 
@@ -276,13 +277,17 @@ const SpotifyFields: FC<{
   );
 };
 
-/** A server address, username and password: Navidrome/Subsonic, and Emby (whose password becomes a token on save). */
+/**
+ * A server address, username and password: Navidrome/Subsonic, and Emby and Audiobookshelf (whose
+ * password becomes a token on save). `passwordHint` explains other ways in, e.g. an API key.
+ */
 const ServerFields: FC<{
   draft: ServiceDraft;
   setConfig: (c: Record<string, any>) => void;
   hasCredentials: boolean;
   placeholder: string;
-}> = ({ draft, setConfig, hasCredentials, placeholder }) => (
+  passwordHint?: string;
+}> = ({ draft, setConfig, hasCredentials, placeholder, passwordHint }) => (
   <>
     <Field label="Server URL">
       <TextField
@@ -297,7 +302,7 @@ const ServerFields: FC<{
         onChange={(e) => setConfig({ ...draft.config, username: e.target.value })}
       />
     </Field>
-    <Field label="Password">
+    <Field label="Password" hint={passwordHint}>
       <TextField
         bIsPassword
         value={draft.config.password ?? ""}
@@ -574,6 +579,15 @@ export const ServiceModal: FC<{
             setConfig={setConfig}
             hasCredentials={!!existing?.has_credentials}
             placeholder="https://emby.example.com"
+          />
+        )}
+        {type === "audiobookshelf" && (
+          <ServerFields
+            draft={draft}
+            setConfig={setConfig}
+            hasCredentials={!!existing?.has_credentials}
+            placeholder="https://abs.example.com"
+            passwordHint="Or paste an API key here and leave the username empty"
           />
         )}
         {type === "jellyfin" && (

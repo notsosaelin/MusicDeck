@@ -5,6 +5,7 @@ tagged library in a temp dir, then drives main.Plugin and the stream server over
     python tests/test_backend.py      (needs aiohttp + certifi installed; mutagen comes from py_modules)
 """
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -596,6 +597,185 @@ async def run():
         finally:
             pxmod.PLEX_TV, pxmod.RESOURCES = real_plex
             await px_runner.cleanup()
+
+        print("audiobookshelf")
+        from aiohttp import web as abweb
+        ab_calls = []
+        ab_state = {"access": "acc1", "refresh": "ref1", "progress": {"B1": {"libraryItemId": "B1", "episodeId": None,
+                                                                            "currentTime": 100, "isFinished": False}}}
+        ab_files = {"11": b"A" * 1000, "12": b"B" * 1000}
+
+        def ab_book(full=True):
+            book = {"id": "B1", "mediaType": "book", "media": {
+                "coverPath": "/metadata/items/B1/cover.jpg", "duration": 180,
+                "metadata": {"title": "Long Book", "authorName": "Ann Author", "narratorName": "Ned",
+                             "authors": [{"id": "AU1", "name": "Ann Author"}]}}}
+            if full:
+                book["media"]["tracks"] = [
+                    {"index": 1, "ino": "11", "startOffset": 0, "duration": 90, "codec": "mp3", "mimeType": "audio/mpeg",
+                     "metaTags": {"tagTitle": "Part one"}},
+                    {"index": 2, "ino": "12", "startOffset": 90, "duration": 90, "codec": "mp3", "mimeType": "audio/mpeg",
+                     "metaTags": {}}]
+                book["media"]["chapters"] = [{"start": 0, "end": 90, "title": "Prologue"},
+                                             {"start": 90, "end": 120, "title": "Second"},
+                                             {"start": 120, "end": 180, "title": "Third"}]
+            return book
+
+        ab_pod = {"id": "P1", "mediaType": "podcast", "media": {"coverPath": None, "metadata": {"title": "Cast", "author": "Host"},
+                  "episodes": [{"id": "E1", "title": "Older", "publishedAt": 1767225600000, "duration": 60,
+                                "audioFile": {"ino": "21", "codec": "wmav2", "duration": 60}},
+                               {"id": "E2", "title": "Newer", "publishedAt": 1769904000000, "duration": 60,
+                                "audioFile": {"ino": "22", "codec": "mp3", "mimeType": "audio/mpeg", "duration": 60}}]}}
+
+        async def fake_abs(request):
+            body = await request.json() if request.can_read_body else None
+            ab_calls.append((request.method, request.path, dict(request.query), body))
+            if request.path == "/login":
+                if body != {"username": "me", "password": "right"} or request.headers.get("x-return-tokens") != "true":
+                    return abweb.Response(status=401, text="Unauthorized")
+                return abweb.json_response({"user": {"id": "U1", "username": "me", "token": "legacy",
+                                                     "accessToken": ab_state["access"], "refreshToken": ab_state["refresh"]}})
+            if request.path == "/auth/refresh":
+                if request.headers.get("x-refresh-token") != ab_state["refresh"]:
+                    return abweb.Response(status=401)
+                ab_state["access"], ab_state["refresh"] = "acc2", "ref2"
+                return abweb.json_response({"user": {"id": "U1", "accessToken": "acc2", "refreshToken": "ref2"}})
+            if request.headers.get("Authorization") not in (f"Bearer {ab_state['access']}", "Bearer apikey"):
+                return abweb.Response(status=401, text="Unauthorized")
+            if request.path == "/api/me":
+                return abweb.json_response({"id": "U1", "username": "me", "mediaProgress": list(ab_state["progress"].values())})
+            if request.path == "/api/libraries":
+                return abweb.json_response({"libraries": [{"id": "L1", "name": "Books", "mediaType": "book"},
+                                                          {"id": "L2", "name": "Shows", "mediaType": "podcast"},
+                                                          {"id": "L3", "name": "Comics", "mediaType": "ebook"}]})
+            if request.path == "/api/libraries/L1/personalized":
+                return abweb.json_response([
+                    {"id": "continue-listening", "type": "book", "entities": [ab_book(False)]},
+                    {"id": "recently-added", "type": "book", "entities": [ab_book(False)]},
+                    {"id": "newest-authors", "type": "authors", "entities": [{"id": "AU1", "name": "Ann Author", "numBooks": 1}]},
+                    {"id": "something-new", "type": "book", "entities": [ab_book(False)]}])
+            if request.path == "/api/libraries/L2/personalized":
+                return abweb.json_response([{"id": "newest-episodes", "type": "episode",
+                                             "entities": [{**ab_pod, "recentEpisode": ab_pod["media"]["episodes"][1]}]}])
+            if request.path == "/api/items/B1":
+                return abweb.json_response(ab_book())
+            if request.path == "/api/items/P1":
+                return abweb.json_response(ab_pod)
+            if request.method == "PATCH" and request.path.startswith("/api/me/progress/"):
+                key = request.path[len("/api/me/progress/"):]
+                item, _, episode = key.partition("/")
+                ab_state["progress"][key] = {"libraryItemId": item, "episodeId": episode or None, **body}
+                return abweb.Response(text="OK")
+            if request.path in ("/api/items/B1/file/11", "/api/items/B1/file/12"):
+                data = ab_files[request.path[-2:]]
+                if request.headers.get("Range") == "bytes=0-99":
+                    return abweb.Response(status=206, body=data[:100], headers={"Content-Range": f"bytes 0-99/{len(data)}"},
+                                          content_type="audio/mpeg")
+                return abweb.Response(body=data, content_type="audio/mpeg")
+            if request.path == "/api/items/B1/cover":
+                return abweb.Response(body=JPEG, content_type="image/jpeg")
+            if request.path == "/api/libraries/L1/search":
+                return abweb.json_response({"book": [{"libraryItem": ab_book(False)}], "authors": [{"id": "AU1", "name": "Ann Author"}],
+                                            "series": [{"series": {"id": "S1", "name": "Saga"}, "books": [ab_book(False)]}]})
+            if request.path == "/api/libraries/L2/search":
+                return abweb.json_response({"podcast": [], "episodes": [{"libraryItem": {**ab_pod, "recentEpisode": ab_pod["media"]["episodes"][0]}}]})
+            if request.path == "/api/libraries/L1/items" and request.query.get("filter") == "series." + base64.b64encode(b"S1").decode():
+                in_series = ab_book(False)
+                in_series["media"]["metadata"]["series"] = {"id": "S1", "name": "Saga", "sequence": "1"}
+                return abweb.json_response({"results": [in_series]})
+            return abweb.Response(status=404)
+        ab_app = abweb.Application()
+        ab_app.router.add_route("*", "/{path:.*}", fake_abs)
+        ab_runner = abweb.AppRunner(ab_app)
+        await ab_runner.setup()
+        ab_site = abweb.TCPSite(ab_runner, "127.0.0.1", 0)
+        await ab_site.start()
+        ab_url = f"http://127.0.0.1:{ab_site._server.sockets[0].getsockname()[1]}"
+        try:
+            wrong = await plugin.save_service({"type": "audiobookshelf", "name": "", "config": {"url": ab_url, "username": "me", "password": "nope"}})
+            check(not wrong["ok"] and "didn't accept that username and password" in wrong["error"], "a wrong password is refused")
+            badkey = await plugin.save_service({"type": "audiobookshelf", "name": "", "config": {"url": ab_url, "password": "nokey"}})
+            check(not badkey["ok"] and "API key" in badkey["error"], "a password without a username is an API key, checked")
+            ab = (await plugin.save_service({"type": "audiobookshelf", "name": "", "config": {"url": ab_url, "username": "me", "password": "right"}}))["data"]
+            aid = ab["id"]
+            stored = next(x for x in plugin.settings.services() if x["id"] == aid)["config"]
+            check(stored["token"] == "acc1" and stored["refresh_token"] == "ref1" and "password" not in stored
+                  and "token" not in ab["config"] and "refresh_token" not in ab["config"],
+                  "the password becomes an access and a refresh token, neither shown to the UI")
+            again = await plugin.save_service({"type": "audiobookshelf", "name": "", "config": {"url": ab_url, "username": "me", "password": "right"}})
+            check(not again["ok"] and "already added" in again["error"], "the same user on the same server can't be added twice")
+            home = (await plugin.home(aid))["data"]
+            check([s["title"] for s in home] == ["Continue listening", "New episodes · Shows", "Recently added · Books", "Authors · Books", "Libraries"],
+                  "home: continue listening first, the server's shelves by name (unknown ones left out), then the libraries")
+            check([t["id"] for t in home[0]["tracks"]] == ["f:B1:12"] and home[0]["tracks"][0]["artist"] == "Ann Author · 1 min left",
+                  "a book in Continue listening is the file it was left in, with what's left of it")
+            check([c["id"] for c in home[-1]["items"]] == ["l:L1", "l:L2"], "ebook-only libraries are left out")
+            page = (await plugin.open_collection(aid, "album", "b:B1"))["data"]
+            check([(t["id"], t["title"]) for t in page["tracks"]] == [("f:B1:11", "Prologue"), ("f:B1:12", "Second")]
+                  and page["subtitle"] == "Ann Author, read by Ned · 3 min" and page["art"] == "i:B1",
+                  "a book's files, named after the chapter each starts")
+            check(page["tracks"][0]["artist"] == "Ann Author · Played" and page["tracks"][0]["artist_id"] == "a:AU1",
+                  "files before where the user is count as played")
+            info = (await plugin.stream_info(aid, "f:B1:12"))["data"]
+            check(info["start_at"] == 5, "a file resumes where the book was left, a few seconds back")
+            check((await plugin.stream_info(aid, "f:B1:11"))["data"]["start_at"] == 0, "a file before that starts at its start")
+            await plugin.save_progress(aid, page["tracks"][1], 20.0, 90.0)
+            check(ab_state["progress"]["B1"]["currentTime"] == 110 and ab_state["progress"]["B1"]["duration"] == 180
+                  and not ab_state["progress"]["B1"]["isFinished"], "progress is saved as the place in the whole book")
+            await plugin.save_progress(aid, page["tracks"][1], 85.0, 90.0)
+            check(ab_state["progress"]["B1"]["isFinished"], "the end of the last file finishes the book")
+            check((await plugin.set_played(aid, page["tracks"][0], False))["ok"] and ab_state["progress"]["B1"]["currentTime"] == 0
+                  and not ab_state["progress"]["B1"]["isFinished"], "unplayed: back to that file's start")
+            await plugin.set_played(aid, page["tracks"][0], True)
+            check(ab_state["progress"]["B1"]["currentTime"] == 90 and not ab_state["progress"]["B1"]["isFinished"],
+                  "played: on to the next file, the book not finished")
+            chapters = (await plugin.get_lyrics(aid, page["tracks"][1]))["data"]
+            check(chapters == {"synced": True, "source": "", "title": "Chapters", "lines": [{"t": 0, "text": "Second"}, {"t": 30, "text": "Third"}]},
+                  "a file's chapters, timed from its start, as synced lines")
+            check((await plugin.get_lyrics(aid, page["tracks"][0]))["data"] is None, "one chapter in a file: nothing to show, nothing looked up")
+            pod = (await plugin.open_collection(aid, "album", "p:P1"))["data"]
+            check([t["id"] for t in pod["tracks"]] == ["e:P1:E2", "e:P1:E1"] and pod["subtitle"] == "Host · 2 episodes"
+                  and pod["tracks"][0]["album_id"] == "p:P1", "a podcast's episodes, newest first")
+            await plugin.save_progress(aid, pod["tracks"][0], 20.0, 60.0)
+            check(ab_state["progress"]["P1/E2"]["currentTime"] == 20, "episode progress under the item and episode")
+            check(not (await plugin.stream_info(aid, "e:P1:E1"))["ok"], "a format Steam can't play is an error, not silence")
+            found = (await plugin.search(aid, "saga"))["data"]
+            check([c["id"] for c in found["collections"]] == ["a:AU1", "b:B1", "s:L1:S1"] and [t["id"] for t in found["tracks"]] == ["e:P1:E1"],
+                  "search: authors, books and series from every library, and episodes")
+            series = (await plugin.open_collection(aid, "album", "s:L1:S1"))["data"]
+            check(series["title"] == "Saga" and [c["id"] for c in series["collections"]] == ["b:B1"], "a series, in the server's order")
+            base, key = plugin.server.base_url, plugin.server.key
+            inst = plugin.instances[aid]
+            async with aiohttp.ClientSession() as http:
+                # the access token stops working: the next request renews it and saves the new pair
+                ab_state["access"] = "acc1"
+                inst.items.clear()
+                inst.config["token"] = "acc-old"
+                await plugin.open_collection(aid, "album", "b:B1")
+                stored = next(x for x in plugin.settings.services() if x["id"] == aid)["config"]
+                check(stored["token"] == "acc2" and stored["refresh_token"] == "ref2", "a refused token is renewed and the new pair saved")
+                plugin.server.forget(aid, "f:B1:11")
+                async with http.get(f"{base}/stream/{aid}/f:B1:11?k={key}", headers={"Range": "bytes=0-99"}) as r:
+                    check(r.status == 206 and await r.read() == b"A" * 100, "audio through the stream server, with ranges")
+                async with http.get(f"{base}/art/{aid}/i:B1?k={key}") as r:
+                    check(r.status == 200 and await r.read() == JPEG, "covers through the stream server")
+            check(next(c for c in reversed(ab_calls) if c[1] == "/api/items/B1/cover")[2] == {"width": "600"},
+                  "covers are asked for at the size shown")
+            for bad in ["b:../../api/me", "b:", "x:B1", "s:L1", "l:nope"]:
+                check(not (await plugin.open_collection(aid, "album", bad))["ok"], f"refused id {bad!r}")
+            for bad in ["f:B1:99", "f:B1/../x:11", "e:P1", "b:B1"]:
+                check(not (await plugin.stream_info(aid, bad))["ok"], f"refused track {bad!r}")
+            check(not (await plugin.set_played(aid, {"id": "f:B1:99"}, True))["ok"], "marking a file that's gone is an error")
+            keyed = await plugin.save_service({"type": "audiobookshelf", "name": "Key", "config": {"url": ab_url, "password": "apikey"}})
+            check(not keyed["ok"] and "already added" in keyed["error"], "an API key for the same user is the same account")
+            await plugin.remove_service(aid)
+            keyed = (await plugin.save_service({"type": "audiobookshelf", "name": "Key", "config": {"url": ab_url, "password": "apikey"}}))["data"]
+            kstored = next(x for x in plugin.settings.services() if x["id"] == keyed["id"])["config"]
+            check(kstored["token"] == "apikey" and not kstored["refresh_token"] and keyed["config"]["username"] == "me",
+                  "an API key is kept as the token, with nothing to renew")
+            await plugin.remove_service(keyed["id"])
+        finally:
+            await ab_runner.cleanup()
 
         print("internet radio")
         from aiohttp import web as aioweb

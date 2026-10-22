@@ -1,10 +1,11 @@
+from .audiobookshelf import AudiobookshelfService
 from .bandcamp import BandcampService
 from .base import MusicService, ServiceError, SignIn, StreamSource
 from .emby import EmbyService
-from .plex import PlexService
 from .jellyfin import JellyfinService
 from .livemusic import LiveMusicService
 from .local import LocalService
+from .plex import PlexService
 from .podcasts import PodcastService
 from .qobuz import QobuzService
 from .radio import RadioService
@@ -22,6 +23,7 @@ SERVICE_TYPES: dict[str, type[MusicService]] = {
     JellyfinService.type: JellyfinService,
     EmbyService.type: EmbyService,
     PlexService.type: PlexService,
+    AudiobookshelfService.type: AudiobookshelfService,
     SoundCloudService.type: SoundCloudService,
     YouTubeService.type: YouTubeService,
     BandcampService.type: BandcampService,

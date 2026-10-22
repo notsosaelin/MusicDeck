@@ -164,7 +164,7 @@ export const LyricsView: FC = () => {
   if (!lyrics) return <Message>No lyrics found for this track</Message>;
   if ("error" in lyrics) return <Message>Couldn't load lyrics: {lyrics.error}</Message>;
   return (
-    <PanelSection title="Lyrics">
+    <PanelSection title={lyrics.title ?? "Lyrics"}>
       <PanelSectionRow>
         <Focusable
           onActivate={openFullScreenLyrics}
@@ -191,9 +191,11 @@ export const LyricsView: FC = () => {
           )}
         </Focusable>
       </PanelSectionRow>
-      <PanelSectionRow>
-        <div style={{ fontSize: 11, opacity: 0.4, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>
-      </PanelSectionRow>
+      {lyrics.source && (
+        <PanelSectionRow>
+          <div style={{ fontSize: 11, opacity: 0.4, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>
+        </PanelSectionRow>
+      )}
     </PanelSection>
   );
 };

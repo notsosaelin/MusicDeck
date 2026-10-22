@@ -143,7 +143,7 @@ class ExampleService(MusicService):
 | `art(art_id)` | if you return art ids | A `StreamSource` for the image. |
 | `star`, `scrobble`, `lyrics`, `radio`, `user_playlists`, `add_to_playlist`, `save_queue`, `load_queue` | per `features` | See `base.py` for signatures and meaning. |
 | `collection_action(kind, id, call)` | if a Page has an `action` with `call` | Do it (e.g. subscribe) and return the sentence to show; the page reloads. |
-| `save_progress(track, position, duration)`, `resume_position(track_id)`, `set_played(track, played)` | with feature `progress` | Long tracks that resume where they were left (podcasts.py). The player reports positions; `stream_info` passes `resume_position` on as `start_at`. |
+| `save_progress(track, position, duration)`, `resume_position(track_id)`, `set_played(track, played)` | with feature `progress` | Long tracks that resume where they were left: kept on the Deck (podcasts.py) or on the server (audiobookshelf.py). All three are async. The player reports positions every few seconds; `stream_info` passes `resume_position` on as `start_at`. |
 
 ### StreamSource
 

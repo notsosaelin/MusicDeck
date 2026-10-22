@@ -34,7 +34,10 @@ export interface LyricLine {
 export interface Lyrics {
   synced: boolean;
   lines: LyricLine[];
+  /** the lyrics site or source they came from; "" when that's the playing source itself */
   source: string;
+  /** what the lines are, when not lyrics: "Chapters" for an audiobook */
+  title?: string;
 }
 
 export interface PlaybackSettings {
@@ -187,7 +190,7 @@ export const collectionAction = callable<
 export const saveProgress = callable<[id: string, track: Track, position: number, duration: number], void>(
   "save_progress",
 );
-export const setPlayed = callable<[id: string, track: Track, played: boolean], void>("set_played");
+export const setPlayed = callable<[id: string, track: Track, played: boolean], Result<null>>("set_played");
 export const forgetStream = callable<[id: string, trackId: string], void>("forget_stream");
 export const logEvents = callable<[entries: { t: number; event: string; data?: Record<string, unknown> }[]], void>(
   "log_events",

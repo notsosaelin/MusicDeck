@@ -1,7 +1,9 @@
 """
 Lyrics in one shape for every source:
 
-    {"synced": bool, "lines": [{"t": seconds | None, "text": str}], "source": str}
+    {"synced": bool, "lines": [{"t": seconds | None, "text": str}], "source": str, "title"?: str}
+
+"title" names lines that aren't lyrics (an audiobook's chapters, as "Chapters").
 
 Sources provide their own when they have them; otherwise `lookup` asks the lyrics sites, none of
 which needs an account: LRCLIB (lrclib.net), a free, open database of time-synced lyrics, then

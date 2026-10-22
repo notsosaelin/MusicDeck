@@ -99,14 +99,15 @@ async function showPlaylistPicker(item: Item, parent: EventTarget) {
   );
 }
 
-/** Context about where the menu was opened, for page-specific items. */
-/** Podcast episodes: "Played" shows in their date line (see podcasts.py), and lists refresh. */
+/** Episodes and books: "Played" shows in their second line (see podcasts.py), and lists refresh. */
 async function markPlayed(instanceId: string, track: Track, played: boolean) {
-  await setPlayed(instanceId, track, played);
+  const done = await setPlayed(instanceId, track, played);
+  if (!done.ok) return notify(track.title, done.error, { instanceId, track });
   invalidateBrowserCache();
   notify(played ? "Marked as played" : "Marked as unplayed", track.title, { instanceId, track });
 }
 
+/** Context about where the menu was opened, for page-specific items. */
 export interface MenuContext {
   /** the MusicDeck playlist being viewed, if any */
   playlistId?: string;
@@ -254,8 +255,8 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
             })
           }
         >
-          {/* a podcast episode's "album" is its show */}
-          {hasFeature(instanceId, "progress") ? "Go to podcast" : "Go to album"}
+          {/* an episode's "album" is its show, a book file's the book: named rather than called an album */}
+          {hasFeature(instanceId, "progress") ? `Go to ${track.album}` : "Go to album"}
         </MenuItem>
       )}
       {browsable && track.artist_id && (

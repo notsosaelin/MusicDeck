@@ -32,7 +32,7 @@ import {
   FaSteam,
   FaYoutube,
 } from "react-icons/fa";
-import { SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-icons/si";
+import { SiAudiobookshelf, SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-icons/si";
 import {
   GameMusic,
   PlaybackSettings,
@@ -60,6 +60,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   jellyfin: <SiJellyfin />,
   emby: <SiEmby />,
   plex: <SiPlex />,
+  audiobookshelf: <SiAudiobookshelf />,
   soundcloud: <FaSoundcloud />,
   youtube: <FaYoutube />,
   bandcamp: <FaBandcamp />,
@@ -98,7 +99,7 @@ const describeStatus = (s: ServiceInfo) => {
   }
   if (s.type === "plex")
     return [s.config.username, s.config.server_name].filter(Boolean).join(" · ") || s.config.server_url || "";
-  if (s.type === "jellyfin" || s.type === "emby")
+  if (s.type === "jellyfin" || s.type === "emby" || s.type === "audiobookshelf")
     return [s.config.username, s.config.url?.replace(/^https?:\/\//, "")].filter(Boolean).join(" · ");
   if (s.type !== "local") return s.config.url ?? "";
   if (s.status.scanning) return `Scanning… ${s.status.found} files`;

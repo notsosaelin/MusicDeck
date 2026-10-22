@@ -318,7 +318,7 @@ class Plugin:
                            local=bool(source.path), expires=source.expires)
             instance = self.instances.get(instance_id)
             # long tracks (podcast episodes) start where they were left
-            start_at = instance.resume_position(track_id) if hasattr(instance, "resume_position") else 0
+            start_at = await instance.resume_position(track_id) if instance and "progress" in instance.features else 0
             return {"hls": source.hls, "gain": source.gain, "start_at": start_at}
         return await _result(work())
 
@@ -452,10 +452,9 @@ class Plugin:
     async def get_lyrics(self, instance_id: str, track: dict[str, Any]) -> dict[str, Any]:
         async def work():
             instance = self.instances.get(instance_id)
-            if instance and "progress" in instance.features:
-                return None  # podcast episodes: talk, not songs; nothing to look up
             found = await instance.lyrics(track) if instance and "lyrics" in instance.features else None
-            if not found and self.http:
+            # episodes and books are talk, not songs: only their source's own (a book's chapters)
+            if not found and self.http and not (instance and "progress" in instance.features):
                 found = await lyrics.lookup(self.http, track)
             return found
         return await _result(work())
@@ -594,16 +593,23 @@ class Plugin:
 
     @_when_ready
     async def save_progress(self, instance_id: str, track: dict[str, Any], position: float, duration: float) -> None:
-        """How far a long track (a podcast episode) got, so it resumes there (feature "progress")."""
+        """How far a long track (a podcast episode, a book) got, so it resumes there (feature "progress")."""
         instance = self.instances.get(instance_id)
-        if instance is not None and hasattr(instance, "save_progress")                 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (position, duration)):
-            instance.save_progress(track, position, duration)
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (position, duration))
+        if instance is not None and "progress" in instance.features and numbers and isinstance(track, dict):
+            try:
+                await instance.save_progress(track, position, duration)
+            except ServiceError as e:  # the next report (a few seconds on) tries again
+                debuglog.debug("progress", "not saved", instance=instance_id, error=str(e))
 
     @_when_ready
-    async def set_played(self, instance_id: str, track: dict[str, Any], played: bool) -> None:
-        instance = self.instances.get(instance_id)
-        if instance is not None and hasattr(instance, "set_played"):
-            instance.set_played(track, bool(played))
+    async def set_played(self, instance_id: str, track: dict[str, Any], played: bool) -> dict[str, Any]:
+        async def work():
+            instance = self._instance(instance_id)
+            if "progress" not in instance.features or not isinstance(track, dict):
+                raise ServiceError("This source doesn't keep track of what's been played")
+            await instance.set_played(track, bool(played))
+        return await _result(work())
 
     @_when_ready
     async def played_collection(self, instance_id: str, collection: dict[str, Any]) -> None:

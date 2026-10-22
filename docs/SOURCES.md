@@ -12,6 +12,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Jellyfin | `jellyfin` | Server | Quick Connect or password → access token | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
 | Emby | `emby` | Server | Password → access token | Original, server transcodes the rest | favourites, play reports, radio, playlists |
 | Plex | `plex` | plex.tv (optional) | PIN: plex.tv/link code, or Plex's page | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
+| Audiobookshelf | `audiobookshelf` | Server | Password → access + refresh token, or an API key | Original files | resume (`progress`), chapters (as `lyrics`) |
 | SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | radio |
 | YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | radio, lyrics |
 | Bandcamp | `bandcamp` | — | — | MP3 128 kbps | radio, lyrics |
@@ -27,7 +28,7 @@ the Deck otherwise. Every source can also use MusicDeck playlists and ListenBrai
 
 **Several accounts.** Every source type can be added more than once. Sources with accounts say who
 they are signed in as through `account(config)` (Spotify username, Qobuz/TIDAL user id, server +
-user for Navidrome, Jellyfin and Emby, account + server for Plex); saving refuses a second source for an account already added. A
+user for Navidrome, Jellyfin, Emby and Audiobookshelf, account + server for Plex); saving refuses a second source for an account already added. A
 new source with no name gets "Spotify", then "Spotify 2", and so on. Per-account files are kept
 apart (Spotify's playback credentials live in `spotify/accounts/<username>/`) and deleted with the
 source (`MusicService.remove`).
@@ -162,6 +163,43 @@ source (`MusicService.remove`).
 - Tested against Plex Media Server 1.43 in a container (unclaimed, so without plex.tv), with
   sidecar lyrics; the plex.tv sign-in and server discovery against a fake plex.tv in the tests,
   and Plex's sign-in page opened on the Deck.
+
+## Audiobookshelf (`audiobookshelf.py`)
+
+- **Protocol**: the REST API Audiobookshelf's own apps use (JSON, `Authorization: Bearer`).
+- **Sign-in**: `POST /login` with `x-return-tokens: true` returns an access token (1 hour) and a
+  refresh token (30 days, replaced on every renewal); servers before 2.26 return one token that
+  doesn't expire. A refused access token is renewed once through `POST /auth/refresh`
+  (`x-refresh-token` header) and the new pair saved; requests waiting on the same renewal share it.
+  The stream server's requests don't pass through that path, so `stream`/`art` renew a token within
+  5 minutes of expiring first and give the stream an `expires`, so a long book re-resolves.
+  An API key (admins make them under Settings → API Keys) is accepted as the password with no
+  username, checked with `/api/me`, and stored as the token with nothing to renew.
+- **Model**: books and podcasts are "albums". A book's tracks are its audio files in order
+  (`media.tracks`, each with `startOffset` in the book); with several files each is named after the
+  chapter it starts, else its title tag, else "Part n". Episodes are a podcast's tracks, newest
+  first. Ebook-only libraries are left out.
+- **Progress** (feature `progress`): the server keeps it per book (time in the whole book) and per
+  episode, shared with Audiobookshelf's apps. A file's position is its `startOffset` plus the
+  player's position; `resume_position` reads the server fresh, so a book started on a phone
+  resumes here. Files before the current place show as "Played", the current one as "n min left".
+  Marking a file played moves the book to its end (finishing the book only at the last file);
+  unplayed moves it back to the file's start. Within 60 s of the end, a book or episode is finished.
+- **Chapters**: a file holding two or more chapters returns them from `lyrics` as synced lines
+  titled "Chapters" (relative to the file), so the full-screen view jumps between them. Episodes
+  and books never go to the lyrics sites.
+- **Home**: Continue listening (episodes as they are; books as the file they were left in, up to
+  8 fetched), then the server's own shelves under MusicDeck's names (new episodes, recently added,
+  continue series, listen again, discover, recent series, authors; library named when there are
+  several), then the libraries to browse in full.
+- **Ids**: `b:`/`p:` + item, `a:` author, `s:<library>:<series>`, `l:` library, `c:` collection,
+  `pl:` playlist; tracks `f:<item>:<inode>` and `e:<item>:<episode>`; art `i:<item>` (cover at
+  600 px) and `a:<author>`. Every id part is checked against `[\w-]` before it goes into a path.
+- **Formats**: MP3, AAC (M4B), FLAC, Opus and Vorbis play directly with byte ranges; anything
+  else is reported as unplayable rather than transcoded (the server only transcodes whole books,
+  as HLS).
+- Tested against Audiobookshelf 2.37.1 in a container (multi-file and single-file M4B books with
+  chapters, a series, a podcast), and in the tests against a fake server.
 
 ## SoundCloud (`soundcloud.py`)
 
@@ -341,7 +379,3 @@ account. Both are asked at once; LRCLIB's synced lyrics win, then NetEase's, the
   error, which the UI doesn't remember, so the next look tries again.
 - Musixmatch was considered and left out: its guest token came back blank when tried.
 
-## Candidates not implemented yet
-
-- **Audiobookshelf**: planned (audiobooks and podcasts from a self-hosted server, with resume
-  through the `progress` feature podcasts use).

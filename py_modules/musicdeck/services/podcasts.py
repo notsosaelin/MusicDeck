@@ -298,7 +298,7 @@ class PodcastService(MusicService):
     def _save_progress(self) -> None:
         save_json(self.progress_path, self.progress)
 
-    def save_progress(self, track: dict[str, Any], position: float, duration: float) -> None:
+    async def save_progress(self, track: dict[str, Any], position: float, duration: float) -> None:
         """The player reports how far an episode got (every few seconds while it plays, and when paused)."""
         if not isinstance(track, dict) or not str(track.get("id", "")).startswith("e:"):
             return
@@ -309,17 +309,17 @@ class PodcastService(MusicService):
                                       "updated": time.time(), "track": {k: track.get(k) for k in keep}}
         self._save_progress()
 
-    def set_played(self, track: dict[str, Any], played: bool) -> None:
+    async def set_played(self, track: dict[str, Any], played: bool) -> None:
         if not isinstance(track, dict) or not str(track.get("id", "")).startswith("e:"):
             return
         if played:
-            self.save_progress(track, track.get("duration") or 0, track.get("duration") or 0)
+            await self.save_progress(track, track.get("duration") or 0, track.get("duration") or 0)
             self.progress[track["id"]]["done"] = True
         else:
             self.progress.pop(track["id"], None)
         self._save_progress()
 
-    def resume_position(self, track_id: str) -> float:
+    async def resume_position(self, track_id: str) -> float:
         """Where to start an episode: where it was left (a little before), or the start."""
         p = self.progress.get(track_id)
         if not p or p.get("done"):

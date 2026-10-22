@@ -177,3 +177,14 @@ class MusicService:
 
     async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> None:
         raise NotImplementedError
+
+    async def save_progress(self, track: dict[str, Any], position: float, duration: float) -> None:
+        """How far a long track got (reported every few seconds while it plays, and when paused)."""
+        raise NotImplementedError
+
+    async def set_played(self, track: dict[str, Any], played: bool) -> None:
+        raise NotImplementedError
+
+    async def resume_position(self, track_id: str) -> float:
+        """Where to start a long track: where it was left (a little before), or 0."""
+        raise NotImplementedError
