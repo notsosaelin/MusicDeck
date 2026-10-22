@@ -55,6 +55,7 @@ class SoundCloudService(MusicService):
     type = "soundcloud"
     display_name = "SoundCloud"
     features = frozenset({"radio"})
+    downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)

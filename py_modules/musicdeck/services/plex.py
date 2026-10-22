@@ -145,6 +145,7 @@ class PlexService(MusicService):
     type = "plex"
     display_name = "Plex"
     features = frozenset({"star", "scrobble", "lyrics", "radio", "playlists"})
+    downloadable = True
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:

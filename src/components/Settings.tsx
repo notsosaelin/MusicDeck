@@ -34,11 +34,14 @@ import {
 } from "react-icons/fa";
 import { SiAudiobookshelf, SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-icons/si";
 import {
+  DownloadStatus,
   GameMusic,
   PlaybackSettings,
   PluginState,
   ServiceInfo,
+  removeDownloads,
   rescan,
+  retryDownloads,
   setGameMusic,
   setListenBrainz,
   setSetting,
@@ -106,6 +109,50 @@ const describeStatus = (s: ServiceInfo) => {
   if (s.status.error) return `Scan failed: ${s.status.error}`;
   const n = s.status.tracks ?? 0;
   return `${n} track${n === 1 ? "" : "s"}`;
+};
+
+const megabytes = (bytes: number) =>
+  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+
+/** What the downloaded playlists take up, what's downloading, and a way to free the space. */
+const DownloadRows: FC<{ status: DownloadStatus }> = ({ status }) => {
+  const progress = status.current
+    ? `Downloading ${status.current}… (${status.pending} to go)`
+    : status.failed > 0
+      ? `${status.failed} couldn't be downloaded${status.stopped ? `: ${status.stopped.toLowerCase()}` : ""}`
+      : status.stopped;
+  const removeAll = () =>
+    showModal(
+      <ConfirmModal
+        strTitle="Remove all downloads?"
+        strDescription="Every downloaded song is deleted from this Deck and plays from its source again. Your playlists stay."
+        strOKButtonText="Remove"
+        bDestructiveWarning
+        onOK={() => removeDownloads()}
+      />,
+    );
+  return (
+    <>
+      <PanelSectionRow>
+        <Field
+          label={`${status.tracks} song${status.tracks === 1 ? "" : "s"} · ${megabytes(status.bytes)}`}
+          description={progress || "Downloaded playlists play without a connection."}
+        />
+      </PanelSectionRow>
+      {status.failed > 0 && !status.current && (
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => retryDownloads()}>
+            Try again
+          </ButtonItem>
+        </PanelSectionRow>
+      )}
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={removeAll}>
+          Remove all downloads
+        </ButtonItem>
+      </PanelSectionRow>
+    </>
+  );
 };
 
 const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }> = ({ service, typeName, active }) => {
@@ -383,6 +430,12 @@ export const Settings: FC = () => {
         </PanelSectionRow>
         <GameMusicRows state={state} />
       </PanelSection>
+
+      {(state.offline.tracks > 0 || state.offline.pending > 0 || state.offline.failed > 0) && (
+        <PanelSection title="Downloads">
+          <DownloadRows status={state.offline} />
+        </PanelSection>
+      )}
 
       <PanelSection title="Add a source">
         {state.service_types.map((t) => {

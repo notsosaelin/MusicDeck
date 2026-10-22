@@ -453,7 +453,9 @@ const PlexFields: FC<{
           draft={draft}
           options={{ client_id: draft.config.client_id ?? "" }}
           label={
-            signedIn && draft.config.username ? `Signed in as ${draft.config.username} · sign in again` : "Sign in with Plex"
+            signedIn && draft.config.username
+              ? `Signed in as ${draft.config.username} · sign in again`
+              : "Sign in with Plex"
           }
           instructions="On a phone or computer signed in to Plex, go to plex.tv/link and enter this code."
           signedInAs={plexSignedIn}

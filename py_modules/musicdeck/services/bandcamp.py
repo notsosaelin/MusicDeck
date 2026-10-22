@@ -64,6 +64,7 @@ class BandcampService(MusicService):
     type = "bandcamp"
     display_name = "Bandcamp"
     features = frozenset({"lyrics", "radio"})
+    downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)

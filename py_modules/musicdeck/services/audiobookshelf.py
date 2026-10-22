@@ -143,6 +143,7 @@ class AudiobookshelfService(MusicService):
     type = "audiobookshelf"
     display_name = "Audiobookshelf"
     features = frozenset({"progress", "lyrics"})
+    downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)

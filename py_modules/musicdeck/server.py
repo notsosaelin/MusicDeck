@@ -19,7 +19,7 @@ import secrets
 import socket
 import ssl
 import time
-from typing import Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 from urllib.parse import quote, urljoin
 
 import aiohttp
@@ -39,6 +39,9 @@ URI_ATTR = re.compile(r'URI="([^"]+)"')
 # Resolved remote URLs (e.g. from yt-dlp) are reused for a while; most expire after ~6 hours
 RESOLVE_TTL = 3 * 3600
 
+if TYPE_CHECKING:
+    from .offline import OfflineStore
+
 ServiceLookup = Callable[[str], Optional[MusicService]]
 
 
@@ -51,10 +54,13 @@ def _unb64(value: str) -> str:
 
 
 class StreamServer:
-    def __init__(self, lookup: ServiceLookup, logger, local_art: Optional[Callable[[str], Optional[str]]] = None):
+    def __init__(self, lookup: ServiceLookup, logger, local_art: Optional[Callable[[str], Optional[str]]] = None,
+                 offline: Optional["OfflineStore"] = None):
         self.lookup = lookup
         # resolves MusicDeck's own art ids (custom playlist pictures), which belong to no service
         self.local_art = local_art
+        # downloaded tracks and their artwork, used before going to the network
+        self.offline = offline
         self.logger = logger
         self.key = secrets.token_urlsafe(24)
         self.port = 0
@@ -96,6 +102,9 @@ class StreamServer:
 
     async def resolve_stream(self, instance_id: str, track_id: str) -> StreamSource:
         """Resolves (and caches) where a track's audio comes from. Raises ServiceError."""
+        kept = self.offline.audio(instance_id, track_id) if self.offline else None
+        if kept:
+            return kept
         cache_key = (instance_id, track_id)
         cached = self._resolved.get(cache_key)
         if cached and cached[1] > time.time():
@@ -156,6 +165,9 @@ class StreamServer:
             local = self.local_art(request.match_info["id"]) if self.local_art else None
             if local:
                 return self._file(StreamSource(path=local))
+            kept = self.offline.picture(request.match_info["instance"], request.match_info["id"]) if self.offline else None
+            if kept:
+                return self._file(kept)
             service = self.lookup(request.match_info["instance"])
             if service is None:
                 raise web.HTTPNotFound(text="Unknown service")

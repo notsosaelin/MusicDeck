@@ -44,6 +44,9 @@ class ExampleService(MusicService):
     display_name = "Example Music"  # shown in "Add a source"
     # Only what you implement. The UI hides the rest (no heart without "star", etc.)
     features = frozenset({"star", "radio", "lyrics"})
+    # Playlists of this source can be downloaded. Only for audio that's the user's own or free to
+    # keep, never a subscription's (see offline.py); the download uses stream() and art() as they are.
+    downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
@@ -278,6 +281,7 @@ return, search, play (seek, skip, let a track end), favourite, and check the deb
 - [ ] Streams play without DRM in Steam's browser engine
 - [ ] Module docstring explains sign-in and streaming; class docstring lists config keys
 - [ ] `features` lists exactly what's implemented
+- [ ] `downloadable` only if keeping the audio is allowed, and `stream()` gives a plain file or unencrypted HLS
 - [ ] Every user-facing failure is a `ServiceError` with a short, plain message
 - [ ] Secrets are in `SECRET_KEYS`; no passwords stored; no credentials in URLs the UI sees
 - [ ] Two sources of this type can coexist: files per instance/account, `account()` if it signs in,

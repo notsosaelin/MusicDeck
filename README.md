@@ -20,6 +20,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   search shows your recent searches.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
   album from a source as your own.
+- **Downloads:** download a MusicDeck playlist and it plays with no connection (and no data used), from
+  your own servers, SoundCloud, YouTube, Bandcamp, podcasts and the Live Music Archive. Each song is kept
+  once however many playlists hold it, and goes when the last one lets it go.
 - **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net) with NetEase Cloud Music as a
   backup, following the song in the Lyrics tab or full screen over the album art.
 - **Sound:** 10-band EQ with presets, volume levelling from ReplayGain data, gapless playback, an
@@ -110,12 +113,6 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 
 ## Roadmap
 
-Planned, not started:
-
-- **Offline playlists.** "Available offline" on a MusicDeck playlist downloads each track once (SoundCloud
-  HLS segments joined into a file, YouTube via yt-dlp); playback prefers the file. Files are tracked per
-  track, so playlists sharing a song share the download.
-
 Not possible:
 
 - **Apple Music, Deezer, Amazon Music.** Their catalogues are only served as DRM-protected (Widevine)
@@ -123,6 +120,9 @@ Not possible:
   [Cider](https://github.com/ciderapp/cider) and [Sidra](https://github.com/wimpysworld/sidra) are separate
   apps built on CastLabs Electron, a Chromium that ships Widevine; nothing comparable exists inside Steam.
   MusicDeck doesn't decrypt streams.
+- **Downloads from Qobuz, TIDAL and Spotify.** Offline listening is part of what those subscriptions license
+  to their own apps, under DRM (Spotify) or terms that rule out other apps keeping the files; MusicDeck
+  streams them only.
 - **Some SoundCloud tracks.** A few label releases are only streamed DRM-protected, for the same
   reason; MusicDeck leaves them out of lists, along with Go+ tracks free accounts only hear 30 seconds of.
 - **TIDAL 24-bit "Max".** TIDAL only grants it to a sign-in that hands its result back through a browser

@@ -85,6 +85,10 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
 - Audiobookshelf against a fake server: password and API-key sign-in, token renewal (and the new
   pair saved), home shelves, books as files named by chapter, resuming in the right file, saving
   the place in the whole book, played/unplayed, chapters as lyrics, unplayable formats, refused ids;
+- downloads against a fake source of every stream kind: ranged files, servers without ranges,
+  fragmented-MP4 and MP3 HLS (master playlists followed), encrypted and generated streams refused;
+  playing, seeking and artwork with the source gone; one copy for two playlists; files deleted with
+  the last playlist holding them; giving up when unreachable; stopping before the disk fills;
 - podcasts against a fake directory and feed: the XML reader (CDATA, entities, broken markup),
   subscribing, home rows, resuming and marking played, refused ids;
 - the Live Music Archive against a fake archive.org: home rows (on this day really today), shows,

@@ -81,6 +81,7 @@ class JellyfinService(MusicService):
     type = "jellyfin"
     display_name = "Jellyfin"
     features = frozenset({"star", "scrobble", "lyrics", "radio", "playlists"})
+    downloadable = True
     # music playlists only (Emby reads this filter as "or" and returns everything; see emby.py)
     PLAYLIST_FILTER: dict[str, str] = {"MediaTypes": "Audio"}
     SIGN_IN_HINT = "Sign in with Quick Connect, or enter your username and password"

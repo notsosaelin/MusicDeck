@@ -79,11 +79,33 @@ export interface Page {
   extra?: { title: string; tracks: Track[] }[];
   /** show songs/videos above albums/artists/playlists (search results) */
   tracks_first?: boolean;
-  /** a button in the header: steam:// URLs run in Steam (e.g. installing a soundtrack), others open in the browser */
-  /** url: a steam:// command or a web page; call: something the source does (collectionAction) */
+  /**
+   * a button in the header. url: a steam:// command (run in Steam, e.g. installing a soundtrack) or a
+   * web page (opened in Steam's browser); call: something the source does (collectionAction)
+   */
   action?: { label: string; url?: string; call?: string } | null;
   /** shown above the content, e.g. why there's nothing to play yet */
   notice?: string | null;
+  /** MusicDeck playlists of a source that can download: whether it's downloaded, and how far */
+  offline?: OfflineState | null;
+}
+
+export interface OfflineState {
+  on: boolean;
+  saved: number;
+  total: number;
+}
+
+/** Every download together (offline.py), for Settings */
+export interface DownloadStatus {
+  tracks: number;
+  bytes: number;
+  pending: number;
+  failed: number;
+  /** the track downloading now */
+  current: string | null;
+  /** why downloading stopped early ("Not enough free space"), or "" */
+  stopped: string;
 }
 
 /** A home row: collections and/or tracks (e.g. YouTube Music's "Quick picks") */
@@ -110,6 +132,8 @@ export interface ServiceInfo {
   has_credentials: boolean;
   status: Record<string, any>;
   features: Feature[];
+  /** its tracks can be saved for offline listening */
+  downloadable: boolean;
 }
 
 export interface ServiceType {
@@ -133,6 +157,7 @@ export interface PluginState {
   /** linked ListenBrainz account ("" when not linked) and listens waiting to be sent */
   listenbrainz: { user: string; pending: number };
   game_music: GameMusic[];
+  offline: DownloadStatus;
 }
 
 /** An album or playlist that plays when a game starts (for one source, while it's live). */
@@ -206,6 +231,10 @@ export const playlistAdd = callable<[playlistId: string, tracks: Track[]], numbe
 export const playlistRemove = callable<[playlistId: string, trackId: string], void>("playlist_remove");
 export const playlistRename = callable<[playlistId: string, name: string], void>("playlist_rename");
 export const playlistDelete = callable<[playlistId: string], void>("playlist_delete");
+export const setPlaylistOffline = callable<[playlistId: string, on: boolean], Result<null>>("set_playlist_offline");
+export const playlistOffline = callable<[id: string, playlistId: string], OfflineState | null>("playlist_offline");
+export const retryDownloads = callable<[], void>("retry_downloads");
+export const removeDownloads = callable<[], void>("remove_downloads");
 export const playlistSetArt = callable<[playlistId: string, imagePath: string], Result<null>>("playlist_set_art");
 export const playlistClearArt = callable<[playlistId: string], void>("playlist_clear_art");
 export const isLocalPlaylist = (id: string) => id.startsWith("md:");

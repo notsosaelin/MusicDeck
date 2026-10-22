@@ -130,7 +130,8 @@ function installHooks() {
     };
   // on the prototype, for whatever wraps it later (Steamcord re-reads it when it re-patches), and on
   // the store itself if something already wraps it there
-  if (typeof proto?.PlayNotificationSound === "function") proto.PlayNotificationSound = wrapSound(proto.PlayNotificationSound);
+  if (typeof proto?.PlayNotificationSound === "function")
+    proto.PlayNotificationSound = wrapSound(proto.PlayNotificationSound);
   if (Object.prototype.hasOwnProperty.call(store ?? {}, "PlayNotificationSound"))
     store.PlayNotificationSound = wrapSound(store.PlayNotificationSound);
 
@@ -181,8 +182,9 @@ export function releaseToastHooks() {
 let audio: any;
 function playToastSound() {
   try {
-    audio ??= findModuleExport((e: any) => typeof e?.GamepadUIAudio?.m_AudioPlaybackManager?.PlayAudioURL === "function")
-      ?.GamepadUIAudio?.m_AudioPlaybackManager;
+    audio ??= findModuleExport(
+      (e: any) => typeof e?.GamepadUIAudio?.m_AudioPlaybackManager?.PlayAudioURL === "function",
+    )?.GamepadUIAudio?.m_AudioPlaybackManager;
     audio?.PlayAudioURL?.(TOAST_SOUND);
   } catch {}
 }

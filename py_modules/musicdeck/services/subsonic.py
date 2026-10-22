@@ -29,6 +29,7 @@ class SubsonicService(MusicService):
     type = "subsonic"
     display_name = "Navidrome / Subsonic"
     features = frozenset({"star", "scrobble", "lyrics", "radio", "queue_sync", "playlists"})
+    downloadable = True
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:

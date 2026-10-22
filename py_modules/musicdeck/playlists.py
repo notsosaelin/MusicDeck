@@ -5,9 +5,8 @@ They work for any source, including ones without accounts (SoundCloud, YouTube),
 track's full metadata, so they open instantly and survive the source changing. Playlists are
 per-source: a playlist belongs to one service instance and only holds that source's tracks.
 
-Layout is intended to grow into offline playback: a playlist can be marked for download, and
-downloaded files are tracked separately by (instance, track id), so one file serves every
-playlist that contains the track.
+A playlist can be marked for download ("offline"); the files themselves are kept by
+offline.py per (instance, track id), so one file serves every playlist that contains the track.
 """
 import json
 import os
@@ -50,6 +49,10 @@ class PlaylistStore:
             raise KeyError(collection_id)
         return p
 
+    def find(self, collection_id: str) -> Optional[dict[str, Any]]:
+        """The stored playlist ({"id", "instance_id", "name", "tracks", ...}), or None."""
+        return self._get(collection_id)
+
     def _get(self, collection_id: str) -> Optional[dict[str, Any]]:
         pid = collection_id[len(PREFIX):] if collection_id.startswith(PREFIX) else collection_id
         return next((p for p in self.playlists if p["id"] == pid), None)
@@ -78,7 +81,7 @@ class PlaylistStore:
         now = time.time()
         p = {"id": secrets.token_hex(6), "instance_id": instance_id, "name": name.strip() or "New playlist",
              "tracks": self._fresh([], tracks or []), "created": now, "updated": now,
-             # where a saved copy came from ({"kind", "id"}), and the future offline flag
+             # where a saved copy came from ({"kind", "id"}), and whether it's downloaded
              "source": source, "offline": False}
         self.playlists.append(p)
         self._save()
@@ -180,6 +183,23 @@ class PlaylistStore:
             return None
         path = os.path.join(self.art_dir, p["art_file"])
         return path if os.path.isfile(path) else None
+
+    def offline(self) -> list[dict[str, Any]]:
+        """The playlists marked for download."""
+        return [p for p in self.playlists if p.get("offline")]
+
+    def is_offline(self, collection_id: str) -> bool:
+        p = self._get(collection_id)
+        return bool(p and p.get("offline"))
+
+    def set_offline(self, collection_id: str, on: bool) -> bool:
+        """Marks a playlist for download or not; False when it's gone."""
+        p = self._get(collection_id)
+        if p is None:
+            return False
+        p["offline"] = on
+        self._save()
+        return True
 
     def delete(self, collection_id: str) -> None:
         pid = collection_id[len(PREFIX):]

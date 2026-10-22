@@ -125,10 +125,11 @@ Details worth knowing:
 | `musicdeck/services/base.py` | `MusicService` (the interface every source implements), `StreamSource` (where audio/art comes from), `SignIn` (OAuth/device-code sign-ins), `ServiceError` (errors safe to show the user). |
 | `musicdeck/services/__init__.py` | `SERVICE_TYPES`: the registry of sources shown in "Add a source". |
 | `musicdeck/services/*.py` | One file per source. See [SOURCES.md](SOURCES.md). |
-| `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; range proxying, HLS rewriting, resolved-source cache. |
+| `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; downloaded files first, then range proxying, HLS rewriting, resolved-source cache. |
 | `musicdeck/settings.py` | `Settings`: atomic JSON store for preferences and configured sources (credentials included, so `chmod 600`). |
 | `musicdeck/recents.py` | `Recents`: the albums and playlists played lately per source, for the "Jump back in" row (`played_collection`; recorded by `playFrom` in nav.ts), and recent searches (recorded by `search`; `search_history`, `forget_search`). |
-| `musicdeck/playlists.py` | `PlaylistStore`: MusicDeck's own playlists (`md:` ids) with custom artwork (`mdart:` ids), stored on the Deck. |
+| `musicdeck/playlists.py` | `PlaylistStore`: MusicDeck's own playlists (`md:` ids) with custom artwork (`mdart:` ids), stored on the Deck, and which are downloaded. |
+| `musicdeck/offline.py` | `OfflineStore`: downloads for the playlists marked for it, one track at a time in the background, kept once per (source, track) with their artwork. Files come in 8 MB ranges; HLS is joined into one file (fragmented MP4, or MP3/AAC segments; never encrypted or MPEG-TS). Stops early with no space (1 GB kept free) or after 3 failures in a row. The stream server serves these files before going to the network. |
 | `musicdeck/lyrics.py` | The lyrics shape, LRC parsing, the lyrics sites asked when a source has none: LRCLIB and NetEase at once, LRCLIB's synced lyrics preferred (a failed lookup is an error, not "no lyrics"). |
 | `musicdeck/feeds.py` | A small XML reader and the RSS parser for podcast feeds (Decky's Python has no `xml`). |
 | `musicdeck/listenbrainz.py` | ListenBrainz client with an on-disk queue for listens made offline. |
@@ -225,6 +226,7 @@ classDiagram
 | `~/homebrew/settings/MusicDeck/` | `settings.json` (mode 600) | Preferences, configured sources and their credentials (tokens, never passwords), ListenBrainz token, game music |
 | | `playlists.json`, `playlist-art/` | MusicDeck playlists and their custom pictures |
 | `~/homebrew/data/MusicDeck/` | `session.json` | The queue, for "Resume where you left off" |
+| `~/homebrew/data/MusicDeck/` | `offline/` | Downloaded songs and their artwork (named by a hash of source and id) and `index.json`, which maps them back (file names, types and sizes only) |
 | `~/homebrew/data/MusicDeck/` | `recents.json` | The last 10 albums and playlists played and the last 8 searches, per source |
 | | `local-<id>.json`, `local-<id>-favourites.json`, `art-cache/` | Local library index, favourites, extracted cover art |
 | | `steam-<id>.json`, `steam-<id>-owned.json`, `steam-<id>-favourites.json` | Installed soundtracks index, owned soundtracks (from Steam's UI), favourites |

@@ -15,9 +15,10 @@ import decky
 
 from musicdeck import debuglog, lyrics
 from musicdeck.listenbrainz import ListenBrainz
+from musicdeck.offline import OfflineStore
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
-from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError
+from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError, StreamSource
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings
 
@@ -89,7 +90,9 @@ class Plugin:
         self.recents = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)
         debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(self.settings.get("debug_log")))
         self.instances = {}
-        self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path)
+        self.offline = OfflineStore(decky.DECKY_PLUGIN_RUNTIME_DIR, _announce_change)
+        self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path,
+                                   offline=self.offline)
         self.http = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
             timeout=aiohttp.ClientTimeout(total=10),
@@ -103,11 +106,13 @@ class Plugin:
             for service in self.settings.services():
                 await self._start_instance(service)
             decky.logger.info(f"MusicDeck started with {len(self.instances)} service(s)")
+            self._sync_offline()  # finishes downloads an earlier session left
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
 
     async def _unload(self):
+        await self.offline.stop()
         for instance in list(self.instances.values()):
             await instance.stop()
         self.instances.clear()
@@ -158,6 +163,7 @@ class Plugin:
             "config": {k: v for k, v in service["config"].items() if k not in SECRET_KEYS},
             "has_credentials": any(k in SECRET_KEYS for k in service["config"]),
             "features": sorted(instance.features) if instance else [],
+            "downloadable": bool(instance and instance.downloadable),
             "status": instance.status() if instance else {},
         }
 
@@ -180,6 +186,7 @@ class Plugin:
             "listenbrainz": {"user": self.settings.get("listenbrainz").get("user", ""),
                              "pending": self.listenbrainz.pending_count()},
             "game_music": self.settings.get("game_music"),
+            "offline": self.offline.status(),
         }
 
     @_when_ready
@@ -229,6 +236,7 @@ class Plugin:
         decky.logger.info(f"Removed source {instance_id} ({getattr(instance, 'type', '?')})")
         self.settings.remove_service(instance_id)
         self.playlists.delete_for_instance(instance_id)
+        self._sync_offline()
         self.recents.forget(instance_id=instance_id)
         self._forget_game_music(lambda m: m["instance_id"] == instance_id)
         await _announce_change()
@@ -264,7 +272,8 @@ class Plugin:
             recent = [current.get(c["id"], c) for c in self.recents.for_instance(instance_id)
                       if not PlaylistStore.is_ours(c["id"]) or c["id"] in current]
             # what was played lately and what the user made come before what the source suggests
-            return ([{"title": "Jump back in", "items": recent}] if recent else [])                 + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections
+            return (([{"title": "Jump back in", "items": recent}] if recent else [])
+                    + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections)
         return await _result(work())
 
     @_when_ready
@@ -272,9 +281,10 @@ class Plugin:
         if PlaylistStore.is_ours(collection_id):
             async def local():
                 try:
-                    return self.playlists.page(collection_id)
+                    page = self.playlists.page(collection_id)
                 except KeyError:
                     raise ServiceError("Playlist not found")
+                return {**page, "offline": self._offline_state(instance_id, collection_id, page["tracks"])}
             return await _result(local())
         return await _result(self._call(instance_id, lambda s: s.open(kind, collection_id)))
 
@@ -317,8 +327,13 @@ class Plugin:
             debuglog.debug("stream", "resolved", instance=instance_id, track=track_id, hls=source.hls,
                            local=bool(source.path), expires=source.expires)
             instance = self.instances.get(instance_id)
-            # long tracks (podcast episodes) start where they were left
-            start_at = await instance.resume_position(track_id) if instance and "progress" in instance.features else 0
+            # long tracks (podcast episodes, books) start where they were left; offline, from the start
+            start_at = 0
+            if instance and "progress" in instance.features:
+                try:
+                    start_at = await instance.resume_position(track_id)
+                except ServiceError as e:
+                    debuglog.debug("progress", "no resume point", track=track_id, error=str(e))
             return {"hls": source.hls, "gain": source.gain, "start_at": start_at}
         return await _result(work())
 
@@ -550,11 +565,14 @@ class Plugin:
 
     @_when_ready
     async def playlist_add(self, playlist_id: str, tracks: list[dict[str, Any]]) -> int:
-        return self.playlists.add(playlist_id, tracks)
+        added = self.playlists.add(playlist_id, tracks)
+        self._sync_offline()
+        return added
 
     @_when_ready
     async def playlist_remove(self, playlist_id: str, track_id: str) -> None:
         self.playlists.remove(playlist_id, track_id)
+        self._sync_offline()
 
     @_when_ready
     async def playlist_rename(self, playlist_id: str, name: str) -> None:
@@ -576,9 +594,62 @@ class Plugin:
     @_when_ready
     async def playlist_delete(self, playlist_id: str) -> None:
         self.playlists.delete(playlist_id)
+        self._sync_offline()
         self.recents.forget(collection_id=playlist_id)
         if self._forget_game_music(lambda m: m["collection"]["id"] == playlist_id):
             await _announce_change()
+
+    # --- downloads (offline.py) ---
+
+    def _sync_offline(self) -> None:
+        """Brings the downloaded files in line with the playlists marked for download."""
+        wanted = {}
+        for p in self.playlists.offline():
+            instance = self.instances.get(p["instance_id"])
+            if instance and instance.downloadable:
+                wanted.update({(p["instance_id"], t["id"]): t for t in p["tracks"]})
+        self.offline.sync(wanted, self._resolve_for_offline)
+
+    async def _resolve_for_offline(self, instance_id: str, kind: str, item_id: str) -> StreamSource:
+        instance = self._instance(instance_id)
+        return await (instance.stream(item_id) if kind == "stream" else instance.art(item_id))
+
+    def _offline_state(self, instance_id: str, playlist_id: str, tracks: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        """A MusicDeck playlist's download state for its page, or None where its source can't download."""
+        instance = self.instances.get(instance_id)
+        if not instance or not instance.downloadable:
+            return None
+        return {"on": self.playlists.is_offline(playlist_id), "total": len(tracks),
+                "saved": sum(1 for t in tracks if self.offline.has(instance_id, t["id"]))}
+
+    @_when_ready
+    async def set_playlist_offline(self, playlist_id: str, on: bool) -> dict[str, Any]:
+        """Downloads a MusicDeck playlist for offline listening, or removes the download."""
+        async def work():
+            if not self.playlists.set_offline(playlist_id, bool(on)):
+                raise ServiceError("That playlist was deleted")
+            self._sync_offline()
+            await _announce_change()
+        return await _result(work())
+
+    @_when_ready
+    async def playlist_offline(self, instance_id: str, playlist_id: str) -> Optional[dict[str, Any]]:
+        """How far a playlist's download got (the page asks again as downloads finish)."""
+        p = self.playlists.find(playlist_id)
+        return self._offline_state(instance_id, playlist_id, p["tracks"]) if p else None
+
+    @_when_ready
+    async def retry_downloads(self) -> None:
+        self.offline.retry(self._resolve_for_offline)
+        await _announce_change()
+
+    @_when_ready
+    async def remove_downloads(self) -> None:
+        """Every playlist stops being downloaded, and the files are deleted."""
+        for p in self.playlists.offline():
+            self.playlists.set_offline("md:" + p["id"], False)
+        self._sync_offline()
+        await _announce_change()
 
     @_when_ready
     async def collection_action(self, instance_id: str, kind: str, collection_id: str, call: str) -> dict[str, Any]:

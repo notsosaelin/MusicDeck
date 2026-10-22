@@ -710,29 +710,29 @@ async def run():
             check([t["id"] for t in home[0]["tracks"]] == ["f:B1:12"] and home[0]["tracks"][0]["artist"] == "Ann Author · 1 min left",
                   "a book in Continue listening is the file it was left in, with what's left of it")
             check([c["id"] for c in home[-1]["items"]] == ["l:L1", "l:L2"], "ebook-only libraries are left out")
-            page = (await plugin.open_collection(aid, "album", "b:B1"))["data"]
-            check([(t["id"], t["title"]) for t in page["tracks"]] == [("f:B1:11", "Prologue"), ("f:B1:12", "Second")]
-                  and page["subtitle"] == "Ann Author, read by Ned · 3 min" and page["art"] == "i:B1",
+            ab_page = (await plugin.open_collection(aid, "album", "b:B1"))["data"]
+            check([(t["id"], t["title"]) for t in ab_page["tracks"]] == [("f:B1:11", "Prologue"), ("f:B1:12", "Second")]
+                  and ab_page["subtitle"] == "Ann Author, read by Ned · 3 min" and ab_page["art"] == "i:B1",
                   "a book's files, named after the chapter each starts")
-            check(page["tracks"][0]["artist"] == "Ann Author · Played" and page["tracks"][0]["artist_id"] == "a:AU1",
+            check(ab_page["tracks"][0]["artist"] == "Ann Author · Played" and ab_page["tracks"][0]["artist_id"] == "a:AU1",
                   "files before where the user is count as played")
             info = (await plugin.stream_info(aid, "f:B1:12"))["data"]
             check(info["start_at"] == 5, "a file resumes where the book was left, a few seconds back")
             check((await plugin.stream_info(aid, "f:B1:11"))["data"]["start_at"] == 0, "a file before that starts at its start")
-            await plugin.save_progress(aid, page["tracks"][1], 20.0, 90.0)
+            await plugin.save_progress(aid, ab_page["tracks"][1], 20.0, 90.0)
             check(ab_state["progress"]["B1"]["currentTime"] == 110 and ab_state["progress"]["B1"]["duration"] == 180
                   and not ab_state["progress"]["B1"]["isFinished"], "progress is saved as the place in the whole book")
-            await plugin.save_progress(aid, page["tracks"][1], 85.0, 90.0)
+            await plugin.save_progress(aid, ab_page["tracks"][1], 85.0, 90.0)
             check(ab_state["progress"]["B1"]["isFinished"], "the end of the last file finishes the book")
-            check((await plugin.set_played(aid, page["tracks"][0], False))["ok"] and ab_state["progress"]["B1"]["currentTime"] == 0
+            check((await plugin.set_played(aid, ab_page["tracks"][0], False))["ok"] and ab_state["progress"]["B1"]["currentTime"] == 0
                   and not ab_state["progress"]["B1"]["isFinished"], "unplayed: back to that file's start")
-            await plugin.set_played(aid, page["tracks"][0], True)
+            await plugin.set_played(aid, ab_page["tracks"][0], True)
             check(ab_state["progress"]["B1"]["currentTime"] == 90 and not ab_state["progress"]["B1"]["isFinished"],
                   "played: on to the next file, the book not finished")
-            chapters = (await plugin.get_lyrics(aid, page["tracks"][1]))["data"]
+            chapters = (await plugin.get_lyrics(aid, ab_page["tracks"][1]))["data"]
             check(chapters == {"synced": True, "source": "", "title": "Chapters", "lines": [{"t": 0, "text": "Second"}, {"t": 30, "text": "Third"}]},
                   "a file's chapters, timed from its start, as synced lines")
-            check((await plugin.get_lyrics(aid, page["tracks"][0]))["data"] is None, "one chapter in a file: nothing to show, nothing looked up")
+            check((await plugin.get_lyrics(aid, ab_page["tracks"][0]))["data"] is None, "one chapter in a file: nothing to show, nothing looked up")
             pod = (await plugin.open_collection(aid, "album", "p:P1"))["data"]
             check([t["id"] for t in pod["tracks"]] == ["e:P1:E2", "e:P1:E1"] and pod["subtitle"] == "Host · 2 episodes"
                   and pod["tracks"][0]["album_id"] == "p:P1", "a podcast's episodes, newest first")
@@ -776,6 +776,157 @@ async def run():
             await plugin.remove_service(keyed["id"])
         finally:
             await ab_runner.cleanup()
+
+        print("downloads")
+        from aiohttp import web as dlweb
+        from musicdeck import offline as offmod
+        from musicdeck.services.base import MusicService as BaseService, StreamSource as Source
+        dl_calls = []
+        dl_audio = bytes(range(256)) * 40  # 10,240 bytes
+        dl_init, dl_seg = b"INIT", [b"SEG0", b"SEG1"]
+
+        async def fake_media(request):
+            dl_calls.append(request.path)
+            if request.path == "/song.mp3":
+                spec = request.headers.get("Range", "")[len("bytes="):]
+                start, _, end = spec.partition("-")
+                start, end = int(start), min(int(end), len(dl_audio) - 1)
+                return dlweb.Response(status=206, body=dl_audio[start:end + 1], content_type="audio/mpeg",
+                                      headers={"Content-Range": f"bytes {start}-{end}/{len(dl_audio)}"})
+            if request.path == "/whole.ogg":  # a server that ignores ranges
+                return dlweb.Response(body=b"OGG" * 100, content_type="audio/ogg")
+            if request.path == "/fmp4.m3u8":
+                return dlweb.Response(text='#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:10,\nseg0.m4s\n#EXTINF:10,\nseg1.m4s\n')
+            if request.path == "/master.m3u8":
+                return dlweb.Response(text="#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nmedia/mp3.m3u8\n")
+            if request.path == "/media/mp3.m3u8":
+                return dlweb.Response(text="#EXTM3U\n#EXTINF:10,\na.mp3\n#EXTINF:10,\nb.mp3\n")
+            if request.path == "/locked.m3u8":
+                return dlweb.Response(text='#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="k"\n#EXTINF:10,\nx.ts\n')
+            if request.path in ("/init.mp4", "/media/a.mp3"):
+                return dlweb.Response(body=dl_init if request.path == "/init.mp4" else b"MP3A")
+            if request.path in ("/seg0.m4s", "/seg1.m4s"):
+                return dlweb.Response(body=dl_seg[int(request.path[4])])
+            if request.path == "/media/b.mp3":
+                return dlweb.Response(body=b"MP3B")
+            if request.path == "/cover.jpg":
+                return dlweb.Response(body=JPEG, content_type="image/jpeg")
+            return dlweb.Response(status=404)
+        dl_app = dlweb.Application()
+        dl_app.router.add_route("GET", "/{path:.*}", fake_media)
+        dl_runner = dlweb.AppRunner(dl_app)
+        await dl_runner.setup()
+        dl_site = dlweb.TCPSite(dl_runner, "127.0.0.1", 0)
+        await dl_site.start()
+        dl_url = f"http://127.0.0.1:{dl_site._server.sockets[0].getsockname()[1]}"
+
+        class FakeSource(BaseService):
+            """Tracks of every kind a downloadable source can hand over."""
+            type, display_name, downloadable = "fakedl", "Fake", True
+            streams = {"file": Source(url=dl_url + "/song.mp3", headers={"X-Key": "secret"}),
+                       "whole": Source(url=dl_url + "/whole.ogg"),
+                       "fmp4": Source(url=dl_url + "/fmp4.m3u8", hls=True),
+                       "mp3hls": Source(url=dl_url + "/master.m3u8", hls=True),
+                       "locked": Source(url=dl_url + "/locked.m3u8", hls=True),
+                       "dash": Source(playlist="#EXTM3U\n", hls=True)}
+
+            async def stream(self, track_id):
+                return self.streams[track_id]
+
+            async def art(self, art_id):
+                return Source(url=dl_url + "/cover.jpg")
+
+        class FakeStreamingOnly(FakeSource):
+            type, display_name, downloadable = "fakesub", "Fake subscription", False
+
+        real_chunk = offmod.CHUNK
+        offmod.CHUNK = 4096  # the file arrives in three ranges
+        main.SERVICE_TYPES.update({FakeSource.type: FakeSource, FakeStreamingOnly.type: FakeStreamingOnly})
+        try:
+            fake = (await plugin.save_service({"type": "fakedl", "name": "", "config": {}}))["data"]
+            fid = fake["id"]
+            check(fake["downloadable"], "sources say whether they can download")
+            tracks = [{"id": i, "title": i.title(), "artist": "", "album": "", "duration": 10, "art": "c1"}
+                      for i in ("file", "whole", "fmp4", "mp3hls", "locked", "dash")]
+            mix = await plugin.create_playlist(fid, "Mix", tracks)
+            dl_page = (await plugin.open_collection(fid, "playlist", mix["id"]))["data"]
+            check(dl_page["offline"] == {"on": False, "saved": 0, "total": 6}, "a playlist of a downloadable source offers it")
+            check((await plugin.set_playlist_offline(mix["id"], True))["ok"], "marking a playlist for download")
+            await plugin.offline.worker
+            st = (await plugin.get_state())["offline"]
+            check(st["tracks"] == 4 and st["failed"] == 2 and st["pending"] == 0 and st["current"] is None,
+                  "plain files, fragmented MP4 and MP3 streams are saved; encrypted and generated streams aren't")
+            check(sum(1 for c in dl_calls if c == "/song.mp3") == 3, "large files come in ranges")
+            check(len(plugin.offline.art) == 1 and dl_calls.count("/cover.jpg") == 1, "artwork shared by tracks is saved once")
+            base, key = plugin.server.base_url, plugin.server.key
+            await dl_runner.cleanup()  # the network is gone
+            async with aiohttp.ClientSession() as http:
+                async def fetch(path):
+                    async with http.get(f"{base}{path}?k={key}") as r:
+                        return r.status, await r.read(), r.headers.get("Content-Type", "")
+                check(await fetch(f"/stream/{fid}/file") == (200, dl_audio, "audio/mpeg"), "a saved file plays without the source")
+                check((await fetch(f"/stream/{fid}/fmp4"))[1:] == (dl_init + b"".join(dl_seg), "audio/mp4"),
+                      "an HLS stream is saved as one MP4 file, init section first")
+                check((await fetch(f"/stream/{fid}/mp3hls"))[1:] == (b"MP3AMP3B", "audio/mpeg"), "a master playlist's media playlist is followed")
+                check((await fetch(f"/stream/{fid}/whole"))[1] == b"OGG" * 100, "a server without ranges sends it whole")
+                check((await fetch(f"/art/{fid}/c1"))[:2] == (200, JPEG), "artwork shows without the source")
+                async with http.get(f"{base}/stream/{fid}/file?k={key}", headers={"Range": "bytes=100-199"}) as r:
+                    check(r.status == 206 and await r.read() == dl_audio[100:200], "saved files seek")
+            check((await plugin.stream_info(fid, "fmp4"))["data"]["hls"] is False, "a saved HLS track plays as a file")
+            check(not any(f.endswith(".part") for f in os.listdir(plugin.offline.dir)), "failed downloads leave nothing behind")
+            saved = (await plugin.playlist_offline(fid, mix["id"]))
+            check(saved == {"on": True, "saved": 4, "total": 6}, "the dl_page counts what's saved")
+            index = json.load(open(os.path.join(plugin.offline.dir, "index.json")))
+            check(all("secret" not in json.dumps(v) and "127.0.0.1" not in json.dumps(v) for v in index.values()),
+                  "the index keeps file names only, not addresses or headers")
+
+            second = await plugin.create_playlist(fid, "Again", [tracks[0]])
+            await plugin.set_playlist_offline(second["id"], True)
+            await plugin.offline.worker
+            check((await plugin.get_state())["offline"]["tracks"] == 4, "a track in two downloaded playlists is kept once")
+            fmp4_file = plugin.offline.tracks[f"{fid} fmp4"]["file"]
+            await plugin.playlist_remove(mix["id"], "fmp4")
+            check(not os.path.exists(os.path.join(plugin.offline.dir, fmp4_file)) and not plugin.offline.has(fid, "fmp4"),
+                  "a track taken out of the playlist is deleted")
+            await plugin.set_playlist_offline(mix["id"], False)
+            check(plugin.offline.has(fid, "file") and len(plugin.offline.tracks) == 1,
+                  "turning a download off keeps what another downloaded playlist holds")
+            await plugin.playlist_delete(second["id"])
+            check(plugin.offline.tracks == {} and plugin.offline.art == {} and
+                  [f for f in os.listdir(plugin.offline.dir) if f != "index.json"] == [],
+                  "deleting the last playlist holding them deletes the files and artwork")
+
+            await plugin.set_playlist_offline(mix["id"], True)  # the source is down now
+            await plugin.offline.worker
+            st = (await plugin.get_state())["offline"]
+            check(st["failed"] == offmod.GIVE_UP_AFTER and st["stopped"] == "Couldn't reach the source",
+                  "with the source unreachable, downloading stops after a few failures")
+            await plugin.remove_downloads()
+            check(not plugin.playlists.offline() and (await plugin.get_state())["offline"]["failed"] == 0,
+                  "remove all downloads: no playlist is downloaded any more")
+
+            real_free = offmod.MIN_FREE
+            offmod.MIN_FREE = 1 << 62
+            await plugin.set_playlist_offline(mix["id"], True)
+            await plugin.offline.worker
+            check((await plugin.get_state())["offline"]["stopped"] == "Not enough free space", "downloads stop before the disk fills")
+            offmod.MIN_FREE = real_free
+            await plugin.remove_downloads()
+
+            sub = (await plugin.save_service({"type": "fakesub", "name": "", "config": {}}))["data"]
+            locked = await plugin.create_playlist(sub["id"], "Subscription mix", tracks[:1])
+            check((await plugin.open_collection(sub["id"], "playlist", locked["id"]))["data"]["offline"] is None,
+                  "a source that can't download doesn't offer it")
+            await plugin.set_playlist_offline(locked["id"], True)
+            check(plugin.offline.wanted == {}, "and marking its playlist anyway downloads nothing")
+            check(not (await plugin.set_playlist_offline("md:gone", True))["ok"], "a deleted playlist can't be downloaded")
+            await plugin.remove_service(sub["id"])
+            await plugin.remove_service(fid)
+        finally:
+            offmod.CHUNK = real_chunk
+            main.SERVICE_TYPES.pop("fakedl", None)
+            main.SERVICE_TYPES.pop("fakesub", None)
+            await dl_runner.cleanup()
 
         print("internet radio")
         from aiohttp import web as aioweb

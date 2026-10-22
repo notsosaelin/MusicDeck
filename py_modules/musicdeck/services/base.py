@@ -76,6 +76,8 @@ class MusicService:
     type: str = ""
     display_name: str = ""
     features: frozenset[str] = frozenset()
+    # its tracks can be saved for offline listening (see offline.py for which sources may)
+    downloadable: bool = False
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         self.instance_id = instance_id

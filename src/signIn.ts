@@ -29,7 +29,8 @@ const PROVIDERS: Record<string, Provider> = {
     name: "Plex",
     // a Plex token belongs to the client id it was issued to, so signing in again reuses the source's
     options: (draft) => ({ client_id: draft.config.client_id ?? "", browser: true }),
-    signedIn: (s) => `Signed in${s.config.username ? ` as ${s.config.username}` : ""} · ${s.config.server_name ?? "Plex"}`,
+    signedIn: (s) =>
+      `Signed in${s.config.username ? ` as ${s.config.username}` : ""} · ${s.config.server_name ?? "Plex"}`,
   },
 };
 
