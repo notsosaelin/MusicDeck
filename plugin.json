@@ -12,7 +12,7 @@
       "radio",
       "soundtracks"
     ],
-    "description": "Play music from local files, your Steam soundtracks, Navidrome, Jellyfin, Emby, SoundCloud, YouTube Music, Bandcamp, internet radio, podcasts, the Live Music Archive, Qobuz, TIDAL and Spotify in the Soundtracks tab of the Quick Access Menu.",
+    "description": "Play music from local files, your Steam soundtracks, Navidrome, Jellyfin, Emby, Plex, SoundCloud, YouTube Music, Bandcamp, internet radio, podcasts, the Live Music Archive, Qobuz, TIDAL and Spotify in the Soundtracks tab of the Quick Access Menu.",
     "image": ""
   }
 }

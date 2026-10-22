@@ -25,6 +25,12 @@ const PROVIDERS: Record<string, Provider> = {
     signedIn: (s) => `Signed in${s.config.display_name ? ` as ${s.config.display_name}` : ""}`,
   },
   tidal: { name: "TIDAL", signedIn: (s) => `Signed in${s.config.username ? ` as ${s.config.username}` : ""}` },
+  plex: {
+    name: "Plex",
+    // a Plex token belongs to the client id it was issued to, so signing in again reuses the source's
+    options: (draft) => ({ client_id: draft.config.client_id ?? "", browser: true }),
+    signedIn: (s) => `Signed in${s.config.username ? ` as ${s.config.username}` : ""} · ${s.config.server_name ?? "Plex"}`,
+  },
 };
 
 const currentRoute = (): string => {
@@ -69,7 +75,7 @@ export async function readClipboard(): Promise<string | null> {
 let running = false;
 
 /**
- * Browser sign-in (Qobuz, Spotify, TIDAL), start to finish: opens the service's own page in
+ * Browser sign-in (Qobuz, Spotify, TIDAL, Plex), start to finish: opens the service's own page in
  * Steam's browser, follows on to the next page when a service needs two consents (Spotify), then
  * closes the browser and saves the source. The user never has to back out of anything. Leaving the
  * browser without finishing cancels the attempt after ABANDON_MS.

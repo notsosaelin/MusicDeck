@@ -423,6 +423,180 @@ async def run():
         finally:
             await em_runner.cleanup()
 
+        print("plex")
+        from aiohttp import web as pxweb
+        from musicdeck.services import plex as pxmod
+        px_calls = []
+        px_pin_polls = []
+        px_open = [False]  # a server that lets this network in without a sign-in
+
+        def px_track(key, codec="mp3", rating=None, gain=None):
+            stream = {"streamType": 2, "codec": codec}
+            if gain is not None:
+                stream.update(gain=gain, albumGain=gain - 1, peak=0.9)
+            return {"ratingKey": key, "type": "track", "title": f"Song {key}", "grandparentTitle": "Band",
+                    "parentTitle": "Record", "parentRatingKey": "20", "grandparentRatingKey": "30", "duration": 61000,
+                    "thumb": "/library/metadata/20/thumb/1", "userRating": rating,
+                    "Media": [{"audioCodec": codec, "Part": [{"key": f"/library/parts/{key}/1/file.{codec}",
+                                                              "Stream": [stream, {"streamType": 4, "key": "/library/streams/9", "codec": "lrc"}]}]}]}
+
+        async def fake_plex(request):
+            path, q = request.path, request.query
+            px_calls.append((request.method, path, dict(q)))
+            token = request.headers.get("X-Plex-Token", "")
+            if path == "/api/v2/pins" and request.method == "POST":
+                return pxweb.json_response({"id": 7, "code": "AB12" if q.get("strong") == "false" else "long-code-xyz"})
+            if path == "/api/v2/pins/7":
+                px_pin_polls.append(1)
+                return pxweb.json_response({"id": 7, "authToken": "acct" if len(px_pin_polls) > 1 else None})
+            if path == "/api/v2/user":
+                return pxweb.json_response({"uuid": "u-1", "username": "plexfan"}) if token == "acct" else pxweb.Response(status=401)
+            if path == "/api/v2/resources":
+                return pxweb.json_response([
+                    {"name": "Friend's", "provides": "server", "owned": False, "clientIdentifier": "friend",
+                     "accessToken": "ft", "connections": [{"uri": px_base, "local": False}]},
+                    {"name": "Home", "provides": "server", "owned": True, "clientIdentifier": "home", "accessToken": "srv",
+                     "connections": [{"uri": "http://127.0.0.1:9", "local": True, "address": "127.0.0.1", "port": 9},
+                                     {"uri": px_base, "local": False}]},
+                    {"name": "TV", "provides": "player,client", "clientIdentifier": "tv"}])
+            if path == "/identity":
+                return pxweb.json_response({"MediaContainer": {"machineIdentifier": "m1"}})
+            if token not in ("srv", "ft") and not px_open[0]:
+                return pxweb.Response(status=401)
+            meta = lambda items: pxweb.json_response({"MediaContainer": {"Metadata": items}})
+            if path == "/library/sections":
+                return pxweb.json_response({"MediaContainer": {"Directory": [{"key": "1", "type": "artist"}, {"key": "2", "type": "movie"}]}})
+            if path == "/library/sections/2/all":
+                raise AssertionError("asked a film library for music")
+            if path == "/library/sections/1/all":
+                return meta([px_track("11", rating=10.0), px_track("12")] if q.get("type") == "10" else
+                            [{"ratingKey": "20", "type": "album", "title": "Record", "parentTitle": "Band", "year": 1999}])
+            items = {"11": px_track("11", rating=10.0, gain=-7.5), "12": px_track("12", codec="alac"),
+                     "20": {"ratingKey": "20", "type": "album", "title": "Record", "parentTitle": "Band"},
+                     "40": {"ratingKey": "40", "type": "playlist", "title": "Mix", "leafCount": 1}}
+            if path.startswith("/library/metadata/") and path.count("/") == 3:
+                key = path.rsplit("/", 1)[1]
+                return meta([items[key]]) if key in items else pxweb.Response(status=404)
+            if path == "/library/metadata/20/children":
+                return meta([px_track("11", rating=10.0), px_track("12")])
+            if path == "/library/metadata/11/nearest":
+                return pxweb.Response(status=403)  # sonic analysis needs Plex Pass
+            if path == "/playlists":
+                return meta([items["40"], {"ratingKey": "41", "type": "playlist", "title": "Smart", "smart": True}])
+            if path == "/playlists/40/items":
+                return meta([px_track("11")]) if request.method == "GET" else meta([])
+            if path == "/library/streams/9":
+                return pxweb.json_response({"MediaContainer": {"Lyrics": [{"timed": True, "Line": [
+                    {"startOffset": 1500, "Span": [{"text": "Hello "}, {"text": "there"}]}, {"startOffset": 4000, "Span": [{"text": "Bye"}]}]}]}})
+            if path in ("/:/rate", "/:/scrobble", "/:/timeline"):
+                return pxweb.Response(status=200)
+            return pxweb.Response(status=404)
+        px_app = pxweb.Application()
+        px_app.router.add_route("*", "/{path:.*}", fake_plex)
+        px_runner = pxweb.AppRunner(px_app)
+        await px_runner.setup()
+        px_site = pxweb.TCPSite(px_runner, "127.0.0.1", 0)
+        await px_site.start()
+        px_base = f"http://127.0.0.1:{px_site._server.sockets[0].getsockname()[1]}"
+        real_plex = (pxmod.PLEX_TV, pxmod.RESOURCES)
+        pxmod.PLEX_TV, pxmod.RESOURCES = px_base + "/api/v2", px_base + "/api/v2/resources"
+        try:
+            locked = await plugin.save_service({"type": "plex", "name": "", "config": {"url": px_base}})
+            check(not locked["ok"] and "needs you to sign in with Plex" in locked["error"],
+                  "an address alone: refused when the server wants a sign-in")
+            px_open[0] = True
+            open_px = (await plugin.save_service({"type": "plex", "name": "", "config": {"url": px_base}}))["data"]
+            check(not open_px["has_credentials"] and open_px["config"]["server_url"] == px_base
+                  and (await plugin.home(open_px["id"]))["ok"], "an address alone: fine for a server that doesn't ask")
+            await plugin.remove_service(open_px["id"])
+            px_open[0] = False
+            started = await plugin.sign_in_start("plex", {"client_id": ""})
+            on_deck = await plugin.sign_in_start("plex", {"client_id": "", "browser": True})
+            check(on_deck["ok"] and not on_deck["data"]["code"] and "code=long-code-xyz" in on_deck["data"]["url"]
+                  and on_deck["data"]["url"].startswith("https://app.plex.tv/auth/#!?clientID="),
+                  "on the Deck: Plex's sign-in page with a long code")
+            started = await plugin.sign_in_start("plex", {"client_id": ""})
+            check(started["ok"] and started["data"]["code"] == "AB12" and not started["data"]["url"],
+                  "elsewhere: a short code for plex.tv/link (the newer attempt replaces the other)")
+            draft = {"type": "plex", "name": "", "config": {}}
+            poll = {"status": "waiting"}
+            for _ in range(20):
+                poll = await plugin.sign_in_poll(started["data"]["login_id"], draft)
+                if poll["status"] != "waiting":
+                    break
+                await asyncio.sleep(0.5)
+            check(poll["status"] == "done", f"the code is approved and the source saved ({poll.get('error')})")
+            px = poll["service"]
+            pid = px["id"]
+            stored = next(x for x in plugin.settings.services() if x["id"] == pid)["config"]
+            check(px["config"]["server_name"] == "Home" and stored["server_url"] == px_base and stored["server_token"] == "srv"
+                  and stored["token"] == "acct" and len(stored["client_id"]) == 24,
+                  "the account's own server, at the first address that answers, with its token and the sign-in's client id")
+            check([x["id"] for x in px["config"]["servers"]] == ["home", "friend"] and px["config"]["username"] == "plexfan",
+                  "the account's servers (own first, players left out) for the dialog's picker")
+            check("token" not in px["config"] and "server_token" not in px["config"] and px["has_credentials"],
+                  "neither token reaches the UI")
+            again = await plugin.save_service({"type": "plex", "name": "", "config": {"token": "acct"}})
+            check(not again["ok"] and "already added" in again["error"], "the same account and server can't be added twice")
+            friend = (await plugin.save_service({"id": pid, "type": "plex", "name": "", "config": {**px["config"], "server": "friend"}}))["data"]
+            fstored = next(x for x in plugin.settings.services() if x["id"] == pid)["config"]
+            check(friend["config"]["server_name"] == "Friend's" and fstored["server_token"] == "ft" and fstored["token"] == "acct",
+                  "picking another server in the dialog, keeping the sign-in")
+            await plugin.save_service({"id": pid, "type": "plex", "name": "", "config": {**px["config"], "server": "home"}})
+            inst = plugin.instances[pid]
+            home = (await plugin.home(pid))["data"]
+            check([x["title"] for x in home] == ["Playlists", "Recently played", "Recently added", "Most played", "Favourite albums", "Library"],
+                  "home rows, from music libraries only")
+            check([c["id"] for c in home[0]["items"]] == ["40", "41"] and [p["id"] for p in await inst.user_playlists()] == ["40"],
+                  "smart playlists are shown but can't be added to")
+            page = (await plugin.open_collection(pid, "album", "20"))["data"]
+            t = page["tracks"][0]
+            check(t["starred"] and not page["tracks"][1]["starred"] and t["duration"] == 61 and t["art"] == "/library/metadata/20/thumb/1",
+                  "tracks: four or five stars is a favourite; lengths; album art")
+            src = await inst.stream("11")
+            check(src.url == px_base + "/library/parts/11/1/file.mp3" and src.headers["X-Plex-Token"] == "srv"
+                  and src.gain == {"track": -7.5, "album": -8.5, "track_peak": 0.9, "album_peak": 0.9},
+                  "playable files direct, token in a header, Plex's loudness analysis as gain")
+            alac = await inst.stream("12")
+            check("/music/:/transcode/universal/start?" in alac.url and "path=%2Flibrary%2Fmetadata%2F12" in alac.url,
+                  "codecs Steam can't play are transcoded by the server")
+            check((await inst.stream("12")).url != alac.url, "each transcode is its own session")
+            found = await inst.lyrics(t)
+            check(found == {"synced": True, "lines": [{"t": 1.5, "text": "Hello there"}, {"t": 4.0, "text": "Bye"}], "source": "Plex"},
+                  "Plex's timed lyrics")
+            await inst.star("11", True)
+            await inst.star("11", False)
+            check([(c[1], c[2].get("rating")) for c in px_calls[-2:]] == [("/:/rate", "10"), ("/:/rate", "-1")],
+                  "favourite = five stars; taking it back clears the rating")
+            await inst.scrobble("11", False)
+            await inst.scrobble("11", True)
+            check([c[1] for c in px_calls[-2:]] == ["/:/timeline", "/:/scrobble"], "now playing, then a play")
+            radio = (await plugin.radio(pid, t))["data"]
+            check(radio is not None and all(x["id"] != "11" for x in radio), "radio without Plex Pass: the library, not the seed")
+            await inst.add_to_playlist("40", ["11", "12"])
+            check(px_calls[-1][2].get("uri") == "server://m1/com.plexapp.plugins.library/library/metadata/11,12",
+                  "adding to a playlist names this server")
+            before = len(px_calls)
+            found = (await plugin.search(pid, "mix"))["data"]
+            check(all(c[1] != "/hubs/search" for c in px_calls[before:]) and any(c[2].get("title") == "mix" for c in px_calls[before:])
+                  and [c["id"] for c in found["collections"] if c["kind"] == "playlist"] == ["40"],
+                  "search by title (not Plex's fuzzy hub search), playlists by name")
+            for bad in ["../20", "20/children", "", "x"]:
+                check(not (await plugin.open_collection(pid, "album", bad))["ok"], f"refused album id {bad!r}")
+            check(not (await plugin.open_collection(pid, "album", "11"))["ok"], "a track opened as an album isn't found")
+            check(not (await plugin.stream_info(pid, "20"))["ok"], "an album isn't a track")
+            for bad in ["/library/../../etc/passwd", "http://elsewhere/x.jpg", "library/metadata/1/thumb"]:
+                try:
+                    await inst.art(bad)
+                    refused = False
+                except Exception:
+                    refused = True
+                check(refused, f"refused art {bad!r}")
+            await plugin.remove_service(pid)
+        finally:
+            pxmod.PLEX_TV, pxmod.RESOURCES = real_plex
+            await px_runner.cleanup()
+
         print("internet radio")
         from aiohttp import web as aioweb
         from musicdeck.services.radio import RadioService

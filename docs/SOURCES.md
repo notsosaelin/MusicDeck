@@ -11,6 +11,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Navidrome / Subsonic | `subsonic` | Server | Password → salted token | Original files (`format=raw`) | favourites, play reports, lyrics, radio, queue sync, playlists |
 | Jellyfin | `jellyfin` | Server | Quick Connect or password → access token | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
 | Emby | `emby` | Server | Password → access token | Original, server transcodes the rest | favourites, play reports, radio, playlists |
+| Plex | `plex` | plex.tv (optional) | PIN: plex.tv/link code, or Plex's page | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
 | SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | radio |
 | YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | radio, lyrics |
 | Bandcamp | `bandcamp` | — | — | MP3 128 kbps | radio, lyrics |
@@ -26,7 +27,7 @@ the Deck otherwise. Every source can also use MusicDeck playlists and ListenBrai
 
 **Several accounts.** Every source type can be added more than once. Sources with accounts say who
 they are signed in as through `account(config)` (Spotify username, Qobuz/TIDAL user id, server +
-user for Navidrome, Jellyfin and Emby); saving refuses a second source for an account already added. A
+user for Navidrome, Jellyfin and Emby, account + server for Plex); saving refuses a second source for an account already added. A
 new source with no name gets "Spotify", then "Spotify 2", and so on. Per-account files are kept
 apart (Spotify's playback credentials live in `spotify/accounts/<username>/`) and deleted with the
 source (`MusicService.remove`).
@@ -128,6 +129,39 @@ source (`MusicService.remove`).
 - **Art**: Emby only has art it found (a `cover.jpg`/`folder.jpg` next to the files, or embedded
   pictures); an album without either shows the placeholder, as it does in Emby's own apps.
 - Tested against Emby Server 4.10.2 in a container, with a music library and a playlist.
+
+## Plex (`plex.py`)
+
+- **Protocol**: the Plex Media Server API its own apps use, JSON (`Accept: application/json`),
+  with `X-Plex-Client-Identifier`/`Product`/`Platform` headers on every request (the transcoder
+  refuses requests without a platform). MusicDeck appears under the server's Devices.
+- **Sign-in** (`PlexLink`): a plex.tv PIN. In the dialog, a short code to enter at plex.tv/link
+  on any signed-in device; "Sign in on this Deck" instead opens `app.plex.tv/auth/#!?…` with a long
+  ("strong") code in Steam's browser. The token belongs to the PIN's client id, which is stored
+  with it and reused when signing in again.
+- **Finding the server** (`authenticate`): plex.tv's resources list gives the account's servers
+  (owned first) with their addresses; all are tried at once and the best that answers wins (local,
+  then remote, then relay; local ones also over plain HTTP, for routers that block `plex.direct`).
+  A shared server uses its own access token. With more than one server the dialog shows a picker;
+  a typed address overrides plex.tv's. Without a sign-in, a typed address is enough for a server
+  that lets the network in (unclaimed, or "allowed without auth").
+- **Browsing**: every music library (`type=artist` sections) merged. Plex filters: `>>=` means
+  "more than", and paging needs both `X-Plex-Container-Start` and `-Size`. Search uses the
+  libraries' `title` filter: `/hubs/search` is fuzzy enough to return a track for nonsense.
+- **Audio**: the file part directly (byte ranges) when its codec plays in Chromium; otherwise
+  `/music/:/transcode/universal/start` to MP3 320, one session id per stream. Transcoded streams
+  have no byte ranges, so seeking only works within what has loaded.
+- **Extras**: favourites are star ratings (`/:/rate`: favouriting sets five stars, taking it back
+  clears the rating; four stars or more shows as a favourite), play reports (`/:/timeline`, then
+  `/:/scrobble`), lyrics (stream type 4: sidecar `.lrc`, or Plex Pass's provider, sent as timed
+  lines), loudness from Plex's analysis (`gain`/`albumGain` on the audio stream), radio from sonic
+  analysis (`/nearest`, Plex Pass) or else the same artist mixed with the library, playlists (smart
+  ones are shown but can't be added to).
+- **Ids**: rating keys (digits only); art ids are the server's image paths, served through
+  `/photo/:/transcode` at 300 px.
+- Tested against Plex Media Server 1.43 in a container (unclaimed, so without plex.tv), with
+  sidecar lyrics; the plex.tv sign-in and server discovery against a fake plex.tv in the tests,
+  and Plex's sign-in page opened on the Deck.
 
 ## SoundCloud (`soundcloud.py`)
 
@@ -286,5 +320,5 @@ These were investigated and can't be supported without DRM circumvention:
 
 ## Candidates not implemented yet
 
-- **Plex**: feasible (PIN sign-in at plex.tv/link, `/library/sections`, direct play of parts,
-  `/:/scrobble`, sonic "nearest" for radio), but there is no public server to test against.
+- **Audiobookshelf**: planned (audiobooks and podcasts from a self-hosted server, with resume
+  through the `progress` feature podcasts use).

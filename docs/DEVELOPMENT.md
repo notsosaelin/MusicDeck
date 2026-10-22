@@ -79,6 +79,9 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
 - every service's mapping and config rules (Spotify, TIDAL, Jellyfin, radio, Bandcamp, Subsonic);
 - Emby against a fake server: its own paths for items, favourites and plays, the session ids its
   play report needs, unfiltered playlists, password-only sign-in and errors that name Emby;
+- Plex against a fake plex.tv and server: both sign-in codes, server discovery (owned first, dead
+  addresses skipped, shared servers' tokens), the picker, open servers, ratings, transcoding,
+  timed lyrics, title search, refused ids and image paths;
 - podcasts against a fake directory and feed: the XML reader (CDATA, entities, broken markup),
   subscribing, home rows, resuming and marking played, refused ids;
 - the Live Music Archive against a fake archive.org: home rows (on this day really today), shows,

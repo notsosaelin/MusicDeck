@@ -309,20 +309,24 @@ const ServerFields: FC<{
 );
 
 /**
- * Jellyfin: Quick Connect (approve a code in any signed-in Jellyfin app, nothing typed here) or a
- * username and password, which the backend swaps for an access token on save.
+ * A sign-in code shown in the dialog (Jellyfin's Quick Connect, Plex's link code): asks the backend
+ * for a code, shows it with where to enter it, and saves the source once it's approved elsewhere.
+ * Closing the dialog abandons the attempt.
  */
-const JellyfinFields: FC<{
+const CodeSignIn: FC<{
+  type: string;
   draft: ServiceDraft;
-  setConfig: (c: Record<string, any>) => void;
-  hasCredentials: boolean;
+  options: Record<string, any>;
+  label: string;
+  instructions: string;
+  disabled?: boolean;
+  signedInAs: (service: ServiceInfo) => string;
   closeModal?: () => void;
-}> = ({ draft, setConfig, hasCredentials, closeModal }) => {
+}> = ({ type, draft, options, label, instructions, disabled, signedInAs, closeModal }) => {
   const [code, setCode] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const login = useRef<string | null>(null);
 
-  // closing the dialog abandons a pending Quick Connect
   useEffect(
     () => () => {
       if (login.current) signInCancel(login.current);
@@ -330,17 +334,17 @@ const JellyfinFields: FC<{
     [],
   );
 
-  const quickConnect = async () => {
-    setStatus("Asking the server for a code…");
-    const start = await signInStart("jellyfin", { url: draft.config.url ?? "" });
-    if (!start.ok) return setStatus(start.error);
-    login.current = start.data.login_id;
-    setCode(start.data.code);
+  const start = async () => {
+    setStatus("Asking for a code…");
+    const begun = await signInStart(type, options);
+    if (!begun.ok) return setStatus(begun.error);
+    login.current = begun.data.login_id;
+    setCode(begun.data.code);
     setStatus(null);
     for (;;) {
       await new Promise((r) => setTimeout(r, 1500));
-      if (login.current !== start.data.login_id) return; // cancelled or restarted
-      const poll = await signInPoll(start.data.login_id, draft);
+      if (login.current !== begun.data.login_id) return; // cancelled or restarted
+      const poll = await signInPoll(begun.data.login_id, draft);
       if (poll.status === "error") {
         login.current = null;
         setCode(null);
@@ -350,7 +354,7 @@ const JellyfinFields: FC<{
         login.current = null;
         await refreshState();
         invalidateBrowserCache();
-        notify(poll.service.name, `Signed in as ${poll.service.config.username || "Jellyfin user"}`);
+        notify(poll.service.name, signedInAs(poll.service));
         return closeModal?.();
       }
     }
@@ -358,42 +362,121 @@ const JellyfinFields: FC<{
 
   return (
     <>
-      <Field label="Server address">
+      {code ? (
+        <div style={{ textAlign: "center", padding: "8px 0" }}>
+          <div style={{ fontSize: 32, fontWeight: "bold", letterSpacing: 6 }}>{code}</div>
+          <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>{instructions} MusicDeck continues by itself.</div>
+        </div>
+      ) : (
+        <DialogButton disabled={disabled} onClick={start}>
+          {label}
+        </DialogButton>
+      )}
+      {status && <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>{status}</div>}
+    </>
+  );
+};
+
+/**
+ * Jellyfin: Quick Connect (approve a code in any signed-in Jellyfin app, nothing typed here) or a
+ * username and password, which the backend swaps for an access token on save.
+ */
+const JellyfinFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  hasCredentials: boolean;
+  closeModal?: () => void;
+}> = ({ draft, setConfig, hasCredentials, closeModal }) => (
+  <>
+    <Field label="Server address">
+      <TextField
+        value={draft.config.url ?? ""}
+        placeholder="https://jellyfin.example.com"
+        onChange={(e) => setConfig({ ...draft.config, url: e.target.value })}
+      />
+    </Field>
+    <Field label="Quick Connect">
+      <CodeSignIn
+        type="jellyfin"
+        draft={draft}
+        options={{ url: draft.config.url ?? "" }}
+        disabled={!draft.config.url}
+        label={hasCredentials ? "Sign in again with Quick Connect" : "Sign in with Quick Connect"}
+        instructions="In a Jellyfin app you're signed in to, open your profile → Quick Connect and enter this code."
+        signedInAs={(s) => `Signed in as ${s.config.username || "Jellyfin user"}`}
+        closeModal={closeModal}
+      />
+    </Field>
+    <div style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 10px" }}>Or sign in with a username and password:</div>
+    <Field label="Username">
+      <TextField
+        value={draft.config.username ?? ""}
+        onChange={(e) => setConfig({ ...draft.config, username: e.target.value })}
+      />
+    </Field>
+    <Field label="Password">
+      <TextField
+        bIsPassword
+        value={draft.config.password ?? ""}
+        placeholder={hasCredentials ? "Unchanged" : ""}
+        onChange={(e) => setConfig({ ...draft.config, password: e.target.value })}
+      />
+    </Field>
+  </>
+);
+
+const plexSignedIn = (s: ServiceInfo) =>
+  `Signed in${s.config.username ? ` as ${s.config.username}` : ""} · ${s.config.server_name ?? "Plex"}`;
+
+/**
+ * Plex: a link code entered at plex.tv/link on any device signed in to Plex (or approved on Plex's
+ * page in Steam's browser). The account's servers come from plex.tv; with more than one, pick here.
+ * A typed address overrides plex.tv's, and alone is enough for a server that doesn't ask for a sign-in.
+ */
+const PlexFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  signedIn: boolean;
+  closeModal?: () => void;
+}> = ({ draft, setConfig, signedIn, closeModal }) => {
+  const servers: { id: string; name: string }[] = draft.config.servers ?? [];
+  return (
+    <>
+      <Field label="Account">
+        <CodeSignIn
+          type="plex"
+          draft={draft}
+          options={{ client_id: draft.config.client_id ?? "" }}
+          label={
+            signedIn && draft.config.username ? `Signed in as ${draft.config.username} · sign in again` : "Sign in with Plex"
+          }
+          instructions="On a phone or computer signed in to Plex, go to plex.tv/link and enter this code."
+          signedInAs={plexSignedIn}
+          closeModal={closeModal}
+        />
+        <DialogButton
+          style={{ marginTop: 8 }}
+          onClick={() => {
+            closeModal?.();
+            signIn("plex", draft);
+          }}
+        >
+          Sign in on this Deck instead
+        </DialogButton>
+      </Field>
+      {servers.length > 1 && (
+        <DropdownItem
+          label="Server"
+          rgOptions={servers.map((s) => ({ data: s.id, label: s.name }))}
+          selectedOption={draft.config.server ?? servers[0].id}
+          onChange={(o) => setConfig({ ...draft.config, server: o.data })}
+        />
+      )}
+      <Field label="Server address (optional)">
         <TextField
           value={draft.config.url ?? ""}
-          placeholder="https://jellyfin.example.com"
+          placeholder={draft.config.server_url ?? "Found through your Plex account"}
           onChange={(e) => setConfig({ ...draft.config, url: e.target.value })}
-        />
-      </Field>
-      <Field label="Quick Connect">
-        {code ? (
-          <div style={{ textAlign: "center", padding: "8px 0" }}>
-            <div style={{ fontSize: 32, fontWeight: "bold", letterSpacing: 6 }}>{code}</div>
-            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
-              In a Jellyfin app you're signed in to, open your profile → Quick Connect and enter this code. MusicDeck
-              continues by itself.
-            </div>
-          </div>
-        ) : (
-          <DialogButton disabled={!draft.config.url} onClick={quickConnect}>
-            {hasCredentials ? "Sign in again with Quick Connect" : "Sign in with Quick Connect"}
-          </DialogButton>
-        )}
-        {status && <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>{status}</div>}
-      </Field>
-      <div style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 10px" }}>Or sign in with a username and password:</div>
-      <Field label="Username">
-        <TextField
-          value={draft.config.username ?? ""}
-          onChange={(e) => setConfig({ ...draft.config, username: e.target.value })}
-        />
-      </Field>
-      <Field label="Password">
-        <TextField
-          bIsPassword
-          value={draft.config.password ?? ""}
-          placeholder={hasCredentials ? "Unchanged" : ""}
-          onChange={(e) => setConfig({ ...draft.config, password: e.target.value })}
         />
       </Field>
     </>
@@ -498,6 +581,14 @@ export const ServiceModal: FC<{
             draft={draft}
             setConfig={setConfig}
             hasCredentials={!!existing?.has_credentials}
+            closeModal={closeModal}
+          />
+        )}
+        {type === "plex" && (
+          <PlexFields
+            draft={draft}
+            setConfig={setConfig}
+            signedIn={!!existing?.has_credentials}
             closeModal={closeModal}
           />
         )}

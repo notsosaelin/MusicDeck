@@ -22,7 +22,7 @@ from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings
 
 # Config keys never sent to the frontend; a service storing a secret under another name adds it here
-SECRET_KEYS = {"password", "token", "refresh_token", "salt", "secret", "cookies", "auth"}
+SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "secret", "cookies", "auth"}
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
 FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log"}
 # What can be set to play with a game: things with a track list of their own
