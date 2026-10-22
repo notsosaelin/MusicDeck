@@ -315,7 +315,12 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
 These were investigated and can't be supported without DRM circumvention:
 
 - **Apple Music**: Widevine-only streams; Steam's browser engine has no CDM. Cider and Sidra are
-  separate CastLabs Electron apps for this reason.
+  separate CastLabs Electron apps for this reason. The decky-apple-music plugin does the same
+  inside Gaming Mode: a hidden CastLabs Electron player (313 MB installed) driven over an
+  unauthenticated local DevTools port, with the Chromium sandbox off. Measured on the test Deck,
+  idle and signed out: 4 processes, about 300 MB of memory (PSS), before any decoding. MusicDeck
+  plays in Steam's own browser engine instead (its backend is about 60 MB), so it doesn't add a
+  second browser.
 - **Deezer, Amazon Music**: same situation.
 
 ## Lyrics sites (`lyrics.py`)
