@@ -134,6 +134,8 @@ export interface ServiceInfo {
   features: Feature[];
   /** its tracks can be saved for offline listening */
   downloadable: boolean;
+  /** can play on speakers and TVs (not Spotify) */
+  castable: boolean;
 }
 
 export interface ServiceType {
@@ -271,3 +273,38 @@ export const setGameMusic = callable<
 >("set_game_music");
 export const onAir = callable<[id: string, trackId: string], Result<OnAir | null>>("on_air");
 export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");
+
+// --- casting (py_modules/musicdeck/cast) ---
+
+export interface CastDevice {
+  id: string;
+  name: string;
+  model: string;
+  kind: "chromecast" | "upnp";
+}
+
+export interface CastSession {
+  id: string;
+  name: string;
+  kind: CastDevice["kind"];
+  volume: number;
+}
+
+/** "cast_status" events: the device's state, or `gone` when the session ended without us ending it. */
+export interface CastStatus {
+  state?: "playing" | "paused" | "buffering" | "idle";
+  position?: number;
+  duration?: number;
+  ended?: boolean;
+  error?: string;
+  volume?: number | null;
+  gone?: string;
+}
+
+export const castDevices = callable<[], Result<CastDevice[]>>("cast_devices");
+export const castStart = callable<[deviceId: string], Result<CastSession>>("cast_start");
+export const castLoad = callable<[id: string, track: Track, start: number, autoplay: boolean], Result<null>>(
+  "cast_load",
+);
+export const castControl = callable<[action: string, value?: number], Result<null>>("cast_control");
+export const castStop = callable<[], Result<null>>("cast_stop");

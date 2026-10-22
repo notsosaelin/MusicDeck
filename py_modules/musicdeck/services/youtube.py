@@ -44,6 +44,8 @@ LYRICS_IDS_TTL = 6 * 3600
 LYRICS_IDS_KEPT = 1000
 # opus (itag 251, ~160 kbps) first, then AAC; both play natively in Steam's Chromium
 AUDIO_FORMAT = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio"
+# for renderers that can't play Opus (most UPnP ones): AAC in MP4
+COMPATIBLE_FORMAT = "bestaudio[ext=m4a]/bestaudio"
 
 
 WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ytdlp_worker.py")
@@ -455,19 +457,25 @@ class YouTubeService(MusicService):
 
     # --- media ---
 
-    async def _extract(self, video_id: str, use_js: bool) -> dict[str, Any]:
+    async def _extract(self, video_id: str, use_js: bool, audio_format: str) -> dict[str, Any]:
         if not VIDEO_ID.match(video_id):
             raise ServiceError("That isn't a YouTube video")
         return await self.worker.call(
-            "extract", video_id=video_id, js_path=self.qjs_path if use_js else None, format=AUDIO_FORMAT,
+            "extract", video_id=video_id, js_path=self.qjs_path if use_js else None, format=audio_format,
             cachedir=os.path.join(self.runtime_dir, "yt-dlp-cache"), timeout=90 if use_js else 30)
 
     async def stream(self, track_id: str) -> StreamSource:
+        return await self._stream(track_id, AUDIO_FORMAT)
+
+    async def compatible_stream(self, track_id: str) -> StreamSource:
+        return await self._stream(track_id, COMPATIBLE_FORMAT)
+
+    async def _stream(self, track_id: str, audio_format: str) -> StreamSource:
         use_js = time.time() < self._needs_js_until
         info = None
         if not use_js:
             try:
-                info = await self._extract(track_id, False)
+                info = await self._extract(track_id, False, audio_format)
                 if not info.get("url"):
                     info = None
             except Exception as e:
@@ -476,7 +484,7 @@ class YouTubeService(MusicService):
             if not self.qjs_path:
                 raise ServiceError("YouTube needs its JavaScript helper, which is missing; reinstall MusicDeck")
             started = time.time()
-            info = await self._extract(track_id, True)
+            info = await self._extract(track_id, True, audio_format)
             self._needs_js_until = time.time() + NEEDS_JS_FOR
             debuglog.debug("youtube", "resolved with QuickJS", track=track_id, seconds=round(time.time() - started, 1))
         url = info.get("url")

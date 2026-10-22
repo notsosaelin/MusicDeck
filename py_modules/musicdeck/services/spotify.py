@@ -236,6 +236,8 @@ class SpotifyService(MusicService):
 
     type = "spotify"
     display_name = "Spotify"
+    # librespot decrypts the audio for this player only; Spotify Connect is how it plays on speakers
+    castable = False
     features = frozenset({"star", "playlists", "radio", "lyrics"})
 
     @classmethod

@@ -12,6 +12,7 @@ import aiohttp
 import decky
 
 from musicdeck import backup, debuglog, lyrics
+from musicdeck.cast import CastManager
 from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.net import tls
 from musicdeck.offline import OfflineStore
@@ -109,6 +110,7 @@ class Plugin:
             # none of these sites needs cookies, and NetEase cuts its search results short for a
             # client that keeps the cookie it sets
             cookie_jar=aiohttp.DummyCookieJar())
+        self.cast = CastManager(self.server, self.instances.get, decky.emit, self.http, decky.logger)
         self.listenbrainz = ListenBrainz(self.http, os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR,
                                                                  "listenbrainz-pending.json"))
         try:
@@ -122,6 +124,7 @@ class Plugin:
             self.ready.set()
 
     async def _unload(self):
+        await self.cast.disconnect()
         await self.offline.stop()
         for instance in list(self.instances.values()):
             await instance.stop()
@@ -174,6 +177,7 @@ class Plugin:
             "has_credentials": any(k in SECRET_KEYS for k in service["config"]),
             "features": sorted(instance.features) if instance else [],
             "downloadable": bool(instance and instance.downloadable),
+            "castable": bool(instance and instance.castable),
             "status": instance.status() if instance else {},
         }
 
@@ -353,6 +357,31 @@ class Plugin:
         """Drops a cached stream URL (e.g. expired mid-play) so the next attempt resolves afresh."""
         debuglog.debug("stream", "forget", instance=instance_id, track=track_id)
         self.server.forget(instance_id, track_id)
+
+    # --- casting (see musicdeck/cast) ---
+
+    @_when_ready
+    async def cast_devices(self) -> dict[str, Any]:
+        """Speakers and TVs on the network: [{"id", "name", "model", "kind"}]."""
+        return await _result(self.cast.search())
+
+    @_when_ready
+    async def cast_start(self, device_id: str) -> dict[str, Any]:
+        return await _result(self.cast.connect(str(device_id)))
+
+    @_when_ready
+    async def cast_load(self, instance_id: str, track: dict[str, Any], start: float, autoplay: bool) -> dict[str, Any]:
+        if not isinstance(track, dict) or not isinstance(start, (int, float)):
+            return {"ok": False, "error": "Bad track"}
+        return await _result(self.cast.load(str(instance_id), track, start, bool(autoplay)))
+
+    @_when_ready
+    async def cast_control(self, action: str, value: Optional[float] = None) -> dict[str, Any]:
+        return await _result(self.cast.control(str(action), value))
+
+    @_when_ready
+    async def cast_stop(self) -> dict[str, Any]:
+        return await _result(self.cast.disconnect())
 
     # --- sign-in (OAuth pages, device codes; see services/base.py:SignIn) ---
 

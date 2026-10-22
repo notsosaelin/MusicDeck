@@ -78,6 +78,12 @@ class MusicService:
     features: frozenset[str] = frozenset()
     # its tracks can be saved for offline listening (see offline.py for which sources may)
     downloadable: bool = False
+    # its audio can be played on a speaker or TV (see cast/); False where that would mean handing
+    # decrypted audio to another device (Spotify)
+    castable: bool = True
+    # for sources whose usual format some renderers can't play (YouTube's Opus): an async method
+    # like stream() that picks one every renderer plays (AAC); used when casting to UPnP devices
+    compatible_stream: Optional[Callable[[str], Awaitable["StreamSource"]]] = None
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         self.instance_id = instance_id
