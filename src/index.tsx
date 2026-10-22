@@ -1,8 +1,10 @@
-import { definePlugin } from "@decky/api";
+import { definePlugin, routerHook } from "@decky/api";
 import { quickAccessMenuClasses, showModal, staticClasses } from "@decky/ui";
 import { FaMusic } from "react-icons/fa";
 import * as api from "./api";
 import { MusicPanel } from "./components/MusicPanel";
+import { LyricsPage } from "./components/LyricsPage";
+import { LYRICS_ROUTE } from "./components/LyricsView";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify } from "./notify";
 import { followState, switchSource } from "./sources";
@@ -45,6 +47,7 @@ export default definePlugin(() => {
     .catch((e) => console.error("[MusicDeck] Failed to load state", e));
 
   const stopFollowing = followState();
+  routerHook.addRoute(LYRICS_ROUTE, LyricsPage, { exact: true });
   const unwatchGames = watchGames();
   const unpatchQam = installQamPatch(
     <MusicPanel />,
@@ -89,6 +92,7 @@ export default definePlugin(() => {
     onDismount() {
       unpatchQam?.();
       stopFollowing();
+      routerHook.removeRoute(LYRICS_ROUTE);
       unwatchGames();
       setSleepTimer(null);
       player.destroy();

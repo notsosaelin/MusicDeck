@@ -685,6 +685,45 @@ async def run():
         await plugin.log_events([{"t": 1, "event": "audio pause", "data": {"at": 12.5, "event": "x", "source": "y"}}])
         check(True, "events with their own at/event/source fields are accepted")
 
+        print("lyrics lookups")
+        from aiohttp import web as lrweb
+        from musicdeck import lyrics as lyrmod
+        answers = {"status": 429}
+
+        async def lrclib(request):
+            if answers["status"] == 404 and request.path == "/api/search":
+                return lrweb.json_response([])  # how LRCLIB says it found nothing
+            if answers["status"] != 200:
+                return lrweb.Response(status=answers["status"])
+            if request.path == "/api/get":
+                return lrweb.json_response({"syncedLyrics": "[00:01.00]Hello\n[00:02.50]World", "instrumental": False})
+            return lrweb.json_response([])
+        lr_app = lrweb.Application()
+        lr_app.router.add_get("/api/get", lrclib)
+        lr_app.router.add_get("/api/search", lrclib)
+        lr_runner = lrweb.AppRunner(lr_app)
+        await lr_runner.setup()
+        lr_site = lrweb.TCPSite(lr_runner, "127.0.0.1", 0)
+        await lr_site.start()
+        real_lrclib = lyrmod.LRCLIB
+        lyrmod.LRCLIB = f"http://127.0.0.1:{lr_site._server.sockets[0].getsockname()[1]}/api"
+        song = {"id": "nope", "title": "Song", "artist": "Artist", "duration": 100}
+        try:
+            r = await plugin.get_lyrics(sid, song)
+            check(not r["ok"] and "429" in r["error"], "LRCLIB refusing (rate limited) is an error, not \"no lyrics\"")
+            answers["status"] = 404
+            r = await plugin.get_lyrics(sid, song)
+            check(r == {"ok": True, "data": None}, "LRCLIB not knowing the song: no lyrics")
+            answers["status"] = 200
+            r = await plugin.get_lyrics(sid, song)
+            check(r["ok"] and r["data"]["synced"] and [line["text"] for line in r["data"]["lines"]] == ["Hello", "World"],
+                  "found lyrics are parsed")
+            await lr_runner.cleanup()
+            r = await plugin.get_lyrics(sid, song)
+            check(not r["ok"] and "reach" in r["error"], "LRCLIB unreachable is an error")
+        finally:
+            lyrmod.LRCLIB = real_lrclib
+
         print("game music")
         mix = await plugin.create_playlist(sid, "Boss fights", [])
         album = {"id": album_one["id"], "kind": "album", "title": "Album One", "art": None, "extra": "dropped"}

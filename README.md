@@ -18,7 +18,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   own components and controller conventions.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
   album from a source as your own.
-- **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net).
+- **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net), in the Lyrics tab or full
+  screen over the album art.
 - **Sound:** 10-band EQ with presets, volume levelling from ReplayGain data, gapless playback, an
   optional crossfade, and endless radio when the queue runs out.
 - **Live radio** with the song on air shown as it plays.

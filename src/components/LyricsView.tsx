@@ -1,18 +1,51 @@
-import { PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
+import { Navigation, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
+import { FaExpand } from "react-icons/fa";
 import { Lyrics, getLyrics } from "../api";
-import { player } from "../player";
+import { QueueItem, player } from "../player";
 import { useStore } from "../store";
-import { Message } from "./common";
+import { ButtonRow, IconButton, Message } from "./common";
 
-/** Lyrics per track, kept for the session so flipping tabs doesn't refetch. null = none found. */
+/** The full-screen lyrics page (registered in index.tsx). */
+export const LYRICS_ROUTE = "/musicdeck/lyrics";
+
+/** Lyrics per track, kept for the session so flipping tabs doesn't refetch. null = the track has none. */
 const lyricsCache = new Map<string, Lyrics | null>();
 
-const WINDOW_HEIGHT = 300;
-/** Keep the current line about a third of the way down the window, like most players. */
-const ANCHOR = WINDOW_HEIGHT / 3;
+/** undefined while loading, null when the track has none, { error } when they couldn't be looked up. */
+export type LyricsResult = Lyrics | null | undefined | { error: string };
 
-const SyncedLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => {
+/** The lyrics of a queue item. A failed lookup isn't remembered: the next look tries again. */
+export function useLyrics(item: QueueItem | undefined): LyricsResult {
+  const key = item ? `${item.instanceId}:${item.track.id}` : "";
+  const [lyrics, setLyrics] = useState<LyricsResult>(() => (key ? lyricsCache.get(key) : null));
+  useEffect(() => {
+    if (!item) return setLyrics(null);
+    if (lyricsCache.has(key)) return setLyrics(lyricsCache.get(key));
+    setLyrics(undefined);
+    let cancelled = false;
+    getLyrics(item.instanceId, item.track)
+      .catch((e) => ({ ok: false as const, error: String(e) }))
+      .then((r) => {
+        if (r.ok) lyricsCache.set(key, r.data);
+        if (!cancelled) setLyrics(r.ok ? r.data : { error: r.error });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+  return lyrics;
+}
+
+/**
+ * Lines that follow the song: the current one sits a third of the way down a window of `height` pixels
+ * and lines before and after fade out at the edges. Tapping a line jumps there.
+ */
+export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number }> = ({
+  lyrics,
+  height,
+  fontSize,
+}) => {
   const { current } = useStore(player.position);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   let active = -1;
@@ -22,11 +55,11 @@ const SyncedLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => {
   }
   // Lines wrap, so position by the active line's measured offset rather than a fixed line height
   const el = lineRefs.current[Math.max(active, 0)];
-  const offset = ANCHOR - (el ? el.offsetTop + el.offsetHeight / 2 : 0);
+  const offset = height / 3 - (el ? el.offsetTop + el.offsetHeight / 2 : 0);
   return (
     <div
       style={{
-        height: WINDOW_HEIGHT,
+        height,
         overflow: "hidden",
         position: "relative",
         // fade lines in and out at the edges instead of cutting them off
@@ -41,11 +74,10 @@ const SyncedLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => {
             ref={(node) => {
               lineRefs.current[i] = node;
             }}
-            // tap a line to jump there
             onClick={() => line.t !== null && player.seek(line.t)}
             style={{
-              padding: "5px 0",
-              fontSize: 16,
+              padding: `${fontSize * 0.3}px 0`,
+              fontSize,
               lineHeight: 1.3,
               fontWeight: i === active ? 600 : 400,
               color: i === active ? "#ffffff" : undefined,
@@ -61,7 +93,7 @@ const SyncedLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => {
   );
 };
 
-const PlainLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => (
+export const PlainLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => (
   <div style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.85 }}>
     {lyrics.lines.map((line, i) => (
       <div key={i} style={{ minHeight: line.text ? undefined : 12 }}>
@@ -71,28 +103,16 @@ const PlainLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => (
   </div>
 );
 
+export const openFullScreenLyrics = () => {
+  Navigation.CloseSideMenus();
+  Navigation.Navigate(LYRICS_ROUTE);
+};
+
+/** The Lyrics view in the Quick Access panel. */
 export const LyricsView: FC = () => {
   const { queue, index } = useStore(player.state);
   const item = queue[index];
-  const key = item ? `${item.instanceId}:${item.track.id}` : "";
-  const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(() => (key ? lyricsCache.get(key) : null));
-
-  useEffect(() => {
-    if (!item) return;
-    if (lyricsCache.has(key)) return setLyrics(lyricsCache.get(key));
-    setLyrics(undefined);
-    let cancelled = false;
-    getLyrics(item.instanceId, item.track)
-      .then((r) => (r.ok ? r.data : null))
-      .catch(() => null)
-      .then((found) => {
-        lyricsCache.set(key, found);
-        if (!cancelled) setLyrics(found);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [key]);
+  const lyrics = useLyrics(item);
 
   if (!item) return <Message>Play something to see its lyrics</Message>;
   if (lyrics === undefined)
@@ -106,10 +126,16 @@ export const LyricsView: FC = () => {
       </PanelSection>
     );
   if (!lyrics) return <Message>No lyrics found for this track</Message>;
+  if ("error" in lyrics) return <Message>Couldn't load lyrics: {lyrics.error}</Message>;
   return (
     <PanelSection title="Lyrics">
+      <ButtonRow>
+        <IconButton onClick={openFullScreenLyrics}>
+          <FaExpand /> Full screen
+        </IconButton>
+      </ButtonRow>
       <PanelSectionRow>
-        {lyrics.synced ? <SyncedLyrics lyrics={lyrics} /> : <PlainLyrics lyrics={lyrics} />}
+        {lyrics.synced ? <SyncedLyrics lyrics={lyrics} height={300} fontSize={16} /> : <PlainLyrics lyrics={lyrics} />}
       </PanelSectionRow>
       <PanelSectionRow>
         <div style={{ fontSize: 11, opacity: 0.4, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>

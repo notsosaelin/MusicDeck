@@ -6,10 +6,13 @@ Lyrics in one shape for every source:
 Sources provide their own when they have them; otherwise we ask LRCLIB (lrclib.net), a free, open
 lyrics database with time-synced lyrics that needs no API key.
 """
+import asyncio
 import re
 from typing import Any, Optional
 
 import aiohttp
+
+from .services.base import ServiceError
 
 LRC_TIME = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
 LRC_META = re.compile(r"^\[[a-z]+:.*\]$", re.I)
@@ -48,6 +51,8 @@ def plain(text: str, source: str) -> Optional[dict[str, Any]]:
 
 
 async def from_lrclib(session: aiohttp.ClientSession, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """The track's lyrics from LRCLIB, or None if it has none. Raises ServiceError when LRCLIB can't be
+    asked (offline, rate limited, down), so that isn't taken for "no lyrics" and remembered as such."""
     if not track.get("title") or not track.get("artist"):
         return None
     params = {"track_name": track["title"], "artist_name": track["artist"]}
@@ -59,20 +64,21 @@ async def from_lrclib(session: aiohttp.ClientSession, track: dict[str, Any]) -> 
     try:
         # /get is an exact match (title, artist, album, ±2s duration); /search is the fuzzy fallback
         async with session.get(f"{LRCLIB}/get", params=params, headers=headers) as resp:
-            if resp.status == 200:
-                found = await resp.json()
-            else:
-                found = None
+            if resp.status not in (200, 404):  # 404: no exact match
+                raise ServiceError(f"LRCLIB answered {resp.status}")
+            found = await resp.json() if resp.status == 200 else None
         if not found:
             q = {"track_name": track["title"], "artist_name": track["artist"]}
             async with session.get(f"{LRCLIB}/search", params=q, headers=headers) as resp:
-                results = await resp.json() if resp.status == 200 else []
+                if resp.status != 200:
+                    raise ServiceError(f"LRCLIB answered {resp.status}")
+                results = await resp.json()
             duration = track.get("duration") or 0
             # prefer synced lyrics from a recording of about the same length
             results.sort(key=lambda r: (not r.get("syncedLyrics"), abs((r.get("duration") or 0) - duration)))
             found = results[0] if results else None
-    except (aiohttp.ClientError, ValueError):
-        return None
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+        raise ServiceError("Couldn't reach LRCLIB") from e
     if not found or found.get("instrumental"):
         return None
     if found.get("syncedLyrics"):

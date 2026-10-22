@@ -154,6 +154,8 @@ Details worth knowing:
 | `components/MusicPanel.tsx` | The QAM panel: now playing card plus five views (Library, Search, Lyrics, Queue, EQ). |
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
 | `components/NowPlaying.tsx` | Now playing card, seek bar (or LIVE bar), transport, volume. |
+| `components/LyricsView.tsx` | The Lyrics tab, and what the full-screen page shares with it: `useLyrics` (looked up once per track; a failed lookup isn't remembered) and `SyncedLyrics`. |
+| `components/LyricsPage.tsx` | Full-screen lyrics: a route in Steam's main window (`/musicdeck/lyrics`, added in index.tsx) over the blurred album art; A/X/Y play-pause/next/previous. Unsynced lyrics scroll with the song. |
 | `components/Queue.tsx` | The queue in play order, with moving tracks (menu items, or "Move…" mode on the d-pad; see `RowMoving` in common.tsx). |
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |
 | `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, games, ListenBrainz, troubleshooting. |
