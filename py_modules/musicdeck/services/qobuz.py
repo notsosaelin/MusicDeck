@@ -456,6 +456,7 @@ class QobuzLogin(SignIn):
         await self._stop_listening()
 
     async def _stop_listening(self) -> None:
-        if self._runner:
-            await self._runner.cleanup()
-            self._runner = None
+        # close() and the cancelled sign-in task both end up here; only the first one cleans up
+        runner, self._runner = self._runner, None
+        if runner:
+            await runner.cleanup()

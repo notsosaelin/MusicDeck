@@ -366,7 +366,7 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
     <>
       <PanelSection>
         <PanelSectionRow>
-          <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Focusable flow-children="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <TextField
                 value={draft}

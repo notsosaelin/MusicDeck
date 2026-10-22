@@ -146,7 +146,12 @@ source (`MusicService.remove`).
 - **Audio**: the station's own stream; HLS stations go through the HLS rewriter (plain-HTTP segments
   allowed for these). Each play is counted with `/json/url/{uuid}`, per Radio Browser's etiquette.
 - **Song on air**: `on_air()` opens the stream with `Icy-MetaData: 1`, reads one metadata block
-  (`StreamTitle='…'`), and closes it. The Now Playing view polls every 20 seconds.
+  (`StreamTitle='…'`), and closes it. The Now Playing view polls every 20 seconds. `parse_on_air()`
+  splits "Artist - Title", and also reads the tagged titles of iHeart and other broadcast systems
+  (`Artist - text="Song" song_spot="M" amgArtworkURL="…"`), whose cover then replaces the station
+  logo while the song plays. An image link in `StreamUrl` counts as a cover too.
+- **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse
+  requests without a user agent, so `art()` sends MusicDeck's.
 - **Favourites**: stored in this source's config (`favourites`) via `save_config`.
 
 ## Qobuz (`qobuz.py`)

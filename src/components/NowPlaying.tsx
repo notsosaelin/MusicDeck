@@ -13,7 +13,7 @@ import {
   FaVolumeUp,
 } from "react-icons/fa";
 import { MdRepeatOne } from "react-icons/md";
-import { onAir, setSetting } from "../api";
+import { OnAir, onAir, setSetting } from "../api";
 import { QueueItem, hasFeature, player } from "../player";
 import { showTrackMenu, toggleStar } from "./TrackMenu";
 import { useStore } from "../store";
@@ -44,16 +44,17 @@ const Seek: FC = () => {
 
 const ON_AIR_POLL_MS = 20_000;
 
-/** In place of the seek bar for live streams: a "Live" marker and the song the station is playing. */
-const LiveBar: FC<{ item: QueueItem; playing: boolean }> = ({ item, playing }) => {
-  const [title, setTitle] = useState<string | null>(null);
+/** The song a live station is playing, polled while it plays (null when it doesn't say). */
+function useOnAir(item: QueueItem | undefined, playing: boolean): OnAir | null {
+  const [song, setSong] = useState<OnAir | null>(null);
+  const live = item?.track.live ? item : undefined;
   useEffect(() => {
-    setTitle(null);
-    if (!playing) return;
+    setSong(null);
+    if (!live || !playing) return;
     let cancelled = false;
     const poll = () =>
-      onAir(item.instanceId, item.track.id)
-        .then((r) => !cancelled && setTitle(r.ok ? r.data : null))
+      onAir(live.instanceId, live.track.id)
+        .then((r) => !cancelled && setSong(r.ok ? r.data : null))
         .catch(() => {});
     poll();
     const timer = window.setInterval(poll, ON_AIR_POLL_MS);
@@ -61,20 +62,23 @@ const LiveBar: FC<{ item: QueueItem; playing: boolean }> = ({ item, playing }) =
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [item.instanceId, item.track.id, playing]);
-  return (
-    <PanelSectionRow>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "6px 0", minWidth: 0 }}>
-        <span style={{ color: "#ff5c5c", fontWeight: "bold", letterSpacing: 1, flexShrink: 0 }}>● LIVE</span>
-        {title && (
-          <span style={{ opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {title}
-          </span>
-        )}
-      </div>
-    </PanelSectionRow>
-  );
-};
+  }, [live?.instanceId, live?.track.id, playing]);
+  return song;
+}
+
+/** In place of the seek bar for live streams: a "Live" marker and the song the station is playing. */
+const LiveBar: FC<{ song: OnAir | null }> = ({ song }) => (
+  <PanelSectionRow>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "6px 0", minWidth: 0 }}>
+      <span style={{ color: "#ff5c5c", fontWeight: "bold", letterSpacing: 1, flexShrink: 0 }}>● LIVE</span>
+      {song && (
+        <span style={{ opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {song.text}
+        </span>
+      )}
+    </div>
+  </PanelSectionRow>
+);
 
 let volumeSaveTimer: number | undefined;
 
@@ -82,6 +86,7 @@ let volumeSaveTimer: number | undefined;
 export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
   const state = useStore(player.state);
   const item = state.queue[state.index];
+  const song = useOnAir(item, state.playing);
   const volumeIcon = state.volume === 0 ? <FaVolumeMute /> : state.volume < 0.5 ? <FaVolumeDown /> : <FaVolumeUp />;
 
   return (
@@ -104,7 +109,7 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
           }
         >
           <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-            <Art instanceId={item?.instanceId ?? ""} art={item?.track.art ?? null} size={72} />
+            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={72} />
             <RowText
               size="large"
               title={
@@ -131,7 +136,7 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
           </div>
         </Field>
       </PanelSectionRow>
-      {item && (item.track.live ? <LiveBar item={item} playing={state.playing} /> : <Seek />)}
+      {item && (item.track.live ? <LiveBar song={song} /> : <Seek />)}
       <ButtonRow>
         <IconButton label="Shuffle" active={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
           <FaRandom />

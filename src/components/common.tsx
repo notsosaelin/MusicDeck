@@ -258,7 +258,7 @@ export const TrackRow: FC<
 /** A row of equal-width buttons that lines up with Field content. */
 export const ButtonRow: FC<{ children: ReactNode }> = ({ children }) => (
   <PanelSectionRow>
-    <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8, padding: "4px 0" }}>
+    <Focusable flow-children="row" style={{ display: "flex", gap: 8, padding: "4px 0" }}>
       {children}
     </Focusable>
   </PanelSectionRow>
@@ -310,7 +310,7 @@ export const DialogActions: FC<{
   onCancel?: () => void;
 }> = ({ primary, onPrimary, primaryDisabled, onCancel }) => (
   <DialogFooter>
-    <Focusable className="DialogTwoColLayout _DialogColLayout" flow-children="horizontal">
+    <Focusable className="DialogTwoColLayout _DialogColLayout" flow-children="row">
       <DialogButtonPrimary onClick={onPrimary} disabled={primaryDisabled}>
         {primary}
       </DialogButtonPrimary>

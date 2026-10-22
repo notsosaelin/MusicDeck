@@ -195,5 +195,12 @@ export const signInCancel = callable<[loginId: string], void>("sign_in_cancel");
 export const steamLibrary = callable<[id: string, owned: OwnedSoundtrack[], running: number | null], void>(
   "steam_library",
 );
-export const onAir = callable<[id: string, trackId: string], Result<string | null>>("on_air");
+/** What a live station says it's playing; `art` is the song's cover when the station sends one. */
+export interface OnAir {
+  text: string;
+  title: string;
+  artist: string;
+  art: string | null;
+}
+export const onAir = callable<[id: string, trackId: string], Result<OnAir | null>>("on_air");
 export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");

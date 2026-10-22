@@ -77,8 +77,11 @@ async def reload(device: str, backend: bool) -> None:
         version = json.loads((ROOT / "package.json").read_text())["version"]
         js = "(async () => {"
         if backend:
-            js += "await DeckyBackend.call('loader/reload_plugin', 'MusicDeck'); await new Promise(r => setTimeout(r, 1500));"
-        js += f"await DeckyPluginLoader.importPlugin('MusicDeck', '{version}'); return 'reloaded'; }})()"
+            # restarting the backend makes Decky import the frontend itself; importing it again on top
+            # loads the plugin twice in a row
+            js += "await DeckyBackend.call('loader/reload_plugin', 'MusicDeck'); return 'reloaded'; })()"
+        else:
+            js += f"await DeckyPluginLoader.importPlugin('MusicDeck', '{version}'); return 'reloaded'; }})()"
         async with websockets.connect(target["webSocketDebuggerUrl"], max_size=2**24) as ws:
             await ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",
                                       "params": {"expression": js, "awaitPromise": True, "returnByValue": True}}))

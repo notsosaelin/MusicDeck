@@ -124,6 +124,10 @@ the "Steam Big Picture Mode" target. (The screen must be on; a sleeping display 
 
 - **The plugin doesn't load at all** (no Soundtracks takeover, missing from Decky): check the plugin
   log for an import error. Usually a top-level import of a module Decky's Python lacks.
+- **The QAM shows something other than what Settings says** (an old source, a queue that doesn't
+  move): that's a copy of the panel from before a reload. Builds from October 2026 on replace it
+  by themselves (see "Quick Access Menu integration" in ARCHITECTURE.md); with an older build still
+  loaded, close and reopen the menu.
 - **"Could not reach …"**: the device is offline or the service changed host; the message is the
   service's own error.
 - **SoundCloud/Qobuz stop working everywhere**: their web bundles changed; update the regexes at the

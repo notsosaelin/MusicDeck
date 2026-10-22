@@ -349,7 +349,8 @@ async def run():
 
         async def icy(request):
             # 16 bytes of audio, then a metadata block announcing the song, as Icecast sends it
-            meta = b"StreamTitle='Artist - Song';StreamUrl='';"
+            meta = (b"StreamTitle='Artist - Song';StreamUrl='';" if request.query.get("enc") != "latin1"
+                    else "StreamTitle='Brüllová - Song';".encode("latin-1"))
             meta += b"\0" * (-len(meta) % 16)
             body = b"A" * 16 + bytes([len(meta) // 16]) + meta + b"B" * 16
             return aioweb.Response(body=body, headers={"icy-metaint": "16", "Content-Type": "audio/mpeg"})
@@ -362,7 +363,27 @@ async def run():
         icy_port = icy_site._server.sockets[0].getsockname()[1]
         await rs.start()
         rs.stations["s1"] = (time.time(), {"stationuuid": "s1", "url_resolved": f"http://127.0.0.1:{icy_port}/stream"})
-        check(await rs.on_air("s1") == "Artist - Song", "song on air read from ICY metadata")
+        check(await rs.on_air("s1") == {"text": "Artist – Song", "title": "Song", "artist": "Artist", "art": None},
+              "song on air read from ICY metadata")
+        from musicdeck.services.radio import parse_on_air
+        iheart = ('Zara Larsson - text="Midnight Sun" song_spot="M" MediaBaseId="3134734" '
+                  'amgArtworkURL="https://i.iheart.com/v3/catalog/track/332448851?ops=fit(200,200)" length="00:03:05"')
+        check(parse_on_air(iheart) == {"text": "Zara Larsson – Midnight Sun", "title": "Midnight Sun",
+                                       "artist": "Zara Larsson",
+                                       "art": "https://i.iheart.com/v3/catalog/track/332448851?ops=fit(200,200)"},
+              "tagged titles: the song, its artist and its cover, without the tags")
+        check(parse_on_air('text="The One That Got Away"artist="Katy Perry" amgArtworkURL=""')["text"]
+              == "Katy Perry – The One That Got Away", "artist given as a tag")
+        check(parse_on_air("Station News", "https://station.example/") == {"text": "Station News", "title": "Station News",
+                                                                           "artist": "", "art": None},
+              "no artist; a website in StreamUrl isn't a cover")
+        check(parse_on_air("A - B", "https://cdn.example/cover.jpg")["art"] == "https://cdn.example/cover.jpg",
+              "an image in StreamUrl is the cover")
+        check(parse_on_air("") is None and parse_on_air(" - ") is None, "nothing on air")
+        check(parse_on_air("NY's #1 Hit Music Station - text=\"Z100\" song_spot=\"T\"") is None,
+              "station idents and ads aren't songs")
+        rs.stations["s3"] = (time.time(), {"stationuuid": "s3", "url_resolved": f"http://127.0.0.1:{icy_port}/stream?enc=latin1"})
+        check((await rs.on_air("s3"))["artist"] == "Brüllová", "Latin-1 titles read as Latin-1")
         rs.stations["s2"] = (time.time(), {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})
         check(await rs.on_air("s2") is None, "HLS stations have no ICY title")
         await rs.stop()
@@ -486,6 +507,18 @@ async def run():
             check(third["login_id"] in FakeSignIn.closed and gone["status"] == "error", "cancel closes the attempt")
             refused = await plugin.sign_in_start("local", {})
             check(not refused["ok"], "sources without a separate sign-in refuse one")
+            # unloading mid sign-in: close() and the cancelled task both stop the redirect listener
+            from musicdeck.services.qobuz import QobuzLogin
+            login = QobuzLogin(tmp)
+            login._runner = aioweb.AppRunner(aioweb.Application())
+            await login._runner.setup()
+            await aioweb.TCPSite(login._runner, "127.0.0.1", 0).start()
+            login._task = asyncio.get_event_loop().create_task(login._finish())
+            await asyncio.sleep(0)
+            await login.close()
+            await asyncio.wait([login._task])
+            check(login._task.cancelled() or login._task.exception() is None,
+                  "closing a waiting sign-in stops its listener once")
         finally:
             del SERVICE_TYPES["fakesignin"]
 
@@ -616,6 +649,11 @@ async def run():
         await plugin.remove_service(bob["data"]["id"])
         check(not os.path.exists(bob_dir) and os.path.exists(alice_dir), "removing an account deletes only its sign-in")
         await plugin.remove_service(alice["data"]["id"])
+
+        print("frontend events")
+        # used to raise (and lose the batch) when an event's fields reused a keyword of debuglog.debug
+        await plugin.log_events([{"t": 1, "event": "audio pause", "data": {"at": 12.5, "event": "x", "source": "y"}}])
+        check(True, "events with their own at/event/source fields are accepted")
 
         print("decky's python")
         import re as _re

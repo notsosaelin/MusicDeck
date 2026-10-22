@@ -260,7 +260,10 @@ class Plugin:
     async def log_events(self, entries: list[dict[str, Any]]) -> None:
         """Batched frontend events for the debug log: [{"t": ms, "event": str, "data": {...}}]."""
         for entry in entries[:200]:
-            debuglog.debug("player", entry.get("event", "?"), at=entry.get("t"), **(entry.get("data") or {}))
+            # "t" is when it happened; the event's own fields can't clash with debug()'s parameters
+            fields = {"t": entry.get("t"), **(entry.get("data") or {})}
+            fields = {k: v for k, v in fields.items() if k not in ("source", "event")}
+            debuglog.debug("player", str(entry.get("event", "?")), **fields)
 
     @_when_ready
     async def stream_info(self, instance_id: str, track_id: str) -> dict[str, Any]:

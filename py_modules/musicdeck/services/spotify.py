@@ -778,9 +778,10 @@ class SpotifyLogin(SignIn):
             await self._close_listener()
 
     async def _close_listener(self) -> None:
-        if self._runner:
-            await self._runner.cleanup()
-            self._runner = None
+        # close() and the cancelled sign-in task both end up here; only the first one cleans up
+        runner, self._runner = self._runner, None
+        if runner:
+            await runner.cleanup()
 
     async def close(self) -> None:
         if self._task:

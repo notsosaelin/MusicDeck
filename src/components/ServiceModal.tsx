@@ -57,7 +57,7 @@ const LocalFields: FC<{
             alignItems: "center",
             marginBottom: 4,
           }}
-          flow-children="horizontal"
+          flow-children="row"
         >
           <div
             style={{

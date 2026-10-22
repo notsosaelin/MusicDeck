@@ -11,7 +11,7 @@ export const Queue: FC = () => {
   if (!queue.length) return <Message>The queue is empty</Message>;
   return (
     <>
-      <PanelSection title={`Up next · ${queue.length} tracks`}>
+      <PanelSection title={`Up next · ${queue.length} track${queue.length === 1 ? "" : "s"}`}>
         <ButtonRow>
           <IconButton onClick={() => player.clear()}>
             <FaTrash /> Clear queue

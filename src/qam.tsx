@@ -1,10 +1,14 @@
 import { ErrorBoundary } from "@decky/ui";
-import { ReactNode } from "react";
+import { FC, ReactNode, useSyncExternalStore } from "react";
 import { QamMode } from "./api";
 
 /** EQuickAccessTab.Soundtrack in Steam's client (see @decky/ui globals/stores/steamuistore/menu). */
 const SOUNDTRACK_TAB = 7;
 const OWN_TAB_KEY = "musicdeck";
+/** Window key naming the plugin instance that owns the tab (the newest one loaded). */
+const OWNER_KEY = "__musicdeckQamOwner";
+/** Window key of the PanelRegistry, shared by every copy of the plugin loaded in this Steam session. */
+const REGISTRY_KEY = "__musicdeckPanel";
 
 interface QamTab {
   key: number | string;
@@ -21,6 +25,42 @@ interface TabsHook {
 }
 
 /**
+ * The panel the tab should show: the newest loaded copy's. Older copies of the plugin read this
+ * too, so its shape must stay the same between versions.
+ */
+interface PanelRegistry {
+  panel: ReactNode;
+  listeners: Set<() => void>;
+}
+
+function panelRegistry(): PanelRegistry {
+  const w = window as any;
+  return (w[REGISTRY_KEY] ??= { panel: null, listeners: new Set() });
+}
+
+function setCurrentPanel(panel: ReactNode) {
+  const registry = panelRegistry();
+  registry.panel = panel;
+  registry.listeners.forEach((l) => l());
+}
+
+const subscribeToPanel = (listener: () => void) => {
+  const { listeners } = panelRegistry();
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+/**
+ * What the tab holds: a host that draws the current panel. Steam only rebuilds the QAM's tabs when
+ * the menu renders, so after a reload or update with the menu open, the tab still holds the previous
+ * copy's element. Because that element is a host, it switches to the new copy's panel right away,
+ * instead of leaving the unloaded copy on screen, stuck on whatever it was showing.
+ */
+const PanelHost: FC = () => <>{useSyncExternalStore(subscribeToPanel, () => panelRegistry().panel)}</>;
+
+/**
  * Takes over the Soundtracks tab of the Quick Access Menu.
  *
  * Decky Loader already patches the QAM renderer to append its own tab, and on every render it
@@ -31,6 +71,9 @@ interface TabsHook {
  *
  * In "replace" mode the Soundtracks tab keeps its icon and position and only its panel changes.
  * If Steam isn't rendering a Soundtracks tab, or in "separate" mode, we add our own tab instead.
+ *
+ * Only the newest loaded copy patches; wrappers left by older copies step aside, so they can't put
+ * back a panel nothing updates any more.
  */
 export function installQamPatch(
   panel: ReactNode,
@@ -43,15 +86,19 @@ export function installQamPatch(
     console.warn("[MusicDeck] Decky TabsHook not found; QAM integration disabled");
     return null;
   }
-  const wrapped = <ErrorBoundary>{panel}</ErrorBoundary>;
+  const current = <ErrorBoundary>{panel}</ErrorBoundary>;
+  setCurrentPanel(current);
+  const wrapped = <PanelHost />;
   const original = hook.render;
   // Tab objects we've modified, so unloading can put Soundtracks back the way Steam had it
   const touched = new Set<QamTab>();
 
-  let active = true;
+  const owner = {};
+  const w = window as any;
+  w[OWNER_KEY] = owner;
   const wrapper = function (this: TabsHook, existingTabs: QamTab[], visible: boolean) {
     const result = original.call(this, existingTabs, visible);
-    if (!active) return result;
+    if (w[OWNER_KEY] !== owner) return result;
     try {
       patchTabs(existingTabs, { panel: wrapped, title, icon }, getMode(), touched);
     } catch (e) {
@@ -62,7 +109,8 @@ export function installQamPatch(
   hook.render = wrapper;
 
   return () => {
-    active = false;
+    if (w[OWNER_KEY] === owner) delete w[OWNER_KEY];
+    if (panelRegistry().panel === current) setCurrentPanel(null);
     // On reload the new instance may already have wrapped us; restoring `original` then would
     // silently unhook it. Only unwrap if we're still outermost; otherwise stay as a passthrough.
     if (hook.render === wrapper) hook.render = original;

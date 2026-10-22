@@ -26,7 +26,41 @@ SERVER_TTL = 6 * 3600
 STATION_TTL = 3600
 LIST_SIZE = 50
 STREAM_TITLE = re.compile(rb"StreamTitle='(.*?)';", re.S)
+STREAM_URL = re.compile(rb"StreamUrl='(.*?)';", re.S)
+# iHeart and other broadcast automation systems put tags in the title:
+#   Artist - text="Song" song_spot="M" amgArtworkURL="https://…" length="00:03:05" …
+TITLE_TAG = re.compile(r'(\w+)="([^"]*)"')
+IMAGE_URL = re.compile(r"^https?://\S+\.(?:jpe?g|png|webp)(?:\?\S*)?$", re.I)
 COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")  # ISO 3166-1 alpha-2; the settings dialog offers a list
+
+
+def parse_on_air(title: str, stream_url: str = "") -> Optional[dict[str, Any]]:
+    """What a station's ICY metadata says is playing: {"text", "title", "artist", "art"}.
+
+    The plain form is "Artist - Title". Some stations add tags (see TITLE_TAG); then the song is in
+    text= (or title=), the artist in artist= or before the first tag, and the cover in amgArtworkURL=.
+    A few send the cover as StreamUrl instead. None when nothing (or no song) is on air.
+    """
+    tags = {k.lower(): v.strip() for k, v in TITLE_TAG.findall(title)}
+    if tags.get("song_spot", "M").upper() != "M":
+        return None  # iHeart marks music "M"; the rest are station idents, ads and talk
+    if tags:
+        lead = TITLE_TAG.split(title, 1)[0].strip().rstrip("-–").strip()
+        song = tags.get("text") or tags.get("title") or tags.get("song") or ""
+        artist = tags.get("artist") or lead
+        art = tags.get("amgartworkurl") or ""
+    else:
+        artist, _, song = title.partition(" - ")
+        if not song:
+            artist, song = "", artist
+        art = ""
+    song, artist = song.strip(), artist.strip()
+    if not song and not artist:
+        return None
+    if not art.startswith(("https://", "http://")):
+        # StreamUrl is usually the station's website; only an image link is a cover
+        art = stream_url if IMAGE_URL.match(stream_url) else None
+    return {"text": " – ".join(x for x in (artist, song) if x), "title": song, "artist": artist, "art": art}
 
 
 def _session() -> aiohttp.ClientSession:
@@ -187,8 +221,9 @@ class RadioService(MusicService):
         if self.save_config:
             self.save_config(self.config)
 
-    async def on_air(self, track_id: str) -> Optional[str]:
-        """The song the station is playing, from the ICY metadata in its stream (None if it has none)."""
+    async def on_air(self, track_id: str) -> Optional[dict[str, Any]]:
+        """The song the station is playing, from the ICY metadata in its stream (None if it has none);
+        see parse_on_air."""
         info = await self._station_info(track_id)
         url = info.get("url_resolved") or info.get("url")
         if not url or info.get("hls"):
@@ -205,9 +240,15 @@ class RadioService(MusicService):
                 block = await resp.content.readexactly(length) if length else b""
         except (aiohttp.ClientError, asyncio.TimeoutError, asyncio.IncompleteReadError, ValueError):
             return None
-        match = STREAM_TITLE.search(block)
-        title = match.group(1).decode("utf-8", "replace").strip() if match else ""
-        return title or None
+        def field(pattern: re.Pattern[bytes]) -> str:
+            match = pattern.search(block)
+            if not match:
+                return ""
+            try:
+                return match.group(1).decode("utf-8").strip()
+            except UnicodeDecodeError:  # older Shoutcast servers send Latin-1
+                return match.group(1).decode("latin-1").strip()
+        return parse_on_air(field(STREAM_TITLE), field(STREAM_URL))
 
     # --- media ---
 
@@ -227,4 +268,5 @@ class RadioService(MusicService):
     async def art(self, art_id: str) -> StreamSource:
         if not art_id.startswith(("https://", "http://")):
             raise ServiceError("Bad art id")
-        return StreamSource(url=art_id)
+        # some logo hosts (DuckDuckGo's icon cache among them) refuse requests that don't say who they are
+        return StreamSource(url=art_id, headers={"User-Agent": USER_AGENT})

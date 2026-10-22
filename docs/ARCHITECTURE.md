@@ -279,9 +279,16 @@ sequenceDiagram
 Decky already patches Steam's QAM renderer and, on every render, calls
 `window.__TABS_HOOK_INSTANCE.render(tabs, visible)` with Steam's tab array. `qam.tsx` wraps that
 method and, in the array, swaps the Soundtracks tab's panel and title for MusicDeck's (or appends
-its own tab). Reloads are safe: an unloaded plugin instance's wrapper becomes a pass-through, so it
-can never undo the newer instance's patch. If Decky ever stops exposing the hook, the patch disables
-itself and MusicDeck stays usable from the Decky menu.
+its own tab). If Decky ever stops exposing the hook, the patch disables itself and MusicDeck stays
+usable from the Decky menu.
+
+Reloads and updates need care, because Steam only rebuilds the tab array when the menu renders.
+After a reload with the menu open, the tab still holds the previous copy's element, and that copy's
+React tree keeps running with stores nothing updates any more. So the tab never holds the panel
+itself: it holds a `PanelHost`, which draws whatever panel is in `window.__musicdeckPanel`, a small
+registry every loaded copy shares. Each copy puts its panel there on load, so an old host switches to
+the new panel at once. The newest copy also owns the patching (`window.__musicdeckQamOwner`);
+wrappers left by older copies pass straight through.
 
 ## Constraints that shaped the code
 
