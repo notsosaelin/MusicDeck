@@ -323,6 +323,15 @@ export const Settings: FC = () => {
           />
         </PanelSectionRow>
         <PanelSectionRow>
+          <DropdownItem
+            label="Crossfade"
+            description="Fades each track into the next. Off still starts the next track without a gap."
+            rgOptions={[0, 2, 4, 6, 8, 12].map((s) => ({ data: s, label: s ? `${s} seconds` : "Off" }))}
+            selectedOption={state.playback.crossfade ?? 0}
+            onChange={(o) => setPlayback({ crossfade: o.data })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
           <ToggleField
             label="Keep the music going"
             description="When the queue ends, continue with similar tracks."

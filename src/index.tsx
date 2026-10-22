@@ -5,7 +5,7 @@ import * as api from "./api";
 import { MusicPanel } from "./components/MusicPanel";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify } from "./notify";
-import { followSourceChanges, switchSource } from "./sources";
+import { followState, switchSource } from "./sources";
 import { navigation, panelTab } from "./nav";
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
@@ -44,7 +44,7 @@ export default definePlugin(() => {
     })
     .catch((e) => console.error("[MusicDeck] Failed to load state", e));
 
-  const stopFollowing = followSourceChanges();
+  const stopFollowing = followState();
   const unwatchGames = watchGames();
   const unpatchQam = installQamPatch(
     <MusicPanel />,

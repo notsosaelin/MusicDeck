@@ -45,6 +45,8 @@ export interface PlaybackSettings {
   autoplay?: boolean;
   /** pause while a game runs, resume when it closes */
   game_pause?: boolean;
+  /** seconds the end of a track and the start of the next overlap; 0 = off (tracks still follow gaplessly) */
+  crossfade?: number;
 }
 
 export interface Session {

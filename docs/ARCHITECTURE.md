@@ -61,6 +61,13 @@ things over HTTP with CORS, and it has no DRM support (no Widevine), which is wh
   hides credentials from URLs, and proxies byte ranges;
 - sources whose catalogue is only available with DRM (Apple Music, Deezer, Amazon) can't be supported.
 
+There are two `<audio>` elements ("decks"). One plays; about 15 seconds before its track ends, the
+next track is loaded on the other, which takes over the moment the first ends (gapless, a few
+milliseconds) or fades in over it (crossfade, equal-power curves on each deck's gain node). A
+preloaded track is used only if it's still what comes next (same queue, same slot); skipping, seeking,
+pausing or clearing during a fade ends the fade. Live streams, repeat-one and "stop after this track"
+never preload.
+
 ## Life of a play
 
 What happens when the user presses A on a track:
@@ -135,10 +142,10 @@ Details worth knowing:
 | `index.tsx` | Plugin entry: loads state, restores the session, installs the QAM patch, exposes the `window.__musicdeck` debug handle, cleans up on unload. |
 | `api.ts` | Typed wrappers for every backend endpoint (`callable(...)`) and the shared types. |
 | `store.ts` | `Store<T>` (tiny observable used with `useSyncExternalStore`), `pluginState`, `mediaUrl()` for stream/art URLs. |
-| `player.ts` | `Player`: queue, shuffle/repeat, the audio element and Web Audio graph, HLS, recovery, play reports, session persistence, radio extension. |
+| `player.ts` | `Player`: queue, shuffle/repeat, the two audio decks and Web Audio graph, gapless and crossfade, HLS, recovery, play reports, session persistence, radio extension. |
 | `qam.tsx` | Takes over the Quick Access Menu's Soundtracks tab (or adds a tab) by wrapping Decky's `__TABS_HOOK_INSTANCE.render`. |
 | `nav.ts` | Panel navigation (Library/Search stacks), kept outside React so it survives the QAM closing. |
-| `sources.ts` | Switching or deleting the live source; `followSourceChanges` stops playback and clears the queue whenever the live source changes, whoever changed it. |
+| `sources.ts` | Switching or deleting the live source; `followState` stops playback and clears the queue whenever the live source changes, whoever changed it. |
 | `signIn.ts` | The browser sign-in flow shared by Qobuz, Spotify and TIDAL; `browseThenReturn` for opening a page and coming back. |
 | `sleep.ts` | Sleep timer. |
 | `steam.ts` | What only Steam's UI knows, for the Steam soundtracks source: owned soundtracks, their games and art, the running game. |
@@ -295,7 +302,7 @@ The Decky menu has the same problem the other way round: it keeps showing the pl
 before a reload, and that page's buttons talk to the unloaded copy. So the backend emits
 `state_changed` after every change to sources or settings (`_announce_change` in `main.py`), and
 each copy reloads the state when it hears it. Resetting playback on a source switch happens in
-`followSourceChanges` (`sources.ts`), which watches the state, so it runs in the copy that's playing
+`followState` (`sources.ts`), which watches the state, so it runs in the copy that's playing
 whichever page made the change.
 
 ## Constraints that shaped the code
