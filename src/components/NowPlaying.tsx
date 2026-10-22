@@ -86,6 +86,11 @@ function cardText(item: QueueItem | undefined, song: OnAir | null): { title: str
 
 let volumeSaveTimer: number | undefined;
 
+// transport icon sizes: skips read first after play/pause; shuffle and repeat are quieter, at the ends
+const SKIP = { height: 44, fontSize: 18 };
+const SIDE = { height: 44, fontSize: 15 };
+const PLAY = { fontSize: 18 };
+
 /** `children` render at the bottom of the same section (the view switcher), keeping spacing tight. */
 export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
   const state = useStore(player.state);
@@ -125,40 +130,60 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
         </Field>
       </PanelSectionRow>
       {item && (item.track.live ? <LiveBar /> : <Seek />)}
-      {/* nothing loaded: no transport, which would only be five disabled buttons */}
+      {/* nothing loaded: only the card and the tabs; transport and volume would do nothing */}
       {item && (
         <ButtonRow>
-          <IconButton label="Shuffle" active={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
+          <IconButton
+            look="plain"
+            label="Shuffle"
+            active={state.shuffle}
+            onClick={() => player.setShuffle(!state.shuffle)}
+            style={SIDE}
+          >
             <FaRandom />
           </IconButton>
-          <IconButton label="Previous" onClick={() => player.previous()}>
+          <IconButton look="plain" label="Previous" onClick={() => player.previous()} style={SKIP}>
             <FaStepBackward />
           </IconButton>
-          <IconButton label={state.playing ? "Pause" : "Play"} onClick={() => player.toggle()}>
-            {state.playing ? <FaPause /> : <FaPlay />}
+          <IconButton
+            look="round"
+            label={state.playing ? "Pause" : "Play"}
+            onClick={() => player.toggle()}
+            style={PLAY}
+          >
+            {state.playing ? <FaPause /> : <FaPlay style={{ marginLeft: 3 }} />}
           </IconButton>
-          <IconButton label="Next" onClick={() => player.next()}>
+          <IconButton look="plain" label="Next" onClick={() => player.next()} style={SKIP}>
             <FaStepForward />
           </IconButton>
-          <IconButton label="Repeat" active={state.repeat !== "off"} onClick={() => player.cycleRepeat()}>
+          <IconButton
+            look="plain"
+            label="Repeat"
+            active={state.repeat !== "off"}
+            onClick={() => player.cycleRepeat()}
+            style={SIDE}
+          >
             {state.repeat === "one" ? <MdRepeatOne /> : <FaRedo />}
           </IconButton>
         </ButtonRow>
       )}
-      <PanelSectionRow>
-        <SliderField
-          icon={volumeIcon}
-          value={Math.round(state.volume * 100)}
-          min={0}
-          max={100}
-          step={5}
-          onChange={(v) => {
-            player.setVolume(v / 100);
-            window.clearTimeout(volumeSaveTimer);
-            volumeSaveTimer = window.setTimeout(() => setSetting("volume", v / 100), 1000);
-          }}
-        />
-      </PanelSectionRow>
+      {item && (
+        <PanelSectionRow>
+          <SliderField
+            icon={volumeIcon}
+            value={Math.round(state.volume * 100)}
+            min={0}
+            max={100}
+            step={5}
+            bottomSeparator="none"
+            onChange={(v) => {
+              player.setVolume(v / 100);
+              window.clearTimeout(volumeSaveTimer);
+              volumeSaveTimer = window.setTimeout(() => setSetting("volume", v / 100), 1000);
+            }}
+          />
+        </PanelSectionRow>
+      )}
       {children}
     </PanelSection>
   );

@@ -1,4 +1,4 @@
-import { Focusable } from "@decky/ui";
+import { Focusable, PanelSectionRow } from "@decky/ui";
 import { FC, ReactNode } from "react";
 import { FaListOl, FaMusic, FaSearch, FaSlidersH } from "react-icons/fa";
 import { MdLyrics } from "react-icons/md";
@@ -10,7 +10,7 @@ import { PanelTab, panelTab, popView, resetStack } from "../nav";
 import { Equalizer } from "./Equalizer";
 import { NowPlaying } from "./NowPlaying";
 import { Queue } from "./Queue";
-import { ButtonRow, IconButton, Message } from "./common";
+import { ACCENT, IconButton, Message, PLAYER_CSS } from "./common";
 
 const TABS: { id: PanelTab; label: string; icon: ReactNode }[] = [
   { id: "library", label: "Library", icon: <FaMusic /> },
@@ -35,24 +35,38 @@ export const MusicPanel: FC = () => {
         if ((t === "library" || t === "search") && popView(t)) e?.stopPropagation?.();
       }}
     >
+      <style>{PLAYER_CSS}</style>
       <NowPlaying>
-        <ButtonRow>
-          {TABS.map((t) => (
-            <IconButton
-              key={t.id}
-              label={t.label}
-              active={tab === t.id}
-              onClick={() => {
-                // tapping the tab you're already on goes back to its start, like most music apps
-                if (tab === t.id && (t.id === "library" || t.id === "search")) resetStack(t.id);
-                panelTab.set({ tab: t.id });
-              }}
-            >
-              {t.icon}
-              {t.id === "queue" && queue.length ? <span style={{ fontSize: 11 }}>{queue.length}</span> : null}
-            </IconButton>
-          ))}
-        </ButtonRow>
+        {/* a tab strip: plain icons over one line, the open tab underlined in the accent colour */}
+        <PanelSectionRow>
+          <Focusable
+            flow-children="row"
+            style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255, 255, 255, 0.1)" }}
+          >
+            {TABS.map((t) => (
+              <IconButton
+                key={t.id}
+                look="plain"
+                label={t.label}
+                active={tab === t.id}
+                style={{
+                  height: 40,
+                  fontSize: 16,
+                  borderRadius: 0,
+                  boxShadow: tab === t.id ? `inset 0 -2px 0 ${ACCENT}` : "none",
+                }}
+                onClick={() => {
+                  // tapping the tab you're already on goes back to its start, like most music apps
+                  if (tab === t.id && (t.id === "library" || t.id === "search")) resetStack(t.id);
+                  panelTab.set({ tab: t.id });
+                }}
+              >
+                {t.icon}
+                {t.id === "queue" && queue.length ? <span style={{ fontSize: 11 }}>{queue.length}</span> : null}
+              </IconButton>
+            ))}
+          </Focusable>
+        </PanelSectionRow>
       </NowPlaying>
       {(tab === "library" || tab === "search") &&
         (!state ? null : active ? (

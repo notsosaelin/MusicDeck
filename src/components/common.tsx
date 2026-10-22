@@ -375,11 +375,15 @@ export const IconButton: FC<{
   label?: string;
   children: ReactNode;
   grow?: number;
-}> = ({ onClick, active, disabled, label, children, grow = 1 }) => (
+  /** "plain": no box until focused or touched (see PLAYER_CSS); "round": a circle, for play/pause */
+  look?: "box" | "plain" | "round";
+  style?: CSSProperties;
+}> = ({ onClick, active, disabled, label, children, grow = 1, look = "box", style }) => (
   <DialogButton
     onClick={onClick}
     disabled={disabled}
     onOKActionDescription={label}
+    className={look === "box" ? undefined : `md-${look}`}
     style={{
       minWidth: 0,
       flex: grow,
@@ -391,11 +395,22 @@ export const IconButton: FC<{
       gap: 6,
       fontSize: 13,
       color: active ? ACCENT : undefined,
+      ...style,
     }}
   >
     {children}
   </DialogButton>
 );
+
+/**
+ * The player's light buttons. Steam gives a focused or touched DialogButton its own highlight
+ * (`.gpfocus`, `:hover`); "plain" buttons only drop the resting box, so that highlight still shows
+ * where the controller is. "round" is play/pause: one filled circle the eye finds first.
+ */
+export const PLAYER_CSS = `
+button.DialogButton.md-plain:not(.gpfocus):not(:hover):not(:active) { background: transparent !important; }
+button.DialogButton.md-round { border-radius: 50% !important; flex: 0 0 44px !important; width: 44px; height: 44px !important; }
+`;
 
 /** Standalone notice; brings its own section so it gets the same inset as everything else. */
 export const Message: FC<{ children: ReactNode }> = ({ children }) => (
