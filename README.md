@@ -65,7 +65,7 @@ Audiobookshelf passwords become access tokens on save (or skip the password with
 Plex signs in with a code entered at plex.tv/link. Qobuz, TIDAL and Spotify sign in on their own websites, in
 Steam's browser, and MusicDeck only receives the resulting tokens.
 
-**Where those tokens live.** In MusicDeck's settings file, which only your user account can read (mode 600),
+**Where those tokens live.** In MusicDeck's settings file, which only your user account can read (mode 600, in a private folder),
 and not encrypted: SteamOS's game mode has no system keyring to lock them with, and a key kept beside them
 would protect nothing. Anything running as your user, or someone signed in to your Deck (SSH included), can
 read them, as with every other app's saved sign-ins. They never reach the Steam UI, and backups leave them out.
@@ -121,6 +121,7 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 | [docs/SOURCES.md](docs/SOURCES.md) | Technical notes per source: protocols, sign-in, streams, what breaks |
 | [docs/ADDING_A_SOURCE.md](docs/ADDING_A_SOURCE.md) | Step-by-step guide and checklist for a new source |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building, testing, deploying to a device, debugging, conventions |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, every entry point and its guard, audit findings, remaining risk |
 
 ## Roadmap
 

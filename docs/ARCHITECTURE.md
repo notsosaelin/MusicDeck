@@ -266,6 +266,13 @@ SoundCloud scrape from their web players).
   Emby and Audiobookshelf passwords become access tokens on save; Plex signs in with a plex.tv code; Qobuz, TIDAL and
   Spotify sign in on their own websites.
 - No source that works without an account asks for one (SoundCloud, YouTube, Bandcamp, radio).
+- The Spotify helper's loopback audio server requires its own per-start key (a header the stream
+  server adds), so nothing else on the device can play through the account.
+- Logs and error messages are redacted (`debuglog.redact`): no web address keeps its query, no
+  credential-looking value survives. MusicDeck's settings, data and log folders are made 0700.
+
+Threat model, every entry point and its guard, the audit's findings and the remaining risk:
+[SECURITY.md](SECURITY.md).
 
 ## Sign-in
 
