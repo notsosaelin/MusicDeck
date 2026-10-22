@@ -398,11 +398,16 @@ export const IconButton: FC<{
   /** "plain": no box until focused or touched (see PLAYER_CSS); "round": a circle, for play/pause */
   look?: "box" | "plain" | "round";
   style?: CSSProperties;
-}> = ({ onClick, active, disabled, label, children, grow = 1, look = "box", style }) => (
+  /** X: a second action on the same button, named in the hint bar */
+  onSecondary?: () => void;
+  secondaryLabel?: string;
+}> = ({ onClick, active, disabled, label, children, grow = 1, look = "box", style, onSecondary, secondaryLabel }) => (
   <DialogButton
     onClick={onClick}
     disabled={disabled}
     onOKActionDescription={label}
+    onSecondaryButton={onSecondary}
+    onSecondaryActionDescription={onSecondary ? secondaryLabel : undefined}
     className={look === "box" ? undefined : `md-${look}`}
     style={{
       minWidth: 0,

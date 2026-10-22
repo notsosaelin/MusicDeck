@@ -8,7 +8,7 @@ import { Browser } from "./Browser";
 import { PanelTab, TAB_ORDER, panelTab, popView, resetStack, setTabStrip, showTab } from "../nav";
 import { Equalizer } from "./Equalizer";
 import { MiniPlayer, NowPlaying } from "./NowPlaying";
-import { Queue } from "./Queue";
+import { Queue, confirmClearQueue } from "./Queue";
 import { ACCENT, IconButton, Message, PLAYER_CSS } from "./common";
 
 const TAB_LOOKS: Record<PanelTab, { label: string; icon: ReactNode }> = {
@@ -44,7 +44,10 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
             <IconButton
               key={t.id}
               look="plain"
-              label={`${t.label} (L1/R1)`}
+              label={t.label}
+              // X on the Queue tab clears it (it asks first), wherever the queue is scrolled to
+              onSecondary={t.id === "queue" && queued ? confirmClearQueue : undefined}
+              secondaryLabel="Clear queue"
               active={tab === t.id}
               style={{ height: 40, fontSize: 16, borderRadius: 0 }}
               onClick={() => {

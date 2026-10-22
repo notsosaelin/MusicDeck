@@ -486,17 +486,14 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
               <FaRandom /> Shuffle
             </IconButton>
             {canSave(instanceId, collection) && (
-              <IconButton
-                label="Save to your playlists"
-                grow={0.45}
-                onClick={() => saveCollection(instanceId, collection)}
-              >
+              <IconButton label="Save playlist" grow={0.45} onClick={() => saveCollection(instanceId, collection)}>
                 <FaPlus />
               </IconButton>
             )}
             {game && canPlayWithGame(collection) && (
               <IconButton
-                label={withGame ? `Don't play with ${game.name}` : `Play when ${game.name} starts`}
+                // short: the hint bar has one line, and a game's name can fill it
+                label={withGame ? "Don't play with game" : "Play with game"}
                 active={withGame}
                 grow={0.45}
                 onClick={() => toggleGameMusic(instanceId, collection)}

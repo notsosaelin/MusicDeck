@@ -89,7 +89,7 @@ playlist without opening it, **Y** opens a
 track's or playlist's options (including the sleep timer for the playing track), **B** goes back, **L1**/**R1**
 switch tabs.
 Re-selecting Library or Search returns to its start. The Queue lists tracks in the order they'll play
-(shuffled or not); **Y** on a queued track moves it (play next, up, down, to the end), and **Move…** picks it
+(shuffled or not); **X** on the Queue tab clears it (after asking); **Y** on a queued track moves it (play next, up, down, to the end), and **Move…** picks it
 up so the d-pad carries it until **A** or **B** puts it down.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.

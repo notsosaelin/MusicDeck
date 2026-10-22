@@ -6,21 +6,26 @@ import { useStore } from "../store";
 import { showTrackMenu } from "./TrackMenu";
 import { ButtonRow, IconButton, Message, TrackRow } from "./common";
 
+/** Clears the queue after asking (X on the Queue tab, or the button below the queue). */
+export function confirmClearQueue() {
+  const n = player.state.get().queue.length;
+  if (!n) return;
+  showModal(
+    <ConfirmModal
+      strTitle="Clear the queue?"
+      strDescription={`${n} track${n === 1 ? "" : "s"}`}
+      strOKButtonText="Clear"
+      bDestructiveWarning
+      onOK={() => player.clear()}
+    />,
+  );
+}
+
 /** The queue in the order it plays (shuffled or not). Y → Move… picks a track up for the d-pad. */
 export const Queue: FC = () => {
   const { queue, index } = useStore(player.state);
   const [moving, setMoving] = useState<QueueItem | null>(null);
   if (!queue.length) return <Message>The queue is empty</Message>;
-  const confirmClear = () =>
-    showModal(
-      <ConfirmModal
-        strTitle="Clear the queue?"
-        strDescription={`${queue.length} track${queue.length === 1 ? "" : "s"}`}
-        strOKButtonText="Clear"
-        bDestructiveWarning
-        onOK={() => player.clear()}
-      />,
-    );
   return (
     <>
       <PanelSection title={`Up next · ${queue.length} track${queue.length === 1 ? "" : "s"}`}>
@@ -51,7 +56,7 @@ export const Queue: FC = () => {
         })}
         {/* at the end and asked first: one stray press on the first row must not lose the queue */}
         <ButtonRow>
-          <IconButton look="plain" label="Clear queue" onClick={confirmClear}>
+          <IconButton look="plain" label="Clear queue" onClick={confirmClearQueue}>
             <FaTrash /> Clear queue
           </IconButton>
         </ButtonRow>
