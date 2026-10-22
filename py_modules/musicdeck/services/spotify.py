@@ -30,7 +30,7 @@ import certifi
 from aiohttp import web
 
 from .. import debuglog, models
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource
 
 PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 HELPER_NAME = "spotify-helper"
@@ -216,6 +216,10 @@ class SpotifyService(MusicService):
         self.liked: dict[str, bool] = {}
         # set by the plugin: persists config changes (Spotify rotates refresh tokens)
         self.save_config: Optional[Callable[[dict[str, Any]], None]] = None
+
+    @classmethod
+    def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
+        return SpotifyLogin(runtime_dir, options.get("client_id") or "")
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],
@@ -618,7 +622,7 @@ class SpotifyService(MusicService):
         return StreamSource(url=art_id)
 
 
-class SpotifyLogin:
+class SpotifyLogin(SignIn):
     """Both Spotify sign-ins in one go: playback first, then the Web API.
 
     Each is OAuth with PKCE: the browser shows Spotify's own page, Spotify redirects to
@@ -626,19 +630,24 @@ class SpotifyLogin:
     """
 
     def __init__(self, runtime_dir: str, client_id: str = ""):
+        super().__init__()
         self.runtime_dir = runtime_dir
         self.client_id = client_id.strip() or WEB_CLIENT_ID
-        self.id = secrets.token_urlsafe(8)
         self.step = "playback"  # playback | web | done | error
-        self.url = ""
-        self.error = ""
-        self.result: Optional[dict[str, Any]] = None
         self._runner: Optional[web.AppRunner] = None
         self._task: Optional[asyncio.Task] = None
         self._code: Optional[asyncio.Future] = None
         self._state = ""
 
-    async def start(self) -> str:
+    @property  # type: ignore[override]
+    def status(self) -> str:
+        return self.step if self.step in ("done", "error") else "waiting"
+
+    @status.setter
+    def status(self, value: str) -> None:
+        pass  # derived from `step`; SignIn.__init__ assigns it
+
+    async def start(self) -> None:
         self._task = asyncio.get_event_loop().create_task(self._run())
         for _ in range(50):  # until the first URL is ready (or it failed)
             if self.url or self.step == "error":
@@ -646,7 +655,6 @@ class SpotifyLogin:
             await asyncio.sleep(0.1)
         if self.step == "error":
             raise ServiceError(self.error)
-        return self.url
 
     async def _listen(self, port: int) -> None:
         await self._close_listener()
@@ -736,7 +744,7 @@ class SpotifyLogin:
             await self._runner.cleanup()
             self._runner = None
 
-    async def cancel(self) -> None:
+    async def close(self) -> None:
         if self._task:
             self._task.cancel()
         await self._close_listener()

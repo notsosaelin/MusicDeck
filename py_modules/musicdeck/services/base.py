@@ -1,3 +1,4 @@
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -38,6 +39,36 @@ FEATURES = {
 }
 
 
+class SignIn:
+    """One sign-in attempt, for sources whose sign-in can't be a password typed into a form.
+
+    The plugin drives every kind the same way (see Plugin.sign_in_start / sign_in_poll):
+
+        start()   sets `url` (a page for Steam's browser, e.g. an OAuth or device-approval page)
+                  or `code` (shown in the dialog, e.g. Jellyfin Quick Connect), then returns
+        status    "waiting" until the user has finished, then "done" or "error"
+        result    when done: config entries to save with the source (tokens, user ids...)
+        error     when failed: a message for the user
+        close()   stops waiting and releases listeners; safe to call at any time
+
+    `url` may change while waiting (Spotify asks for two consents); the frontend follows it.
+    """
+
+    def __init__(self) -> None:
+        self.id = secrets.token_urlsafe(8)
+        self.status = "starting"
+        self.error = ""
+        self.url = ""
+        self.code = ""
+        self.result: Optional[dict[str, Any]] = None
+
+    async def start(self) -> None:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        """Cancel the attempt (or clean up after it); must not raise."""
+
+
 class MusicService:
     """One configured instance of a music source (a library folder, a Navidrome server, an account...)."""
 
@@ -56,6 +87,12 @@ class MusicService:
         into a token so the plain password is never written to disk. `previous` is the stored
         config when editing an existing instance."""
         return config
+
+    @classmethod
+    def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> Optional[SignIn]:
+        """A new sign-in attempt for services that sign in outside the settings form (see SignIn),
+        or None for the rest. `options` come from the dialog (e.g. a server address)."""
+        return None
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],

@@ -12,7 +12,6 @@ import asyncio
 import base64
 import json
 import re
-import secrets as pysecrets
 import ssl
 import time
 from typing import Any, Optional
@@ -21,7 +20,7 @@ import aiohttp
 import certifi
 
 from .. import debuglog, lyrics, models
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource
 
 API = "https://api.tidal.com/v1/"
 AUTH = "https://auth.tidal.com/v1/oauth2/"
@@ -110,6 +109,10 @@ class TidalService(MusicService):
         self.token_lock = asyncio.Lock()
         self.favourites: set[str] = set()
         self.favourites_at = 0.0
+
+    @classmethod
+    def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
+        return TidalLogin()
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],
@@ -429,18 +432,14 @@ class TidalService(MusicService):
         return StreamSource(url=art_id)
 
 
-class TidalLogin:
+class TidalLogin(SignIn):
     """TIDAL's device login: a short code the user approves on link.tidal.com, polled until done."""
 
     def __init__(self) -> None:
-        self.id = pysecrets.token_urlsafe(8)
-        self.status = "starting"  # starting | waiting | done | error
-        self.error = ""
-        self.url = ""
-        self.result: Optional[dict[str, Any]] = None
+        super().__init__()
         self._task: Optional[asyncio.Task] = None
 
-    async def start(self) -> str:
+    async def start(self) -> None:
         async with _session() as session:
             try:
                 async with session.post(AUTH + "device_authorization",
@@ -455,7 +454,6 @@ class TidalLogin:
         self.status = "waiting"
         self._task = asyncio.get_event_loop().create_task(
             self._poll(data["deviceCode"], int(data.get("interval") or 2), int(data.get("expiresIn") or 300)))
-        return self.url
 
     async def _poll(self, device_code: str, interval: int, expires_in: int) -> None:
         try:

@@ -177,42 +177,15 @@ export const playlistSetArt = callable<[playlistId: string, imagePath: string], 
 export const playlistClearArt = callable<[playlistId: string], void>("playlist_clear_art");
 export const isLocalPlaylist = (id: string) => id.startsWith("md:");
 export const youtubeUpdate = callable<[id: string], Result<string>>("youtube_update");
-export const qobuzLoginStart = callable<[], Result<{ login_id: string; url: string }>>("qobuz_login_start");
-export const qobuzLoginPoll = callable<
+/** Sign-in outside the form (OAuth pages, device codes): see SignIn in services/base.py. */
+export const signInStart = callable<
+  [type: string, options: Record<string, any>],
+  Result<{ login_id: string; url: string; code: string }>
+>("sign_in_start");
+export const signInPoll = callable<
   [loginId: string, service: ServiceDraft],
-  {
-    status: "starting" | "waiting" | "done" | "error";
-    error?: string;
-    service?: ServiceInfo;
-  }
->("qobuz_login_poll");
-export const qobuzLoginCancel = callable<[loginId: string], void>("qobuz_login_cancel");
-export const spotifyLoginStart = callable<[clientId: string], Result<{ login_id: string; url: string }>>(
-  "spotify_login_start",
-);
-export const spotifyLoginPoll = callable<
-  [loginId: string, service: ServiceDraft],
-  {
-    status: "waiting" | "done" | "error";
-    error?: string;
-    url?: string;
-    service?: ServiceInfo;
-  }
->("spotify_login_poll");
-export const spotifyLoginCancel = callable<[loginId: string], void>("spotify_login_cancel");
-export const tidalLoginStart = callable<[], Result<{ login_id: string; url: string }>>("tidal_login_start");
-export const tidalLoginPoll = callable<
-  [loginId: string, service: ServiceDraft],
-  { status: "waiting" | "done" | "error"; error?: string; service?: ServiceInfo }
->("tidal_login_poll");
-export const tidalLoginCancel = callable<[loginId: string], void>("tidal_login_cancel");
-export const jellyfinLoginStart = callable<[url: string], Result<{ login_id: string; code: string }>>(
-  "jellyfin_login_start",
-);
-export const jellyfinLoginPoll = callable<
-  [loginId: string, service: ServiceDraft],
-  { status: "starting" | "waiting" | "done" | "error"; error?: string; service?: ServiceInfo }
->("jellyfin_login_poll");
-export const jellyfinLoginCancel = callable<[loginId: string], void>("jellyfin_login_cancel");
+  { status: "waiting" | "done" | "error"; error?: string; url?: string; service?: ServiceInfo }
+>("sign_in_poll");
+export const signInCancel = callable<[loginId: string], void>("sign_in_cancel");
 export const onAir = callable<[id: string, trackId: string], Result<string | null>>("on_air");
 export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");

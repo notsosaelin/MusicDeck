@@ -13,7 +13,6 @@ streamrip and qobuz-dl).
 """
 import asyncio
 import base64
-import secrets as pysecrets
 import socket
 import hashlib
 import json
@@ -29,7 +28,7 @@ import certifi
 from aiohttp import web
 
 from .. import debuglog, models
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource
 
 API = "https://www.qobuz.com/api.json/0.2"
 PLAYER = "https://play.qobuz.com"
@@ -151,6 +150,10 @@ class QobuzService(MusicService):
                 if resp.status in (200, 401):
                     return secret
         raise ServiceError("Qobuz rejected every signing secret from its web player")
+
+    @classmethod
+    def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
+        return QobuzLogin(runtime_dir)
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],
@@ -370,7 +373,7 @@ class QobuzService(MusicService):
         return StreamSource(url=art_id)
 
 
-class QobuzLogin:
+class QobuzLogin(SignIn):
     """One sign-in attempt: a loopback listener for Qobuz's OAuth redirect, then the code exchange.
 
     Qobuz redirects the browser to http://localhost:<port>/?code_autorisation=<code>; Steam's browser
@@ -378,18 +381,14 @@ class QobuzLogin:
     """
 
     def __init__(self, runtime_dir: str):
+        super().__init__()
         self.runtime_dir = runtime_dir
-        self.id = pysecrets.token_urlsafe(8)
-        self.status = "starting"  # starting | waiting | done | error
-        self.error = ""
-        self.result: Optional[dict[str, Any]] = None
-        self.url = ""
         self.app_id = ""
         self._runner: Optional[web.AppRunner] = None
         self._code: asyncio.Future = asyncio.get_event_loop().create_future()
         self._task: Optional[asyncio.Task] = None
 
-    async def start(self) -> str:
+    async def start(self) -> None:
         async with _session() as session:
             app = await QobuzService._app_credentials(session, self.runtime_dir)
         self.app_id = app["app_id"]
@@ -405,7 +404,6 @@ class QobuzLogin:
                     f"&redirect_url=http://localhost:{port}")
         self.status = "waiting"
         self._task = asyncio.get_event_loop().create_task(self._finish())
-        return self.url
 
     async def _redirect(self, request: web.Request) -> web.Response:
         code = request.query.get("code_autorisation") or request.query.get("code")
@@ -446,9 +444,14 @@ class QobuzLogin:
         except Exception as e:
             self.status, self.error = "error", f"Sign-in failed: {e}"
         finally:
-            await self.close()
+            await self._stop_listening()
 
     async def close(self) -> None:
+        if self._task and not self._task.done() and self._task is not asyncio.current_task():
+            self._task.cancel()
+        await self._stop_listening()
+
+    async def _stop_listening(self) -> None:
         if self._runner:
             await self._runner.cleanup()
             self._runner = None

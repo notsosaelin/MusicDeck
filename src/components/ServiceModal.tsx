@@ -15,15 +15,7 @@ import { browseThenReturn, readClipboard, signIn } from "../signIn";
 import { FC, useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
 import { DialogActions } from "./common";
-import {
-  ServiceDraft,
-  ServiceInfo,
-  jellyfinLoginCancel,
-  jellyfinLoginPoll,
-  jellyfinLoginStart,
-  saveService,
-  testService,
-} from "../api";
+import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart, saveService, testService } from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
 
@@ -325,14 +317,14 @@ const JellyfinFields: FC<{
   // closing the dialog abandons a pending Quick Connect
   useEffect(
     () => () => {
-      if (login.current) jellyfinLoginCancel(login.current);
+      if (login.current) signInCancel(login.current);
     },
     [],
   );
 
   const quickConnect = async () => {
     setStatus("Asking the server for a code…");
-    const start = await jellyfinLoginStart(draft.config.url ?? "");
+    const start = await signInStart("jellyfin", { url: draft.config.url ?? "" });
     if (!start.ok) return setStatus(start.error);
     login.current = start.data.login_id;
     setCode(start.data.code);
@@ -340,7 +332,7 @@ const JellyfinFields: FC<{
     for (;;) {
       await new Promise((r) => setTimeout(r, 1500));
       if (login.current !== start.data.login_id) return; // cancelled or restarted
-      const poll = await jellyfinLoginPoll(start.data.login_id, draft);
+      const poll = await signInPoll(start.data.login_id, draft);
       if (poll.status === "error") {
         login.current = null;
         setCode(null);

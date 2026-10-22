@@ -444,6 +444,50 @@ async def run():
         check(json.loads(bcmod._unescape(bcmod.TRALBUM.search(page_html).group(1))) == tralbum,
               "album data read back out of a page attribute")
 
+        print("sign-in flow")
+        from musicdeck.services import SERVICE_TYPES, SignIn
+        from musicdeck.services.radio import RadioService
+
+        class FakeSignIn(SignIn):
+            closed = []
+
+            async def start(self):
+                self.url, self.status = "https://example.com/approve", "waiting"
+
+            async def close(self):
+                FakeSignIn.closed.append(self.id)
+
+        class FakeSource(RadioService):
+            type = "fakesignin"
+            display_name = "Fake"
+
+            @classmethod
+            def sign_in(cls, options, runtime_dir):
+                return FakeSignIn()
+        SERVICE_TYPES["fakesignin"] = FakeSource
+        try:
+            first = (await plugin.sign_in_start("fakesignin", {}))["data"]
+            second = (await plugin.sign_in_start("fakesignin", {}))["data"]
+            check(FakeSignIn.closed == [first["login_id"]] and second["url"] == "https://example.com/approve",
+                  "a new attempt replaces the previous one")
+            draft = {"type": "fakesignin", "name": "Fake one", "config": {"country": "DE"}}
+            poll = await plugin.sign_in_poll(second["login_id"], draft)
+            check(poll == {"status": "waiting", "url": "https://example.com/approve"}, "waiting, with the page to show")
+            attempt = plugin.sign_ins[second["login_id"]]
+            attempt.status, attempt.result = "done", {"favourites": [{"id": "from-sign-in"}]}
+            done = await plugin.sign_in_poll(second["login_id"], draft)
+            check(done["status"] == "done" and done["service"]["name"] == "Fake one"
+                  and done["service"]["config"]["country"] == "DE", "done: the source is saved")
+            await plugin.remove_service(done["service"]["id"])
+            third = (await plugin.sign_in_start("fakesignin", {}))["data"]
+            await plugin.sign_in_cancel(third["login_id"])
+            gone = await plugin.sign_in_poll(third["login_id"], draft)
+            check(third["login_id"] in FakeSignIn.closed and gone["status"] == "error", "cancel closes the attempt")
+            refused = await plugin.sign_in_start("local", {})
+            check(not refused["ok"], "sources without a separate sign-in refuse one")
+        finally:
+            del SERVICE_TYPES["fakesignin"]
+
         print("decky's python")
         import re as _re
         # Decky's frozen interpreter ships without these; a top-level import stops the whole plugin loading

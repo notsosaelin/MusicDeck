@@ -21,7 +21,7 @@ import aiohttp
 import certifi
 
 from .. import debuglog, models
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource
 
 CLIENT = "MusicDeck"
 VERSION = "0.1.0"
@@ -80,6 +80,10 @@ class JellyfinService(MusicService):
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.session: Optional[aiohttp.ClientSession] = None
+
+    @classmethod
+    def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
+        return JellyfinQuickConnect(options.get("url") or "")
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],
@@ -301,33 +305,28 @@ class JellyfinService(MusicService):
                             params={"ids": ",".join(track_ids), "userId": self.config.get("user_id")})
 
 
-class JellyfinQuickConnect:
+class JellyfinQuickConnect(SignIn):
     """Jellyfin's Quick Connect: the server issues a code, the user approves it in a Jellyfin app
     that is already signed in (Settings → Quick Connect), and the secret becomes a token."""
 
-    def __init__(self, url: str):
-        self.url = _normalise_url(url)
+    def __init__(self, server: str):
+        super().__init__()  # no url: the code is shown in MusicDeck's dialog instead
+        self.server = _normalise_url(server)
         self.device_id = pysecrets.token_hex(16)
-        self.id = pysecrets.token_urlsafe(8)
-        self.status = "starting"  # starting | waiting | done | error
-        self.error = ""
-        self.code = ""
-        self.result: Optional[dict[str, Any]] = None
         self._secret = ""
         self._task: Optional[asyncio.Task] = None
 
-    async def start(self) -> str:
-        if not self.url:
+    async def start(self) -> None:
+        if not self.server:
             raise ServiceError("Enter the server address first")
         async with _session() as session:
-            enabled = await _call(session, "GET", f"{self.url}/QuickConnect/Enabled", self.device_id)
+            enabled = await _call(session, "GET", f"{self.server}/QuickConnect/Enabled", self.device_id)
             if enabled is False:
                 raise ServiceError("Quick Connect is turned off on this server; sign in with your password")
-            data = await _call(session, "POST", f"{self.url}/QuickConnect/Initiate", self.device_id)
+            data = await _call(session, "POST", f"{self.server}/QuickConnect/Initiate", self.device_id)
         self._secret, self.code = data["Secret"], data["Code"]
         self.status = "waiting"
         self._task = asyncio.get_event_loop().create_task(self._poll())
-        return self.code
 
     async def _poll(self) -> None:
         try:
@@ -337,13 +336,13 @@ class JellyfinQuickConnect:
                     await asyncio.sleep(2)
                     if time.time() > deadline:
                         raise ServiceError("The code expired; start again")
-                    state = await _call(session, "GET", f"{self.url}/QuickConnect/Connect", self.device_id,
+                    state = await _call(session, "GET", f"{self.server}/QuickConnect/Connect", self.device_id,
                                         params={"secret": self._secret})
                     if state and state.get("Authenticated"):
                         break
-                data = await _call(session, "POST", f"{self.url}/Users/AuthenticateWithQuickConnect", self.device_id,
+                data = await _call(session, "POST", f"{self.server}/Users/AuthenticateWithQuickConnect", self.device_id,
                                    json={"Secret": self._secret})
-            self.result = {"url": self.url, "device_id": self.device_id, "token": data["AccessToken"],
+            self.result = {"url": self.server, "device_id": self.device_id, "token": data["AccessToken"],
                            "user_id": data["User"]["Id"], "username": data["User"].get("Name", "")}
             self.status = "done"
             debuglog.debug("jellyfin", "signed in with Quick Connect", user=self.result["username"])

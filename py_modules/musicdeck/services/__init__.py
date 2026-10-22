@@ -1,5 +1,5 @@
 from .bandcamp import BandcampService
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource
 from .jellyfin import JellyfinService
 from .local import LocalService
 from .qobuz import QobuzService
@@ -26,4 +26,4 @@ SERVICE_TYPES: dict[str, type[MusicService]] = {
 # Shown in the UI as "coming soon" so the roadmap is visible without pretending they work.
 PLANNED_TYPES: list[dict[str, str]] = []
 
-__all__ = ["MusicService", "ServiceError", "StreamSource", "SERVICE_TYPES", "PLANNED_TYPES"]
+__all__ = ["MusicService", "ServiceError", "SignIn", "StreamSource", "SERVICE_TYPES", "PLANNED_TYPES"]

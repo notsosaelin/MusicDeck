@@ -57,10 +57,8 @@ class Plugin:
     def __init__(self):
         self.ready = asyncio.Event()
         self.http: Optional[aiohttp.ClientSession] = None  # shared client for LRCLIB etc.
-        self.qobuz_logins: dict[str, Any] = {}
-        self.tidal_logins: dict[str, Any] = {}
-        self.jellyfin_logins: dict[str, Any] = {}
-        self.spotify_logins: dict[str, Any] = {}
+        # the sign-in in progress, if any (SignIn by id)
+        self.sign_ins: dict[str, Any] = {}
         self.recent_scrobbles: dict[tuple[str, str, bool], float] = {}
 
     # --- lifecycle ---
@@ -267,144 +265,44 @@ class Plugin:
         self.server.forget(instance_id, track_id)
 
     @_when_ready
-    async def qobuz_login_start(self) -> dict[str, Any]:
-        """Starts a Qobuz OAuth sign-in; the frontend opens the returned URL in Steam's browser."""
+    async def sign_in_start(self, service_type: str, options: dict[str, Any]) -> dict[str, Any]:
+        """Starts a sign-in for sources that don't take a password in the form (see SignIn). The
+        frontend opens `url` in Steam's browser or shows `code`, then polls sign_in_poll."""
         async def work():
-            from musicdeck.services.qobuz import QobuzLogin
-            for old in self.qobuz_logins.values():
+            cls = SERVICE_TYPES.get(service_type)
+            attempt = cls.sign_in(options or {}, decky.DECKY_PLUGIN_RUNTIME_DIR) if cls else None
+            if attempt is None:
+                raise ServiceError("This source doesn't sign in that way")
+            for old in self.sign_ins.values():  # one attempt at a time: the newest wins
                 await old.close()
-            login = QobuzLogin(decky.DECKY_PLUGIN_RUNTIME_DIR)
-            self.qobuz_logins = {login.id: login}
-            url = await login.start()
-            return {"login_id": login.id, "url": url}
+            self.sign_ins = {attempt.id: attempt}
+            await attempt.start()
+            return {"login_id": attempt.id, "url": attempt.url, "code": attempt.code}
         return await _result(work())
 
     @_when_ready
-    async def qobuz_login_poll(self, login_id: str, service: dict[str, Any]) -> dict[str, Any]:
-        """Waiting / error, or once signed in: saves the source (token only) and returns it."""
-        login = self.qobuz_logins.get(login_id)
-        if not login:
+    async def sign_in_poll(self, login_id: str, service: dict[str, Any]) -> dict[str, Any]:
+        """Waiting (with the page to show, which can change), error, or done: then the source is
+        saved with the sign-in's result and returned."""
+        attempt = self.sign_ins.get(login_id)
+        if not attempt:
             return {"status": "error", "error": "Sign-in expired; start again"}
-        if login.status != "done":
-            return {"status": login.status, "error": login.error}
-        self.qobuz_logins.pop(login_id, None)
-        saved = await self.save_service({**service, "type": "qobuz",
-                                         "config": {**service.get("config", {}), **(login.result or {})}})
+        if attempt.status == "error":
+            self.sign_ins.pop(login_id, None)
+            return {"status": "error", "error": attempt.error}
+        if attempt.status != "done":
+            return {"status": "waiting", "url": attempt.url}
+        self.sign_ins.pop(login_id, None)
+        saved = await self.save_service({**service, "config": {**service.get("config", {}), **(attempt.result or {})}})
         if not saved["ok"]:
             return {"status": "error", "error": saved["error"]}
         return {"status": "done", "service": saved["data"]}
 
     @_when_ready
-    async def qobuz_login_cancel(self, login_id: str) -> None:
-        login = self.qobuz_logins.pop(login_id, None)
-        if login:
-            if login._task:
-                login._task.cancel()
-            await login.close()
-
-    @_when_ready
-    async def jellyfin_login_start(self, url: str) -> dict[str, Any]:
-        """Starts Jellyfin Quick Connect; the frontend shows the returned code to approve."""
-        async def work():
-            from musicdeck.services.jellyfin import JellyfinQuickConnect
-            for old in self.jellyfin_logins.values():
-                await old.close()
-            login = JellyfinQuickConnect(url)
-            self.jellyfin_logins = {login.id: login}
-            code = await login.start()
-            return {"login_id": login.id, "code": code}
-        return await _result(work())
-
-    @_when_ready
-    async def jellyfin_login_poll(self, login_id: str, service: dict[str, Any]) -> dict[str, Any]:
-        """Waiting / error, or once approved: saves the source (token only) and returns it."""
-        login = self.jellyfin_logins.get(login_id)
-        if not login:
-            return {"status": "error", "error": "Sign-in expired; start again"}
-        if login.status != "done":
-            return {"status": login.status, "error": login.error}
-        self.jellyfin_logins.pop(login_id, None)
-        saved = await self.save_service({**service, "type": "jellyfin",
-                                         "config": {**service.get("config", {}), **(login.result or {})}})
-        if not saved["ok"]:
-            return {"status": "error", "error": saved["error"]}
-        return {"status": "done", "service": saved["data"]}
-
-    @_when_ready
-    async def jellyfin_login_cancel(self, login_id: str) -> None:
-        login = self.jellyfin_logins.pop(login_id, None)
-        if login:
-            await login.close()
-
-    @_when_ready
-    async def tidal_login_start(self) -> dict[str, Any]:
-        """Starts TIDAL's device login; the frontend opens the returned link in Steam's browser."""
-        async def work():
-            from musicdeck.services.tidal import TidalLogin
-            for old in self.tidal_logins.values():
-                await old.close()
-            login = TidalLogin()
-            self.tidal_logins = {login.id: login}
-            url = await login.start()
-            return {"login_id": login.id, "url": url}
-        return await _result(work())
-
-    @_when_ready
-    async def tidal_login_poll(self, login_id: str, service: dict[str, Any]) -> dict[str, Any]:
-        """Waiting / error, or once approved: saves the source (refresh token only) and returns it."""
-        login = self.tidal_logins.get(login_id)
-        if not login:
-            return {"status": "error", "error": "Sign-in expired; start again"}
-        if login.status != "done":
-            return {"status": login.status, "error": login.error}
-        self.tidal_logins.pop(login_id, None)
-        saved = await self.save_service({**service, "type": "tidal",
-                                         "config": {**service.get("config", {}), **(login.result or {})}})
-        if not saved["ok"]:
-            return {"status": "error", "error": saved["error"]}
-        return {"status": "done", "service": saved["data"]}
-
-    @_when_ready
-    async def tidal_login_cancel(self, login_id: str) -> None:
-        login = self.tidal_logins.pop(login_id, None)
-        if login:
-            await login.close()
-
-    @_when_ready
-    async def spotify_login_start(self, client_id: str = "") -> dict[str, Any]:
-        """Starts Spotify's two-step sign-in; the frontend follows the URL the poll reports."""
-        async def work():
-            from musicdeck.services.spotify import SpotifyLogin
-            for old in self.spotify_logins.values():
-                await old.cancel()
-            login = SpotifyLogin(decky.DECKY_PLUGIN_RUNTIME_DIR, client_id or "")
-            self.spotify_logins = {login.id: login}
-            url = await login.start()
-            return {"login_id": login.id, "url": url}
-        return await _result(work())
-
-    @_when_ready
-    async def spotify_login_poll(self, login_id: str, service: dict[str, Any]) -> dict[str, Any]:
-        login = self.spotify_logins.get(login_id)
-        if not login:
-            return {"status": "error", "error": "Sign-in expired; start again"}
-        if login.step == "error":
-            self.spotify_logins.pop(login_id, None)
-            return {"status": "error", "error": login.error}
-        if login.step != "done":
-            return {"status": "waiting", "url": login.url}
-        self.spotify_logins.pop(login_id, None)
-        saved = await self.save_service({**service, "type": "spotify",
-                                         "config": {**service.get("config", {}), **(login.result or {})}})
-        if not saved["ok"]:
-            return {"status": "error", "error": saved["error"]}
-        return {"status": "done", "service": saved["data"]}
-
-    @_when_ready
-    async def spotify_login_cancel(self, login_id: str) -> None:
-        login = self.spotify_logins.pop(login_id, None)
-        if login:
-            await login.cancel()
+    async def sign_in_cancel(self, login_id: str) -> None:
+        attempt = self.sign_ins.pop(login_id, None)
+        if attempt:
+            await attempt.close()
 
     @_when_ready
     async def youtube_update(self, instance_id: str) -> dict[str, Any]:

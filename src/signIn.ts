@@ -1,17 +1,5 @@
 import { Navigation, Router } from "@decky/ui";
-import {
-  ServiceDraft,
-  ServiceInfo,
-  qobuzLoginCancel,
-  qobuzLoginPoll,
-  qobuzLoginStart,
-  spotifyLoginCancel,
-  spotifyLoginPoll,
-  spotifyLoginStart,
-  tidalLoginCancel,
-  tidalLoginPoll,
-  tidalLoginStart,
-} from "./api";
+import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart } from "./api";
 import { invalidateBrowserCache } from "./nav";
 import { notify } from "./notify";
 import { refreshState } from "./store";
@@ -21,45 +9,22 @@ const POLL_MS = 1000;
 /** Left the sign-in page without finishing: give up after this long, so nothing lingers. */
 const ABANDON_MS = 15_000;
 
-type Poll = {
-  status: string;
-  error?: string;
-  url?: string;
-  service?: ServiceInfo;
-};
-
+/** What differs per source in the browser sign-in; the flow itself is shared. */
 interface Provider {
   name: string;
-  start: (
-    draft: ServiceDraft,
-  ) => Promise<{ ok: true; data: { login_id: string; url: string } } | { ok: false; error: string }>;
-  poll: (loginId: string, draft: ServiceDraft) => Promise<Poll>;
-  cancel: (loginId: string) => Promise<void>;
+  /** passed to the backend's SignIn (e.g. Spotify's own client ID) */
+  options?: (draft: ServiceDraft) => Record<string, any>;
   signedIn: (service: ServiceInfo) => string;
 }
 
 const PROVIDERS: Record<string, Provider> = {
-  qobuz: {
-    name: "Qobuz",
-    start: () => qobuzLoginStart(),
-    poll: qobuzLoginPoll,
-    cancel: qobuzLoginCancel,
-    signedIn: (s) => `Signed in${s.config.email ? ` as ${s.config.email}` : ""}`,
-  },
+  qobuz: { name: "Qobuz", signedIn: (s) => `Signed in${s.config.email ? ` as ${s.config.email}` : ""}` },
   spotify: {
     name: "Spotify",
-    start: (draft) => spotifyLoginStart((draft.config.client_id ?? "").trim()),
-    poll: spotifyLoginPoll,
-    cancel: spotifyLoginCancel,
+    options: (draft) => ({ client_id: (draft.config.client_id ?? "").trim() }),
     signedIn: (s) => `Signed in${s.config.display_name ? ` as ${s.config.display_name}` : ""}`,
   },
-  tidal: {
-    name: "TIDAL",
-    start: () => tidalLoginStart(),
-    poll: tidalLoginPoll,
-    cancel: tidalLoginCancel,
-    signedIn: (s) => `Signed in${s.config.username ? ` as ${s.config.username}` : ""}`,
-  },
+  tidal: { name: "TIDAL", signedIn: (s) => `Signed in${s.config.username ? ` as ${s.config.username}` : ""}` },
 };
 
 const currentRoute = (): string => {
@@ -104,17 +69,17 @@ export async function readClipboard(): Promise<string | null> {
 let running = false;
 
 /**
- * Browser sign-in for services that use OAuth (Qobuz, Spotify), start to finish: opens the
- * service's own page in Steam's browser, follows on to the next page when a service needs two
- * consents (Spotify), then closes the browser and saves the source. The user never has to back
- * out of anything.
+ * Browser sign-in (Qobuz, Spotify, TIDAL), start to finish: opens the service's own page in
+ * Steam's browser, follows on to the next page when a service needs two consents (Spotify), then
+ * closes the browser and saves the source. The user never has to back out of anything. Leaving the
+ * browser without finishing cancels the attempt after ABANDON_MS.
  */
 export async function signIn(type: string, draft: ServiceDraft) {
   const provider = PROVIDERS[type];
   if (!provider || running) return;
   running = true;
   try {
-    const start = await provider.start(draft);
+    const start = await signInStart(type, provider.options?.(draft) ?? {});
     if (!start.ok) {
       notify(provider.name, `Couldn't start sign-in: ${start.error}`);
       return;
@@ -124,7 +89,7 @@ export async function signIn(type: string, draft: ServiceDraft) {
     let awaySince = 0;
     for (;;) {
       await new Promise((r) => setTimeout(r, POLL_MS));
-      const poll = await provider.poll(start.data.login_id, draft);
+      const poll = await signInPoll(start.data.login_id, draft);
       if (poll.status === "done" || poll.status === "error") {
         await leaveBrowser();
         if (poll.status === "done" && poll.service) {
@@ -146,7 +111,7 @@ export async function signIn(type: string, draft: ServiceDraft) {
       if (!currentRoute().startsWith(BROWSER_ROUTE)) {
         awaySince ||= Date.now();
         if (Date.now() - awaySince > ABANDON_MS) {
-          await provider.cancel(start.data.login_id);
+          await signInCancel(start.data.login_id);
           return;
         }
       } else {
