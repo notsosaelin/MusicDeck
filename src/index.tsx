@@ -6,7 +6,7 @@ import { MusicPanel } from "./components/MusicPanel";
 import { LyricsPage } from "./components/LyricsPage";
 import { LYRICS_ROUTE } from "./components/LyricsView";
 import { showTrackMenu } from "./components/TrackMenu";
-import { notify } from "./notify";
+import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
 import { navigation, panelTab } from "./nav";
 import { Settings } from "./components/Settings";
@@ -95,6 +95,7 @@ export default definePlugin(() => {
       routerHook.removeRoute(LYRICS_ROUTE);
       unwatchGames();
       setSleepTimer(null);
+      releaseToastHooks();
       player.destroy();
       // a reload can mount the new instance before this one unmounts; only remove our own handle
       if ((window as any).__musicdeck === debugHandle) delete (window as any).__musicdeck;

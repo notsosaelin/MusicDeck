@@ -1,4 +1,4 @@
-import { ErrorBoundary } from "@decky/ui";
+import { ErrorBoundary, Navigation } from "@decky/ui";
 import { FC, ReactNode, useSyncExternalStore } from "react";
 import { QamMode } from "./api";
 
@@ -75,6 +75,14 @@ const PanelHost: FC = () => <>{useSyncExternalStore(subscribeToPanel, () => pane
  * Only the newest loaded copy patches; wrappers left by older copies step aside, so they can't put
  * back a panel nothing updates any more.
  */
+/** The newest loaded copy's tab mode, for openMusicDeck. */
+let currentMode: () => QamMode = () => "replace";
+
+/** Opens the Quick Access menu on MusicDeck: the Soundtracks tab it took over, or its own tab. */
+export function openMusicDeck() {
+  Navigation.OpenQuickAccessMenu((currentMode() === "replace" ? SOUNDTRACK_TAB : OWN_TAB_KEY) as any);
+}
+
 export function installQamPatch(
   panel: ReactNode,
   title: ReactNode,
@@ -88,6 +96,7 @@ export function installQamPatch(
   }
   const current = <ErrorBoundary>{panel}</ErrorBoundary>;
   setCurrentPanel(current);
+  currentMode = getMode;
   const wrapped = <PanelHost />;
   const original = hook.render;
   // Tab objects we've modified, so unloading can put Soundtracks back the way Steam had it

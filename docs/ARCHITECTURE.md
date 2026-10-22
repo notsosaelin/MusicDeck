@@ -152,7 +152,7 @@ Details worth knowing:
 | `sleep.ts` | Sleep timer. |
 | `steam.ts` | What only Steam's UI knows, for the Steam soundtracks source: owned soundtracks, their games and art, the running game. |
 | `games.ts` | Games starting and stopping: plays the music set for a game (`set_game_music`) and pauses it when the game closes; with "Pause while playing" (`playback.game_pause`), pauses the music during games and resumes it after; keeps the Steam source's running game current. Each undoes only what it did itself. Steam's running list decides what started or stopped (its notifications' process ids don't pair a start with its stop). |
-| `eq.ts`, `log.ts`, `notify.tsx` | EQ bands and presets; batched debug logging to the backend; Steam toasts. |
+| `eq.ts`, `log.ts`, `notify.tsx` | EQ bands and presets; batched debug logging to the backend; Steam toasts with artwork (see [Toasts](#toasts)). |
 | `components/MusicPanel.tsx` | The QAM panel: now playing card plus five views (Library, Search, Lyrics, Queue, EQ). |
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
 | `components/NowPlaying.tsx` | Now playing card, seek bar (or LIVE bar), transport, volume. |
@@ -312,6 +312,26 @@ before a reload, and that page's buttons talk to the unloaded copy. So the backe
 each copy reloads the state when it hears it. Resetting playback on a source switch happens in
 `followState` (`sources.ts`), which watches the state, so it runs in the copy that's playing
 whichever page made the change.
+
+## Toasts
+
+Decky's toaster can't draw a picture on current SteamOS: its renderer doesn't apply there (Decky
+toasts reach Steam components that fail on them), so Steam, or a plugin such as Steamcord that
+reroutes every Decky toast, draws them in Steam's chat-message style with a "?" avatar. `notify.tsx`
+uses that style itself, as Steamcord does for Discord avatars:
+
+- Each toast is a `DisplayClientNotification` friend message "from" a stand-in persona: an account
+  id in `0xDD000000`–`0xDD00FFFF` (no real account; Steamcord uses `0xDE…`), hashed from the
+  title and artwork. Its `friendStore` entry gets the title as its name (set again for a few
+  seconds, since Steam refreshes unknown accounts and wipes it) and the artwork as its avatar
+  (`avatar_url_*` getters). The artwork is MusicDeck's own `/art` URL; without one, an inline SVG.
+- Two hooks, in Steam's notification sound (on the store's prototype and on any wrapper already
+  there) and in its open-a-friend-chat action: ours play the ordinary toast sound instead of the
+  chat ping, and tapping ours opens MusicDeck. Everything else passes through. They stay for the
+  Steam session and act through `window.__musicdeckToastHooks`, which the newest plugin copy fills
+  and an unloading copy empties; a change to the hooks themselves raises `HOOKS_VERSION`.
+- Once shown, the toast is removed from Steam's notification list (`RemoveGroupFromTray`).
+- They follow Steam's own notification settings for friend messages: turning those off hides them.
 
 ## Constraints that shaped the code
 
