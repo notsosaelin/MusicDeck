@@ -5,8 +5,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 ## Features
 
-- **Seven sources:** local files, Navidrome/Subsonic, SoundCloud, YouTube Music (plus regular YouTube), Qobuz
-  and Spotify. One source is live at a time, chosen in the plugin's Decky page.
+- **Ten sources:** local files, Navidrome/Subsonic, Jellyfin, SoundCloud, YouTube Music (plus regular
+  YouTube), Bandcamp, internet radio, Qobuz, TIDAL and Spotify. One source is live at a time, chosen in the
+  plugin's Decky page.
 - **Native Quick Access tab:** now playing, Library, Search, Lyrics, Queue and Equalizer, built from Steam's
   own components and controller conventions.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
@@ -14,6 +15,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net).
 - **Sound:** 10-band EQ with presets, volume levelling from ReplayGain data, and endless radio when the
   queue runs out.
+- **Live radio** with the song on air shown as it plays.
+- **ListenBrainz scrobbling** for every source, including plays made offline.
+- **Sleep timer:** pause after 15–90 minutes with a fade-out, or at the end of the track.
 - **Picks up where you left off:** the queue survives restarts, and with Navidrome it follows you between
   devices.
 
@@ -23,27 +27,37 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | --- | --- | --- |
 | Local files | — | Recursive scan, tags and artwork, `.lrc`/embedded lyrics, ReplayGain, `.m3u` playlists, favourites, radio |
 | Navidrome / Subsonic | Your server | Favourites, play reports, lyrics, similar-song radio, queue sync across devices, add to server playlists, ReplayGain |
+| Jellyfin | Your server | Sign in with Quick Connect (no typing), favourites, play reports, lyrics, Instant Mix radio, add to playlists, original-quality audio |
 | SoundCloud | None | Search, curated selections, artists, playlists and albums, related-track radio |
 | YouTube Music | None | Home, search across YouTube Music **and** regular YouTube, artists and channels, radio, lyrics |
+| Bandcamp | None | Genre charts, search, albums and artist discographies, full-track streaming, lyrics, same-artist radio |
+| Internet radio | None | Tens of thousands of stations from [Radio Browser](https://www.radio-browser.info): popular near you, trending, genres, search, favourite stations, song on air |
 | Qobuz | Your subscription | Your playlists and favourites (synced), editorial picks, search, MP3 up to 24-bit/192 kHz FLAC, plays reported as from the official player |
+| TIDAL | Your subscription | Your playlists, mixes and favourites, TIDAL's home page, search, track radio, synced lyrics, up to CD-quality FLAC |
 | Spotify | Premium | Your playlists, Liked Songs (synced), recently played, top tracks and artists, saved albums, new releases, search, Spotify's synced lyrics, up to 320 kbps, Spotify's own loudness levelling |
 
-**No accounts where a service doesn't need one.** SoundCloud and YouTube are used signed out, as NewPipe
-does: nothing ties your listening to an identity, and there's no account to get flagged for using an
-unofficial client. Your playlists and favourites for those stay on the Deck.
+**No accounts where a service doesn't need one.** SoundCloud, YouTube, Bandcamp and radio are used signed
+out, as NewPipe does: nothing ties your listening to an identity, and there's no account to get flagged for
+using an unofficial client. Your playlists and favourites for those stay on the Deck.
 
-**Passwords are never stored.** Navidrome passwords become Subsonic tokens on save. Qobuz and Spotify sign in
-on their own websites, in Steam's browser, and MusicDeck only receives the resulting tokens.
+**Passwords are never stored.** Navidrome passwords become Subsonic tokens and Jellyfin passwords become
+access tokens on save (or skip the password with Jellyfin's Quick Connect). Qobuz, TIDAL and Spotify sign in on
+their own websites, in Steam's browser, and MusicDeck only receives the resulting tokens.
+
+**Spotify tip:** Spotify's public Web API app is shared by every client that uses it and is often
+rate-limited. Most of MusicDeck's Spotify browsing avoids it, but search and your listening history use it.
+Add your own free app's Client ID in the Spotify source (the dialog links to Spotify's developer dashboard).
 
 ## Using it
 
 | Where | What |
 | --- | --- |
-| Decky → MusicDeck | Add and manage sources, pick the live one, playback options, debug log |
+| Decky → MusicDeck | Add and manage sources, pick the live one, playback options, ListenBrainz, debug log |
 | Quick Access → Soundtracks tab | The player. Takes over the tab by default, or gets its own tab |
 
 Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the Queue), **Y** opens a
-track's or playlist's options, **B** goes back. Re-selecting Library or Search returns to its start.
+track's or playlist's options (including the sleep timer for the playing track), **B** goes back.
+Re-selecting Library or Search returns to its start.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
 
@@ -55,76 +69,14 @@ plugin from ZIP** with `MusicDeck.zip`.
 Logs are in `~/homebrew/logs/MusicDeck/`. Turn on **Debug log** under Troubleshooting in the plugin settings
 for a detailed playback timeline in `musicdeck-debug.log`.
 
-## How it works
+## Documentation
 
-```
-Steam UI (shared JS context, always loaded)          Decky plugin process (Python)
-┌──────────────────────────────────────────┐        ┌───────────────────────────────────┐
-│ QAM patch → MusicPanel (React)           │ calls  │ main.py  Plugin                   │
-│ Player: <audio>/hls.js → ReplayGain →    │───────▶│   services/ local, subsonic,      │
-│   preamp → 10× biquad → destination      │        │     soundcloud, youtube, qobuz    │
-│                                          │  HTTP  │ server.py  127.0.0.1:<random>     │
-│   audio.src = /stream/<svc>/<id>?k=…     │◀──────│   files, proxied streams, HLS     │
-└──────────────────────────────────────────┘        └──────────────┬────────────────────┘
-                                                                   │ JSON lines
-                                                    ┌──────────────▼────────────────────┐
-                                                    │ ytdlp_worker.py (system Python)   │
-                                                    │   yt-dlp  ── bin/qjs (QuickJS-NG) │
-                                                    └───────────────────────────────────┘
-```
-
-- **Playback** runs in Steam's own browser context, so it keeps going when the QAM closes or a game runs.
-- **All audio goes through the loopback server**, keyed per session. Local files can't be opened from the UI
-  context, and remote streams need CORS headers or the Web Audio EQ outputs silence. HLS sources
-  (SoundCloud) are served as rewritten playlists so hls.js fetches every segment through it too. Signed URLs
-  are cached only until their real expiry; an expired playlist is re-resolved server-side. If playback
-  stalls or a stream errors mid-song, the player re-resolves and resumes at the same second once before
-  reporting a failure.
-- **YouTube** browsing uses [ytmusicapi](https://github.com/sigma67/ytmusicapi); audio comes from
-  [yt-dlp](https://github.com/yt-dlp/yt-dlp) in a persistent worker on the system's Python, because Decky's
-  frozen interpreter lacks parts of the standard library yt-dlp imports. yt-dlp first tries without a
-  JavaScript engine (~1 s) and falls back to the bundled [QuickJS-NG](https://github.com/quickjs-ng/quickjs)
-  (~5 s) when YouTube insists on its signature challenge. yt-dlp updates itself from PyPI (checksum-verified,
-  weekly check or on demand, rolled back if the new version won't start).
-- **Qobuz** follows [Qobine](https://github.com/sofusa/qobine) for sign-in (Qobuz's OAuth page, caught by a
-  one-shot loopback listener) and [streamrip](https://github.com/nathom/streamrip) for the web player's app
-  credentials and signed file URLs.
-- **Spotify** follows [Spotifast](https://github.com/crmne/spotifast): two browser sign-ins (playback with
-  Spotify's desktop identity, library access with the public Web API app or your own), and
-  [librespot](https://github.com/librespot-org/librespot) for audio. Playlists, your playlist library,
-  albums, artists and lyrics are read over the librespot session, the way Spotify's own clients read them,
-  so they don't touch the Web API's rate limit. The shared Web API app is rate-limited across everyone using
-  it; for the rest (search, Liked Songs, recently played, top tracks), add your own app's client ID to the
-  source (developer.spotify.com, redirect URI `http://127.0.0.1:8989/login`). `bin/spotify-helper` (Rust,
-  `backend/spotify-helper/`) keeps the librespot session and serves each track's *decrypted original file*
-  (Ogg Vorbis) over loopback HTTP with byte ranges, so Steam's browser decodes it like any other source. It's
-  a fully static binary (musl, rustls with bundled roots), so it runs on any distro.
-- **QAM takeover** (`src/qam.tsx`) wraps Decky's own tab hook and swaps the Soundtracks tab's panel and title,
-  or adds a separate tab. Reloads hand over cleanly between plugin instances. If Decky changes that internal,
-  the patch disables itself and the plugin stays usable from the Decky menu.
-- **Services** implement `services/base.py:MusicService`, advertise optional features (favourites, play
-  reports, lyrics, radio, queue sync, server playlists) and return one shared data model (`models.py`), so
-  the UI never needs to know which source it's showing.
-
-## Developing
-
-Requirements: Node 18+, pnpm 9, Python 3.
-
-```sh
-pnpm install
-pnpm build                    # dist/index.js
-python scripts/vendor.py      # pure-Python deps into py_modules/, QuickJS-NG into bin/ (checksum pinned)
-bash scripts/build_spotify_helper.sh   # bin/spotify-helper (needs rustup, cargo-zigbuild, zig; Linux or WSL)
-python scripts/package.py     # out/MusicDeck.zip
-```
-
-Backend tests need no Deck: they stub `decky`, build a small tagged library, and drive the real plugin and
-stream server over HTTP.
-
-```sh
-pip install aiohttp certifi
-python tests/test_backend.py
-```
+| Document | For |
+| --- | --- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it works: processes, the life of a play, every module, storage, security |
+| [docs/SOURCES.md](docs/SOURCES.md) | Technical notes per source: protocols, sign-in, streams, what breaks |
+| [docs/ADDING_A_SOURCE.md](docs/ADDING_A_SOURCE.md) | Step-by-step guide and checklist for a new source |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building, testing, deploying to a device, debugging, conventions |
 
 ## Roadmap
 
@@ -133,14 +85,27 @@ Planned, not started:
 - **Offline playlists.** "Available offline" on a MusicDeck playlist downloads each track once (SoundCloud
   HLS segments joined into a file, YouTube via yt-dlp); playback prefers the file. Files are tracked per
   track, so playlists sharing a song share the download.
+- **Plex.** Feasible (PIN sign-in, direct play), but needs a server to test against. Notes in
+  [SOURCES.md](docs/SOURCES.md#candidates-not-implemented-yet).
 
 Not possible:
 
-- **Apple Music.** Apple only serves its catalogue as Widevine-protected streams, and Steam's browser engine has
-  no Widevine (or any other DRM system), which a plugin can't add. Desktop clients such as
+- **Apple Music, Deezer, Amazon Music.** Their catalogues are only served as DRM-protected (Widevine)
+  streams, and Steam's browser engine has no DRM system, which a plugin can't add. Desktop clients such as
   [Cider](https://github.com/ciderapp/cider) and [Sidra](https://github.com/wimpysworld/sidra) are separate
   apps built on CastLabs Electron, a Chromium that ships Widevine; nothing comparable exists inside Steam.
-  Library browsing alone wouldn't make a useful source, and MusicDeck doesn't decrypt streams.
+  MusicDeck doesn't decrypt streams.
+- **TIDAL 24-bit "Max".** TIDAL only grants it to a sign-in that hands its result back through a browser
+  redirect Steam doesn't expose to plugins; MusicDeck plays TIDAL up to CD quality.
+
+## Thanks
+
+Built on the work of [librespot](https://github.com/librespot-org/librespot) and
+[Spotifast](https://github.com/crmne/spotifast), [yt-dlp](https://github.com/yt-dlp/yt-dlp),
+[ytmusicapi](https://github.com/sigma67/ytmusicapi), [python-tidal](https://github.com/EbbLabs/python-tidal),
+[streamrip](https://github.com/nathom/streamrip), [Qobine](https://github.com/sofusa/qobine),
+[NewPipe](https://github.com/TeamNewPipe/NewPipe), [Radio Browser](https://www.radio-browser.info),
+[LRCLIB](https://lrclib.net) and [hls.js](https://github.com/video-dev/hls.js).
 
 ## License
 
