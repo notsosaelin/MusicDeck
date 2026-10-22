@@ -5,34 +5,28 @@ import { LyricsView } from "./LyricsView";
 import { player } from "../player";
 import { pluginState, useStore } from "../store";
 import { Browser } from "./Browser";
-import { PanelTab, panelTab, popView, resetStack } from "../nav";
+import { PanelTab, TAB_ORDER, panelTab, popView, resetStack, setTabStrip, showTab } from "../nav";
 import { Equalizer } from "./Equalizer";
 import { MiniPlayer, NowPlaying } from "./NowPlaying";
 import { Queue } from "./Queue";
 import { ACCENT, IconButton, Message, PLAYER_CSS } from "./common";
 
-const TABS: { id: PanelTab; label: string; icon: ReactNode }[] = [
-  { id: "playing", label: "Now playing", icon: <FaCompactDisc /> },
-  { id: "library", label: "Library", icon: <FaMusic /> },
-  { id: "search", label: "Search", icon: <FaSearch /> },
-  { id: "queue", label: "Queue", icon: <FaListOl /> },
-  { id: "eq", label: "Equalizer", icon: <FaSlidersH /> },
-];
+const TAB_LOOKS: Record<PanelTab, { label: string; icon: ReactNode }> = {
+  playing: { label: "Now playing", icon: <FaCompactDisc /> },
+  library: { label: "Library", icon: <FaMusic /> },
+  search: { label: "Search", icon: <FaSearch /> },
+  queue: { label: "Queue", icon: <FaListOl /> },
+  eq: { label: "Equalizer", icon: <FaSlidersH /> },
+};
 
 // GamepadButton.BUMPER_LEFT / BUMPER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
 const L1 = 5;
 const R1 = 6;
 
-/**
- * L1 and R1 step through the tabs, wrapping round, as in Steam's own tabbed pages. Focus moves to
- * the new tab's button: what had it may be gone with the old tab, and Steam would spend the next
- * press finding focus again.
- */
-function stepTab(by: number, panel: HTMLElement | null) {
-  const at = TABS.findIndex((t) => t.id === panelTab.get().tab);
-  const next = (at + by + TABS.length) % TABS.length;
-  panelTab.set({ tab: TABS[next].id });
-  window.requestAnimationFrame(() => panel?.querySelectorAll<HTMLElement>(".md-tabs button")[next]?.focus());
+/** L1 and R1 step through the tabs, wrapping round, as in Steam's own tabbed pages. */
+function stepTab(by: number) {
+  const at = TAB_ORDER.indexOf(panelTab.get().tab);
+  showTab(TAB_ORDER[(at + by + TAB_ORDER.length) % TAB_ORDER.length]);
 }
 
 /** The tab strip at the top of the panel: plain icons over one line, the open tab underlined. */
@@ -40,34 +34,36 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
   // in a section, for the same side margins as everything below it
   <PanelSection>
     <PanelSectionRow>
-      <Focusable
-        flow-children="row"
-        className="md-tabs"
-        style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255, 255, 255, 0.1)", marginBottom: 8 }}
-      >
-        {TABS.map((t) => (
-          <IconButton
-            key={t.id}
-            look="plain"
-            label={`${t.label} (L1/R1)`}
-            active={tab === t.id}
-            style={{
-              height: 40,
-              fontSize: 16,
-              borderRadius: 0,
-              boxShadow: tab === t.id ? `inset 0 -2px 0 ${ACCENT}` : "none",
-            }}
-            onClick={() => {
-              // tapping the tab you're already on goes back to its start, like most music apps
-              if (tab === t.id && (t.id === "library" || t.id === "search")) resetStack(t.id);
-              panelTab.set({ tab: t.id });
-            }}
-          >
-            {t.icon}
-            {t.id === "queue" && queued ? <span style={{ fontSize: 11 }}>{queued}</span> : null}
-          </IconButton>
-        ))}
-      </Focusable>
+      <div ref={setTabStrip}>
+        <Focusable
+          flow-children="row"
+          className="md-tabs"
+          style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255, 255, 255, 0.1)", marginBottom: 8 }}
+        >
+          {TAB_ORDER.map((id) => ({ id, ...TAB_LOOKS[id] })).map((t) => (
+            <IconButton
+              key={t.id}
+              look="plain"
+              label={`${t.label} (L1/R1)`}
+              active={tab === t.id}
+              style={{ height: 40, fontSize: 16, borderRadius: 0 }}
+              onClick={() => {
+                // tapping the tab you're already on goes back to its start, like most music apps
+                if (tab === t.id && (t.id === "library" || t.id === "search")) resetStack(t.id);
+                panelTab.set({ tab: t.id });
+              }}
+            >
+              {t.icon}
+              {t.id === "queue" && queued ? <span style={{ fontSize: 11 }}>{queued}</span> : null}
+              {/* the underline is an element, not an inset shadow: on a button of fractional width
+                Chromium also draws a hairline down the shadow's right edge */}
+              {tab === t.id && (
+                <span style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 2, background: ACCENT }} />
+              )}
+            </IconButton>
+          ))}
+        </Focusable>
+      </div>
     </PanelSectionRow>
   </PanelSection>
 );
@@ -90,7 +86,7 @@ export const MusicPanel: FC = () => {
       onButtonDown={(e: any) => {
         const button = e?.detail?.button;
         if (button === L1 || button === R1) {
-          stepTab(button === L1 ? -1 : 1, e.currentTarget);
+          stepTab(button === L1 ? -1 : 1);
           e.stopPropagation?.();
         }
       }}
@@ -107,7 +103,7 @@ export const MusicPanel: FC = () => {
           {queue.length > 0 && <LyricsView />}
         </>
       ) : (
-        tab !== "eq" && <MiniPlayer onOpen={() => panelTab.set({ tab: "playing" })} />
+        tab !== "eq" && <MiniPlayer onOpen={() => showTab("playing")} />
       )}
       {browsing &&
         (!state ? null : active ? (

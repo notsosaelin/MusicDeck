@@ -103,8 +103,9 @@ export const NowPlaying: FC = () => {
       {/* Focusable so gamepad navigation (and therefore scrolling) can reach the top of the panel */}
       <PanelSectionRow>
         <Field
-          focusable
-          highlightOnFocus
+          // nothing loaded: nothing to do with the card, so the controller doesn't stop on it
+          focusable={!!item}
+          highlightOnFocus={!!item}
           bottomSeparator="none"
           childrenLayout="below"
           onActivate={(e: any) => item && showTrackMenu(item.instanceId, item.track, e?.currentTarget)}

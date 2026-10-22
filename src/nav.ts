@@ -9,6 +9,24 @@ import { RecentlyUsed, Store } from "./store";
 
 export type PanelTab = "playing" | "library" | "search" | "queue" | "eq";
 export const panelTab = new Store<{ tab: PanelTab }>({ tab: "library" });
+/** The tabs in the order the panel shows them. */
+export const TAB_ORDER: PanelTab[] = ["playing", "library", "search", "queue", "eq"];
+
+/** The panel's tab strip (set by MusicPanel), so a tab change can move focus there first. */
+let tabStrip: HTMLElement | null = null;
+export const setTabStrip = (el: HTMLElement | null) => {
+  tabStrip = el;
+};
+
+/**
+ * Opens a tab, moving the controller's focus to its button first: what had focus may go with the
+ * old tab's content (the mini player, a row, the now-playing card), and Steam would then spend the
+ * next press finding focus again, or hand it to whatever comes first in the new tab.
+ */
+export function showTab(tab: PanelTab) {
+  tabStrip?.querySelectorAll<HTMLElement>("button")[TAB_ORDER.indexOf(tab)]?.focus();
+  panelTab.set({ tab });
+}
 
 export type View =
   { type: "home" } | { type: "search"; query: string } | { type: "collection"; collection: Collection };
@@ -47,7 +65,7 @@ export const popView = (name: StackName): boolean => {
 /** Open an album/artist/playlist in the Library tab, from anywhere. */
 export const openInLibrary = (collection: Collection) => {
   pushView("library", { type: "collection", collection });
-  panelTab.set({ tab: "library" });
+  showTab("library");
 };
 
 /**
