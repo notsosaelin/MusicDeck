@@ -167,6 +167,7 @@ class StreamServer:
         app.router.add_get("/c/{link}", self._handle_cast_stream)
         app.router.add_get("/c/{link}/art", self._handle_cast_art)
         app.router.add_get("/c/{link}/f", self._handle_cast_fetch)
+        app.on_response_prepare.append(_dlna_headers)
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -218,6 +219,8 @@ class StreamServer:
         if request.remote != self.lan_peer:
             raise web.HTTPForbidden()
         link = self.cast_links.get(request.match_info["link"])
+        debuglog.debug("cast", "device request", path=request.path.rsplit("/", 1)[-1][:8], found=link is not None,
+                       range=request.headers.get("Range"), agent=request.headers.get("User-Agent", "")[:60])
         if link is None:
             raise web.HTTPNotFound()
         return link
@@ -427,10 +430,22 @@ class StreamServer:
                 await response.write(chunk)
             await response.write_eof()
             return response
-        except (ConnectionResetError, aiohttp.ClientConnectionError):
-            # the player seeking or skipping closes the connection mid-stream; that's normal
+        except (ConnectionError, aiohttp.ClientConnectionError):
+            # the player (or a cast device) seeking or skipping closes the connection mid-stream; that's normal
             if response is not None and response.prepared:
                 return response
             raise web.HTTPBadGateway(headers=CORS)
         finally:
             upstream.release()
+
+
+async def _dlna_headers(request: web.Request, response: web.StreamResponse) -> None:
+    """DLNA renderers (Samsung's especially) ask how media may be fetched, and wait or give up without
+    an answer: audio streams and seeks by byte range, pictures arrive whole."""
+    if "getcontentFeatures.dlna.org" not in request.headers:
+        return
+    picture = request.path.endswith("/art")
+    response.headers["transferMode.dlna.org"] = "Interactive" if picture else "Streaming"
+    response.headers["contentFeatures.dlna.org"] = (
+        "DLNA.ORG_PN=JPEG_TN;DLNA.ORG_OP=00;DLNA.ORG_FLAGS=00f00000000000000000000000000000" if picture
+        else "DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000")

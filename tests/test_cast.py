@@ -165,6 +165,10 @@ async def castv2_tests():
     fake.send("receiver-0", castv2.NS_HEARTBEAT, {"type": "PING"})
     check(await until(lambda: fake.of("PONG")), "the device's pings are answered")
     fake.send("receiver-0", castv2.NS_RECEIVER, fake.receiver_status(0, running=False))
+    await asyncio.sleep(0.1)
+    check(not gone, "a status without our player just after it started isn't a takeover (devices send those)")
+    cast.launched_at -= castv2.LAUNCH_GRACE + 1
+    fake.send("receiver-0", castv2.NS_RECEIVER, fake.receiver_status(0, running=False))
     check(await until(lambda: gone), "another app taking over the device ends the session")
     await cast.close()
 
@@ -317,6 +321,12 @@ async def lan_tests(http, path):
             check(r.status == 206, "ranges work, so the device can seek")
         async with http.get(link["art"]) as r:
             check(r.status == 200, "and its cover")
+        async with http.get(link["url"], headers={"getcontentFeatures.dlna.org": "1"}) as r:
+            check(r.headers.get("transferMode.dlna.org") == "Streaming"
+                  and "DLNA.ORG_OP=01" in r.headers.get("contentFeatures.dlna.org", ""),
+                  "DLNA renderers are told the track streams and seeks")
+        async with http.get(link["art"], headers={"getcontentFeatures.dlna.org": "1"}) as r:
+            check(r.headers.get("transferMode.dlna.org") == "Interactive", "and that the cover is a picture")
         async with http.get(server.lan_base + "/c/guessed") as r:
             check(r.status == 404, "a made-up link gets nothing")
         async with http.get(server.lan_base + f"/stream/fake/t?k={server.key}") as r:
@@ -403,6 +413,7 @@ async def manager_tests(http, path):
         except ServiceError:
             check(True, "HLS isn't sent to UPnP renderers")
         manager.device.kind = "chromecast"
+        manager.device.launched_at -= castv2.LAUNCH_GRACE + 1
         fake.send("receiver-0", castv2.NS_RECEIVER, fake.receiver_status(0, running=False))
         check(await until(lambda: any(d.get("gone") for _, d in events) and manager.device is None and not server.lan_base),
               "a session ended on the device is reported, and the network site closes")

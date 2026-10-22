@@ -11,6 +11,7 @@ import asyncio
 import json
 import ssl
 import struct
+import time
 from typing import Any, Callable, Optional
 
 DEFAULT_RECEIVER = "CC1AD845"
@@ -24,6 +25,9 @@ REPLY_TIMEOUT = 15
 MAX_MESSAGE = 1 << 20  # the protocol's own limit is 64 KiB; anything near this is garbage
 # how often to ask for the position while playing, so the Deck's clock doesn't drift from the device's
 STATUS_EVERY = 5
+# while its player starts, a device can send a status or two that doesn't list it yet; those aren't
+# "something else took over"
+LAUNCH_GRACE = 5
 
 
 class CastError(Exception):
@@ -113,6 +117,7 @@ class Chromecast:
         self.volume = 1.0
         self.closing = False
         self.playing = False
+        self.launched_at = 0.0
 
     async def connect(self) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -137,6 +142,7 @@ class Chromecast:
         if not app:
             raise CastError("The device didn't start its player")
         self.transport_id, self.session_id = app["transportId"], app["sessionId"]
+        self.launched_at = time.monotonic()
         self._send(self.transport_id, NS_CONNECTION, {"type": "CONNECT"})
 
     async def close(self, stop_player: bool = True) -> None:
@@ -291,7 +297,8 @@ class Chromecast:
             future.set_result(payload)
         if kind == "RECEIVER_STATUS":
             app = self._receiver_status(payload)
-            if self.session_id and (not app or app.get("sessionId") != self.session_id) and not self.closing:
+            settled = time.monotonic() - self.launched_at > LAUNCH_GRACE
+            if self.session_id and settled and (not app or app.get("sessionId") != self.session_id) and not self.closing:
                 self.closing = True
                 self.on_gone("Something else is playing on the device")
         elif kind == "MEDIA_STATUS" and not future:

@@ -164,11 +164,14 @@ def _clock(seconds: float) -> str:
 
 def didl(url: str, content_type: str, meta: dict) -> str:
     """DIDL-Lite metadata for SetAVTransportURI: what the renderer shows and how to fetch the audio."""
-    art = f"<upnp:albumArtURI>{escape(meta['art'])}</upnp:albumArtURI>" if meta.get("art") else ""
+    # Samsung and other DLNA renderers only show covers labelled with a DLNA image profile
+    art = (f'<upnp:albumArtURI dlna:profileID="JPEG_TN">{escape(meta["art"])}</upnp:albumArtURI>'
+           if meta.get("art") else "")
     duration = f' duration="{_clock(meta["duration"])}.000"' if meta.get("duration") else ""
     return (
         '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
-        'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
+        'xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">'
         '<item id="0" parentID="-1" restricted="1">'
         f"<dc:title>{escape(meta.get('title') or 'MusicDeck')}</dc:title>"
         f"<upnp:artist>{escape(meta.get('artist') or '')}</upnp:artist>"
