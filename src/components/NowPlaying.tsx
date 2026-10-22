@@ -1,5 +1,5 @@
-import { Field, PanelSection, PanelSectionRow, SliderField } from "@decky/ui";
-import { FC, ReactNode, useEffect, useState } from "react";
+import { Field, Focusable, PanelSection, PanelSectionRow, SliderField } from "@decky/ui";
+import { FC, useEffect, useState } from "react";
 import {
   FaHeart,
   FaPause,
@@ -91,8 +91,8 @@ const SKIP = { height: 44, fontSize: 18 };
 const SIDE = { height: 44, fontSize: 15 };
 const PLAY = { fontSize: 18 };
 
-/** `children` render at the bottom of the same section (the view switcher), keeping spacing tight. */
-export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
+/** The Now Playing tab: the cover and title, seek bar, transport and volume (lyrics follow it). */
+export const NowPlaying: FC = () => {
   const state = useStore(player.state);
   const item = state.queue[state.index];
   const song = useOnAir(item, state.playing);
@@ -119,7 +119,7 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
           }
         >
           <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={72} />
+            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={88} />
             <RowText
               size="large"
               scroll="always"
@@ -130,7 +130,7 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
         </Field>
       </PanelSectionRow>
       {item && (item.track.live ? <LiveBar /> : <Seek />)}
-      {/* nothing loaded: only the card and the tabs; transport and volume would do nothing */}
+      {/* nothing loaded: only the card; transport and volume would do nothing */}
       {item && (
         <ButtonRow>
           <IconButton
@@ -184,7 +184,66 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
           />
         </PanelSectionRow>
       )}
-      {children}
+    </PanelSection>
+  );
+};
+
+/** The thin progress line under the mini player (redraws on its own, not the whole row). */
+const MiniProgress: FC = () => {
+  const { current, duration } = useStore(player.position);
+  const done = duration > 0 ? Math.min(current / duration, 1) : 0;
+  return (
+    <div style={{ height: 2, background: "rgba(255, 255, 255, 0.1)", marginTop: 6 }}>
+      <div style={{ height: "100%", width: `${done * 100}%`, background: ACCENT }} />
+    </div>
+  );
+};
+
+/**
+ * What's playing, in one row above Library, Search and Queue (the mini player music apps keep
+ * above their content): cover, title and artist, play/pause and next, and a thin progress line.
+ * The row opens the Now Playing tab.
+ */
+export const MiniPlayer: FC<{ onOpen: () => void }> = ({ onOpen }) => {
+  const state = useStore(player.state);
+  const item = state.queue[state.index];
+  const song = useOnAir(item, state.playing);
+  if (!item) return null;
+  const { title, subtitle } = cardText(item, song);
+  return (
+    <PanelSection>
+      <PanelSectionRow>
+        <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <Focusable
+            className="md-mini"
+            onActivate={onOpen}
+            onClick={onOpen}
+            onOKActionDescription="Now playing"
+            onGamepadFocus={scrollPanelToTop}
+            style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, padding: 4, margin: -4 }}
+          >
+            <Art instanceId={item.instanceId} art={song?.art ?? item.track.art ?? null} size={40} />
+            <RowText title={title} subtitle={subtitle[0]} />
+          </Focusable>
+          <IconButton
+            look="plain"
+            label={state.playing ? "Pause" : "Play"}
+            onClick={() => player.toggle()}
+            style={{ flex: "0 0 40px", height: 40, fontSize: 16 }}
+          >
+            {state.playing ? <FaPause /> : <FaPlay />}
+          </IconButton>
+          <IconButton
+            look="plain"
+            label="Next"
+            onClick={() => player.next()}
+            style={{ flex: "0 0 40px", height: 40, fontSize: 16 }}
+          >
+            <FaStepForward />
+          </IconButton>
+        </Focusable>
+      </PanelSectionRow>
+      {!item.track.live && <MiniProgress />}
     </PanelSection>
   );
 };

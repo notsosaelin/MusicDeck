@@ -14,7 +14,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   pause while you play and pick up again when the game closes.
 - **Several accounts:** add a service more than once (two Spotify accounts, a second Navidrome user) and
   switch between them like any other source.
-- **Native Quick Access tab:** now playing, Library, Search, Lyrics, Queue and Equalizer, built from Steam's
+- **Native Quick Access tab:** Now playing (with lyrics), Library, Search, Queue and Equalizer, with a mini player while you browse, built from Steam's
   own components and controller conventions.
 - **Jump back in:** each source's home starts with the albums and playlists you played last, and an empty
   search shows your recent searches.
@@ -24,7 +24,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   your own servers, SoundCloud, YouTube, Bandcamp, podcasts and the Live Music Archive. Each song is kept
   once however many playlists hold it, and goes when the last one lets it go.
 - **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net) with NetEase Cloud Music as a
-  backup, following the song in the Lyrics tab or full screen over the album art.
+  backup, following the song under Now playing or full screen over the album art.
 - **Sound:** 10-band EQ with presets, volume levelling from ReplayGain data, gapless playback, an
   optional crossfade, and endless radio when the queue runs out.
 - **Live radio** with the song on air shown as it plays.

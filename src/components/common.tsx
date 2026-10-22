@@ -410,6 +410,8 @@ export const IconButton: FC<{
 export const PLAYER_CSS = `
 button.DialogButton.md-plain:not(.gpfocus):not(:hover):not(:active) { background: transparent !important; }
 button.DialogButton.md-round { border-radius: 50% !important; flex: 0 0 44px !important; width: 44px; height: 44px !important; }
+.md-mini { border-radius: 4px; }
+.md-mini.gpfocus, .md-mini:hover { background: rgba(255, 255, 255, 0.1); }
 `;
 
 /** Standalone notice; brings its own section so it gets the same inset as everything else. */

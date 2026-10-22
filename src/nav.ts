@@ -7,7 +7,7 @@ import { RecentlyUsed, Store } from "./store";
  * so anything (track menus, the now-playing card) can navigate without importing the views.
  */
 
-export type PanelTab = "library" | "search" | "lyrics" | "queue" | "eq";
+export type PanelTab = "playing" | "library" | "search" | "queue" | "eq";
 export const panelTab = new Store<{ tab: PanelTab }>({ tab: "library" });
 
 export type View =

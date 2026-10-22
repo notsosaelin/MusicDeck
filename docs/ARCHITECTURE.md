@@ -156,10 +156,10 @@ Details worth knowing:
 | `steam.ts` | What only Steam's UI knows, for the Steam soundtracks source: owned soundtracks, their games and art, the running game. |
 | `games.ts` | Games starting and stopping: plays the music set for a game (`set_game_music`) and pauses it when the game closes; with "Pause in games" (`playback.game_pause`), pauses the music during games and resumes it after; keeps the Steam source's running game current. Each undoes only what it did itself. Steam's running list decides what started or stopped (its notifications' process ids don't pair a start with its stop). |
 | `eq.ts`, `log.ts`, `notify.tsx` | EQ bands and presets; batched debug logging to the backend; Steam toasts with artwork (see [Toasts](#toasts)). |
-| `components/MusicPanel.tsx` | The QAM panel: now playing card plus five views (Library, Search, Lyrics, Queue, EQ). |
+| `components/MusicPanel.tsx` | The QAM panel: a tab strip on top (Now playing, Library, Search, Queue, EQ); Now playing holds the full player and the lyrics, the others a one-row mini player (`NowPlaying.tsx`) above their content. |
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
 | `components/NowPlaying.tsx` | Now playing card, seek bar (or LIVE bar), transport, volume. |
-| `components/LyricsView.tsx` | The Lyrics tab, and what the full-screen page shares with it: `useLyrics` (looked up once per track; a failed lookup isn't remembered) and `SyncedLyrics`. |
+| `components/LyricsView.tsx` | The lyrics under Now playing, and what the full-screen page shares with it: `useLyrics` (looked up once per track; a failed lookup isn't remembered) and `SyncedLyrics`. |
 | `components/LyricsPage.tsx` | Full-screen lyrics: a route in Steam's main window (`/musicdeck/lyrics`, added in index.tsx) over the blurred album art; A/X/Y play-pause/next/previous. Unsynced lyrics scroll with the song. |
 | `components/Queue.tsx` | The queue in play order, with moving tracks (menu items, or "Move…" mode on the d-pad; see `RowMoving` in common.tsx). |
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |
