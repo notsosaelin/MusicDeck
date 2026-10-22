@@ -25,7 +25,7 @@ import {
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
 import { hasFeature, player } from "../player";
 import { pluginState, useStore } from "../store";
-import { ROOTS, StackName, dataVersion, navigation, pushView, resultCache, setStack } from "../nav";
+import { ROOTS, StackName, dataVersion, navigation, playFrom, pushView, resultCache, setStack } from "../nav";
 import { notify } from "../notify";
 import { MenuContext, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
 import { Art, ButtonRow, CollectionRow, IconButton, Message, RowText, ScrollingText, TrackRow } from "./common";
@@ -98,7 +98,7 @@ async function playCollection(instanceId: string, c: Collection) {
   if (!result.ok) return notify(`Couldn't play ${c.title}`, result.error);
   if (!result.data.tracks.length) return notify(c.title, result.data.notice || "Nothing to play here");
   resultCache.set(key, result);
-  player.playList(instanceId, result.data.tracks, 0);
+  playFrom(instanceId, c, result.data.tracks);
 }
 
 const CollectionList: FC<{
@@ -196,7 +196,9 @@ const TrackList: FC<{
   showAlbum?: boolean;
   playlistId?: string;
   showArt?: boolean;
-}> = ({ instanceId, title, tracks, limit, showAlbum = true, playlistId, showArt = true }) => {
+  /** the album or playlist page these tracks are, so playing from it counts as playing it */
+  from?: Collection;
+}> = ({ instanceId, title, tracks, limit, showAlbum = true, playlistId, showArt = true, from }) => {
   const [expanded, setExpanded] = useState(false);
   const { queue, index } = useStore(player.state);
   const current = queue[index];
@@ -210,7 +212,7 @@ const TrackList: FC<{
           showAlbum={showAlbum}
           artInstanceId={showArt ? instanceId : undefined}
           active={current?.instanceId === instanceId && current.track.id === t.id}
-          onPlay={() => player.playList(instanceId, tracks, i)}
+          onPlay={() => (from ? playFrom(instanceId, from, tracks, i) : player.playList(instanceId, tracks, i))}
           {...trackActions(instanceId, t, { playlistId })}
         />
       ))}
@@ -231,12 +233,14 @@ const TrackList: FC<{
   );
 };
 
-const PageBody: FC<{ instanceId: string; stack: StackName; page: Page; playlistId?: string }> = ({
-  instanceId,
-  stack,
-  page,
-  playlistId,
-}) => {
+const PageBody: FC<{
+  instanceId: string;
+  stack: StackName;
+  page: Page;
+  playlistId?: string;
+  /** the collection this page is (not set for search results) */
+  from?: Collection;
+}> = ({ instanceId, stack, page, playlistId, from }) => {
   // Album pages don't need the album name repeated on every row
   const showAlbum = new Set(page.tracks.map((t) => t.album)).size > 1;
   const mixed = page.collections.length > 0 || !!page.extra?.length;
@@ -262,6 +266,7 @@ const PageBody: FC<{ instanceId: string; stack: StackName; page: Page; playlistI
           // one album's tracks share a cover: no need to repeat it on every row
           showArt={showAlbum}
           playlistId={playlistId}
+          from={from}
           // full lists (albums, playlists) show everything; mixed pages keep each part short
           limit={mixed ? 8 : undefined}
         />
@@ -335,10 +340,10 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
       >
         {page && page.tracks.length > 0 && (
           <ButtonRow>
-            <IconButton onClick={() => player.playList(instanceId, page.tracks, 0, false)}>
+            <IconButton onClick={() => playFrom(instanceId, collection, page.tracks, 0, false)}>
               <FaPlay /> Play
             </IconButton>
-            <IconButton onClick={() => player.playList(instanceId, page.tracks, 0, true)}>
+            <IconButton onClick={() => playFrom(instanceId, collection, page.tracks, 0, true)}>
               <FaRandom /> Shuffle
             </IconButton>
             {canSave(instanceId, collection) && (
@@ -376,6 +381,7 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
           stack={stack}
           page={page}
           playlistId={isLocalPlaylist(collection.id) ? collection.id : undefined}
+          from={collection}
         />
       ) : (
         <Loading result={result} />

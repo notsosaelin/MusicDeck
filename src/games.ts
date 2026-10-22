@@ -1,4 +1,5 @@
 import { Collection, GameMusic, openCollection, setGameMusic } from "./api";
+import { playFrom } from "./nav";
 import { notify } from "./notify";
 import { player } from "./player";
 import { refreshRunningGame } from "./steam";
@@ -60,7 +61,7 @@ async function onGameStart(appid: number) {
     notify(`Game music for ${music.game}`, page.ok ? `${music.collection.title} is empty` : page.error);
     return;
   }
-  player.playList(live, page.data.tracks, 0);
+  playFrom(live, music.collection, page.data.tracks);
   started = { appid, queue: player.queueId };
   notify(`Playing for ${music.game}`, music.collection.title);
 }

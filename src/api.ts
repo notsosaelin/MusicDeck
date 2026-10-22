@@ -216,6 +216,7 @@ export interface OnAir {
   artist: string;
   art: string | null;
 }
+export const playedCollection = callable<[id: string, collection: Collection], void>("played_collection");
 export const setGameMusic = callable<
   [id: string, appid: number, game: string, collection: Collection | null],
   Result<GameMusic[]>

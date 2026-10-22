@@ -18,6 +18,7 @@ from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError
+from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings
 
 # Config keys never sent to the frontend; a service storing a secret under another name adds it here
@@ -85,6 +86,7 @@ class Plugin:
     async def _main(self):
         self.settings = Settings(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.playlists = PlaylistStore(decky.DECKY_PLUGIN_SETTINGS_DIR)
+        self.recents = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)
         debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(self.settings.get("debug_log")))
         self.instances = {}
         self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path)
@@ -224,6 +226,7 @@ class Plugin:
         decky.logger.info(f"Removed source {instance_id} ({getattr(instance, 'type', '?')})")
         self.settings.remove_service(instance_id)
         self.playlists.delete_for_instance(instance_id)
+        self.recents.forget(instance_id=instance_id)
         self._forget_game_music(lambda m: m["instance_id"] == instance_id)
         await _announce_change()
 
@@ -253,8 +256,12 @@ class Plugin:
         async def work():
             sections = await self._instance(instance_id).home()
             ours = self.playlists.for_instance(instance_id)
-            # MusicDeck playlists come first: they're what the user made
-            return ([{"title": "Your playlists", "items": ours}] if ours else []) + sections
+            # MusicDeck playlists show as they are now (renamed, new artwork), not as they were played
+            current = {c["id"]: c for c in ours}
+            recent = [current.get(c["id"], c) for c in self.recents.for_instance(instance_id)
+                      if not PlaylistStore.is_ours(c["id"]) or c["id"] in current]
+            # what was played lately and what the user made come before what the source suggests
+            return ([{"title": "Jump back in", "items": recent}] if recent else [])                 + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections
         return await _result(work())
 
     @_when_ready
@@ -549,8 +556,15 @@ class Plugin:
     @_when_ready
     async def playlist_delete(self, playlist_id: str) -> None:
         self.playlists.delete(playlist_id)
+        self.recents.forget(collection_id=playlist_id)
         if self._forget_game_music(lambda m: m["collection"]["id"] == playlist_id):
             await _announce_change()
+
+    @_when_ready
+    async def played_collection(self, instance_id: str, collection: dict[str, Any]) -> None:
+        """An album or playlist was played: it leads the source's "Jump back in" row."""
+        if self.settings.find_service(instance_id):
+            self.recents.add(instance_id, collection)
 
     # --- music that starts with a game (src/games.ts plays it) ---
 

@@ -724,6 +724,40 @@ async def run():
         finally:
             lyrmod.LRCLIB = real_lrclib
 
+        print("jump back in")
+        titles_of = lambda home: [s["title"] for s in home]  # noqa: E731
+        first_home = (await plugin.home(sid))["data"]
+        check("Jump back in" not in titles_of(first_home), "nothing played yet: no row")
+        mine = await plugin.create_playlist(sid, "Road trip", [])
+        await plugin.played_collection(sid, album_one)
+        await plugin.played_collection(sid, mine)
+        await plugin.played_collection(sid, album_one)  # again: moves to the front, once
+        home_now = (await plugin.home(sid))["data"]
+        check(titles_of(home_now)[:2] == ["Jump back in", "Your playlists"]
+              and [c["title"] for c in home_now[0]["items"]] == ["Album One", "Road trip"],
+              "played albums and playlists lead the home, newest first, once each")
+        await plugin.playlist_rename(mine["id"], "Road trip 2")
+        check([c["title"] for c in (await plugin.home(sid))["data"][0]["items"]] == ["Album One", "Road trip 2"],
+              "a renamed playlist shows its new name")
+        await plugin.playlist_delete(mine["id"])
+        check([c["title"] for c in (await plugin.home(sid))["data"][0]["items"]] == ["Album One"],
+              "a deleted playlist leaves the row")
+        for i in range(15):
+            await plugin.played_collection(sid, {"id": f"a{i}", "kind": "album", "title": f"A{i}"})
+        check(len(plugin.recents.for_instance(sid)) == 10, "the row keeps the last 10")
+        for junk in [None, "x", {}, {"id": "only-id"}, {"kind": "album"}]:
+            await plugin.played_collection(sid, junk)
+        await plugin.played_collection("no-such-source", album_one)
+        check(len(plugin.recents.for_instance(sid)) == 10 and "no-such-source" not in plugin.recents.data,
+              "garbage and unknown sources are ignored")
+        temp = await plugin.save_service({"type": "radio", "name": "Temp", "config": {}})
+        await plugin.played_collection(temp["data"]["id"], {"id": "tag:jazz", "kind": "list", "title": "Jazz"})
+        await plugin.remove_service(temp["data"]["id"])
+        check(temp["data"]["id"] not in plugin.recents.data, "removing a source forgets what it played")
+        from musicdeck.recents import Recents
+        check(len(Recents(decky.DECKY_PLUGIN_RUNTIME_DIR).for_instance(sid)) == 10, "kept across restarts")
+        plugin.recents.forget(instance_id=sid)
+
         print("game music")
         mix = await plugin.create_playlist(sid, "Boss fights", [])
         album = {"id": album_one["id"], "kind": "album", "title": "Album One", "art": None, "extra": "dropped"}

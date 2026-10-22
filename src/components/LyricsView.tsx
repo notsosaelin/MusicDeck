@@ -93,15 +93,47 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
   );
 };
 
-export const PlainLyrics: FC<{ lyrics: Lyrics }> = ({ lyrics }) => (
-  <div style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.85 }}>
-    {lyrics.lines.map((line, i) => (
-      <div key={i} style={{ minHeight: line.text ? undefined : 12 }}>
-        {line.text}
+/**
+ * Unsynced lyrics have no timings, so they scroll with the song's progress instead: the whole text
+ * passes through a window of `height` pixels as the track plays.
+ */
+export const ScrollingPlainLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number }> = ({
+  lyrics,
+  height,
+  fontSize,
+}) => {
+  const { current, duration } = useStore(player.position);
+  const inner = useRef<HTMLDivElement>(null);
+  const travel = Math.max((inner.current?.scrollHeight ?? 0) - height * 0.6, 0);
+  const progress = duration > 0 ? Math.min(current / duration, 1) : 0;
+  return (
+    <div
+      style={{
+        height,
+        overflow: "hidden",
+        maskImage: "linear-gradient(transparent, black 12%, black 88%, transparent)",
+        WebkitMaskImage: "linear-gradient(transparent, black 12%, black 88%, transparent)",
+      }}
+    >
+      <div
+        ref={inner}
+        style={{
+          transform: `translateY(${height * 0.2 - travel * progress}px)`,
+          transition: "transform 1s linear",
+          fontSize,
+          lineHeight: 1.6,
+          opacity: 0.85,
+        }}
+      >
+        {lyrics.lines.map((line, i) => (
+          <div key={i} style={{ minHeight: line.text ? undefined : fontSize * 0.8 }}>
+            {line.text}
+          </div>
+        ))}
       </div>
-    ))}
-  </div>
-);
+    </div>
+  );
+};
 
 export const openFullScreenLyrics = () => {
   Navigation.CloseSideMenus();
@@ -135,7 +167,11 @@ export const LyricsView: FC = () => {
         </IconButton>
       </ButtonRow>
       <PanelSectionRow>
-        {lyrics.synced ? <SyncedLyrics lyrics={lyrics} height={300} fontSize={16} /> : <PlainLyrics lyrics={lyrics} />}
+        {lyrics.synced ? (
+          <SyncedLyrics lyrics={lyrics} height={300} fontSize={16} />
+        ) : (
+          <ScrollingPlainLyrics lyrics={lyrics} height={300} fontSize={14} />
+        )}
       </PanelSectionRow>
       <PanelSectionRow>
         <div style={{ fontSize: 11, opacity: 0.4, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>

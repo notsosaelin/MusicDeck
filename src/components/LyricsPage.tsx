@@ -3,7 +3,7 @@ import { FC, RefObject, useEffect, useRef, useState } from "react";
 import { player } from "../player";
 import { mediaUrl, useStore } from "../store";
 import { formatTime } from "./common";
-import { SyncedLyrics, useLyrics } from "./LyricsView";
+import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "./LyricsView";
 
 /**
  * The height of an element, kept current. The page renders into Steam's main window while this code
@@ -22,34 +22,6 @@ function useHeight(ref: RefObject<HTMLElement | null>) {
   }, []);
   return height;
 }
-
-/** Unsynced lyrics scroll with the song's progress, so the whole text passes by as it plays. */
-const ScrollingPlainLyrics: FC<{ lines: string[]; height: number }> = ({ lines, height }) => {
-  const { current, duration } = useStore(player.position);
-  const inner = useRef<HTMLDivElement>(null);
-  const travel = Math.max((inner.current?.scrollHeight ?? 0) - height * 0.6, 0);
-  const progress = duration > 0 ? Math.min(current / duration, 1) : 0;
-  return (
-    <div style={{ height, overflow: "hidden" }}>
-      <div
-        ref={inner}
-        style={{
-          transform: `translateY(${height * 0.2 - travel * progress}px)`,
-          transition: "transform 1s linear",
-          fontSize: 26,
-          lineHeight: 1.6,
-          opacity: 0.85,
-        }}
-      >
-        {lines.map((line, i) => (
-          <div key={i} style={{ minHeight: line ? undefined : 20 }}>
-            {line}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 /**
  * Full-screen lyrics in Steam's main window, over the album art. A plays or pauses, X skips, Y goes
@@ -149,7 +121,7 @@ export const LyricsPage: FC = () => {
             lyrics.synced ? (
               <SyncedLyrics lyrics={lyrics} height={height} fontSize={34} />
             ) : (
-              <ScrollingPlainLyrics lines={lyrics.lines.map((l) => l.text)} height={height} />
+              <ScrollingPlainLyrics lyrics={lyrics} height={height} fontSize={26} />
             )
           ) : null}
         </div>
