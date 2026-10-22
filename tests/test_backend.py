@@ -25,6 +25,12 @@ decky.DECKY_PLUGIN_SETTINGS_DIR = os.path.join(tmp, "settings")
 decky.DECKY_PLUGIN_RUNTIME_DIR = os.path.join(tmp, "runtime")
 decky.DECKY_PLUGIN_LOG_DIR = os.path.join(tmp, "logs")
 decky.DECKY_USER_HOME = tmp
+emitted = []
+
+
+async def _emit(event, *args):
+    emitted.append(event)
+decky.emit = _emit
 os.environ["DECKY_USER_HOME"] = tmp  # Decky also passes it to the plugin as an environment variable
 sys.modules["decky"] = decky
 logging.basicConfig(level=logging.INFO)
@@ -213,6 +219,13 @@ async def run():
                                    "index": 0, "position": 0})
         check(await plugin.load_session() is None, "a queue from another source isn't restored")
 
+        print("changes are announced")
+        emitted.clear()
+        await plugin.set_active_service(plugin.settings.get("active_service"))
+        await plugin.set_setting("volume", 0.5)
+        check(emitted == ["state_changed", "state_changed"],
+              "every loaded frontend hears about a source switch or a setting change")
+
         print("spotify mapping")
         from musicdeck.services.spotify import SpotifyService
         spot = SpotifyService("sp", {}, tmp)
@@ -341,9 +354,9 @@ async def run():
         rs = RadioService("rd", {"favourites": [{"id": "s1"}]}, tmp)
         station = rs._station({"stationuuid": "s1", "name": " Jazz FM ", "codec": "MP3", "bitrate": 128,
                                "country": "Germany", "tags": "jazz,smooth,lounge,extra", "favicon": ""})
-        check(station["live"] and station["title"] == "Jazz FM" and station["artist"] == "Germany · MP3 128 kbps"
+        check(station["live"] and station["title"] == "Jazz FM" and station["artist"] == "Germany"
               and station["album"] == "jazz, smooth, lounge" and station["starred"] and station["art"] is None,
-              "stations are live tracks with place, quality and genres")
+              "stations are live tracks with their place and genres")
         from musicdeck import models as md_models
         check("live" not in md_models.track("t", "Song"), "ordinary tracks carry no live flag")
 
@@ -382,6 +395,10 @@ async def run():
         check(parse_on_air("") is None and parse_on_air(" - ") is None, "nothing on air")
         check(parse_on_air("NY's #1 Hit Music Station - text=\"Z100\" song_spot=\"T\"") is None,
               "station idents and ads aren't songs")
+        check(parse_on_air('title="Super Bass",artist="NICKI MINAJ",url="song_spot="M" MediaBaseId="0"')["text"]
+              == "NICKI MINAJ – Super Bass", "title= and artist= tags")
+        check(parse_on_air('title="Z100 Preset 4",artist="",url="song_spot="F" MediaBaseId="0"') is None,
+              "a jingle behind an unclosed url= tag isn't a song")
         rs.stations["s3"] = (time.time(), {"stationuuid": "s3", "url_resolved": f"http://127.0.0.1:{icy_port}/stream?enc=latin1"})
         check((await rs.on_air("s3"))["artist"] == "Brüllová", "Latin-1 titles read as Latin-1")
         rs.stations["s2"] = (time.time(), {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})

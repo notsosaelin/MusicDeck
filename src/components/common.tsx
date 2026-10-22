@@ -74,7 +74,6 @@ export const Art: FC<{
 
 export const ellipsis: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
-/** Title + subtitle stacked, truncating instead of wrapping so rows stay one height. */
 /**
  * True while the focused element (Steam moves real DOM focus with the gamepad) is an ancestor of
  * this text, i.e. its row is selected. Listens on the document because the focused row element
@@ -103,49 +102,80 @@ function useRowFocused(ref: RefObject<HTMLElement | null>) {
   return focused;
 }
 
-/** Truncates normally; once its row has been focused for a moment, scrolls to reveal the rest. */
-const Scrolling: FC<{ focused: boolean; style: CSSProperties; children: ReactNode }> = ({
-  focused,
-  style,
-  children,
-}) =>
-  focused ? (
-    <Marquee play delay={1} speed={0.5} fadeLength={8} resetOnPause style={style}>
-      {children}
+/**
+ * One line of text. If it doesn't fit it ends in "…", and while `play` is on it scrolls (Steam's own
+ * marquee) to show the rest. Text that fits never moves.
+ */
+export const ScrollingText: FC<{ text: string; play: boolean; style?: CSSProperties }> = ({ text, play, style }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  // whether `text` overflows, measured on the plain line (a hidden menu has no width yet, so wait)
+  const [fit, setFit] = useState<{ text: string; overflows: boolean } | null>(null);
+  const scrolling = play && fit?.text === text && fit.overflows;
+  useEffect(() => {
+    const el = ref.current;
+    if (scrolling || !el) return;
+    const measure = () => {
+      if (!el.clientWidth) return;
+      const overflows = el.scrollWidth > el.clientWidth + 1;
+      setFit((f) => (f?.text === text && f.overflows === overflows ? f : { text, overflows }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, scrolling]);
+  return scrolling ? (
+    // speed is in pixels per second; 30 is Steam's own
+    <Marquee play delay={1} speed={30} fadeLength={8} resetOnPause style={style}>
+      {text}
     </Marquee>
   ) : (
-    <div style={{ ...ellipsis, ...style }}>{children}</div>
+    <div ref={ref} style={{ ...ellipsis, ...style }}>
+      {text}
+    </div>
   );
+};
 
-/** Title + subtitle stacked, truncating instead of wrapping so rows stay one height. */
-export const RowText: FC<{ title: ReactNode; subtitle?: ReactNode; active?: boolean; size?: "normal" | "large" }> = ({
-  title,
-  subtitle,
-  active,
-  size = "normal",
-}) => {
+/**
+ * Title + subtitle lines stacked, truncating instead of wrapping so rows stay one height. Text that
+ * doesn't fit scrolls while the row is focused, or all the time with `scroll="always"` (headers and
+ * the now-playing card, which aren't focused while you read them).
+ */
+export const RowText: FC<{
+  title: string;
+  /** one line, or several */
+  subtitle?: string | string[];
+  /** shown after the title, e.g. a favourite heart */
+  badge?: ReactNode;
+  active?: boolean;
+  size?: "normal" | "large";
+  scroll?: "focus" | "always";
+}> = ({ title, subtitle, badge, active, size = "normal", scroll = "focus" }) => {
   const ref = useRef<HTMLDivElement>(null);
   const focused = useRowFocused(ref);
+  const play = scroll === "always" || focused;
+  const lines = (Array.isArray(subtitle) ? subtitle : [subtitle]).filter((l): l is string => !!l);
   return (
     <div
       ref={ref}
       style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1, textAlign: "left", lineHeight: 1.25 }}
     >
-      <Scrolling
-        focused={focused}
-        style={{
-          fontSize: size === "large" ? 16 : 14,
-          fontWeight: size === "large" ? 600 : undefined,
-          color: active ? ACCENT : undefined,
-        }}
-      >
-        {title}
-      </Scrolling>
-      {subtitle ? (
-        <Scrolling focused={focused} style={{ fontSize: 12, opacity: 0.6 }}>
-          {subtitle}
-        </Scrolling>
-      ) : null}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+        <ScrollingText
+          text={title}
+          play={play}
+          style={{
+            fontSize: size === "large" ? 16 : 14,
+            fontWeight: size === "large" ? 600 : undefined,
+            color: active ? ACCENT : undefined,
+            minWidth: 0,
+          }}
+        />
+        {badge}
+      </div>
+      {lines.map((line, i) => (
+        <ScrollingText key={i} text={line} play={play} style={{ fontSize: 12, opacity: 0.6 }} />
+      ))}
     </div>
   );
 };
@@ -166,7 +196,7 @@ interface RowActions {
  * native Quick Access lists. Extra actions are bound to controller buttons and shown in the footer.
  */
 const ListRow: FC<
-  RowActions & { leading?: ReactNode; title: ReactNode; subtitle?: ReactNode; trailing?: ReactNode; active?: boolean }
+  RowActions & { leading?: ReactNode; title: string; subtitle?: string; trailing?: ReactNode; active?: boolean }
 > = ({
   leading,
   title,

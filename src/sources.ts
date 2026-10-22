@@ -1,26 +1,50 @@
+import { addEventListener, removeEventListener } from "@decky/api";
 import { removeService, setActiveService } from "./api";
 import { invalidateBrowserCache } from "./nav";
 import { player } from "./player";
 import { pluginState, refreshState } from "./store";
 
-/**
- * Changes the live source. One source plays at a time, so whatever came from the previous one stops
- * and the queue (and its saved session) is emptied: nothing from the old source stays playable.
- */
+/** Changes the live source; followSourceChanges resets playback and browsing. */
 export async function switchSource(instanceId: string) {
   if (pluginState.get()?.active_service === instanceId) return;
-  player.clear();
   await setActiveService(instanceId);
-  invalidateBrowserCache();
   await refreshState();
 }
 
-/** Removes a source; if it was live (or anything queued came from it), playback is cleared too. */
+/** Removes a source; followSourceChanges clears playback if anything playing came from it. */
 export async function deleteSource(instanceId: string) {
-  const wasActive = pluginState.get()?.active_service === instanceId;
-  const queued = player.state.get().queue.some((q) => q.instanceId === instanceId);
-  if (wasActive || queued) player.clear();
   await removeService(instanceId);
-  invalidateBrowserCache();
   await refreshState();
+}
+
+/**
+ * One source plays at a time, so when the live source changes, whatever came from the previous one
+ * stops, the queue (and its saved session) is emptied, and the library views start over; when a
+ * source is removed, nothing queued from it stays.
+ *
+ * This reacts to the state rather than living in switchSource because the change can come from
+ * another copy of the plugin: Decky can keep showing its plugin page from before a reload, and that
+ * page talks to its own (unloaded) copy. The backend announces every change ("state_changed"), so
+ * the copy that's playing reloads the state and follows. Returns the function that stops it.
+ */
+export function followSourceChanges(): () => void {
+  // undefined until the first state arrives: loading isn't a change (the saved session is restored)
+  let live: string | null | undefined = pluginState.get()?.active_service;
+  const unsubscribe = pluginState.subscribe(() => {
+    const state = pluginState.get();
+    if (!state) return;
+    const sources = new Set(state.services.map((s) => s.id));
+    const switched = live !== undefined && state.active_service !== live;
+    live = state.active_service;
+    if (switched || player.state.get().queue.some((q) => !sources.has(q.instanceId))) player.clear();
+    if (switched) invalidateBrowserCache();
+  });
+  const onChange = () => {
+    refreshState().catch(() => {});
+  };
+  addEventListener("state_changed", onChange);
+  return () => {
+    unsubscribe();
+    removeEventListener("state_changed", onChange);
+  };
 }

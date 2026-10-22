@@ -66,19 +66,23 @@ function useOnAir(item: QueueItem | undefined, playing: boolean): OnAir | null {
   return song;
 }
 
-/** In place of the seek bar for live streams: a "Live" marker and the song the station is playing. */
-const LiveBar: FC<{ song: OnAir | null }> = ({ song }) => (
+/** In place of the seek bar for live streams (what's on air shows next to the cover). */
+const LiveBar: FC = () => (
   <PanelSectionRow>
-    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "6px 0", minWidth: 0 }}>
-      <span style={{ color: "#ff5c5c", fontWeight: "bold", letterSpacing: 1, flexShrink: 0 }}>● LIVE</span>
-      {song && (
-        <span style={{ opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {song.text}
-        </span>
-      )}
-    </div>
+    <div style={{ fontSize: 12, padding: "6px 0", color: "#ff5c5c", fontWeight: "bold", letterSpacing: 1 }}>● LIVE</div>
   </PanelSectionRow>
 );
+
+/**
+ * The lines next to the cover. A station shows the song it's playing when it says (song, artist,
+ * station); otherwise the station, where it is and its genres, like any track's title/artist/album.
+ */
+function cardText(item: QueueItem | undefined, song: OnAir | null): { title: string; subtitle: string[] } {
+  if (!item) return { title: "Nothing playing", subtitle: ["Pick something from your library"] };
+  const { title, artist, album } = item.track;
+  if (song?.title) return { title: song.title, subtitle: [song.artist, title] };
+  return { title, subtitle: [artist, album] };
+}
 
 let volumeSaveTimer: number | undefined;
 
@@ -112,31 +116,14 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
             <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={72} />
             <RowText
               size="large"
-              title={
-                item ? (
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.track.title}</span>
-                    {item.track.starred && <FaHeart style={{ color: ACCENT, fontSize: 12, flexShrink: 0 }} />}
-                  </span>
-                ) : (
-                  "Nothing playing"
-                )
-              }
-              subtitle={
-                item ? (
-                  <>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.track.artist}</div>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.track.album}</div>
-                  </>
-                ) : (
-                  "Pick something from your library"
-                )
-              }
+              scroll="always"
+              {...cardText(item, song)}
+              badge={item?.track.starred && <FaHeart style={{ color: ACCENT, fontSize: 12, flexShrink: 0 }} />}
             />
           </div>
         </Field>
       </PanelSectionRow>
-      {item && (item.track.live ? <LiveBar song={song} /> : <Seek />)}
+      {item && (item.track.live ? <LiveBar /> : <Seek />)}
       <ButtonRow>
         <IconButton label="Shuffle" active={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
           <FaRandom />

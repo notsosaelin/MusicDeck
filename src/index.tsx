@@ -5,7 +5,7 @@ import * as api from "./api";
 import { MusicPanel } from "./components/MusicPanel";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify } from "./notify";
-import { switchSource } from "./sources";
+import { followSourceChanges, switchSource } from "./sources";
 import { navigation, panelTab } from "./nav";
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
@@ -43,6 +43,7 @@ export default definePlugin(() => {
     })
     .catch((e) => console.error("[MusicDeck] Failed to load state", e));
 
+  const stopFollowing = followSourceChanges();
   const unwatchGames = watchRunningGame();
   const unpatchQam = installQamPatch(
     <MusicPanel />,
@@ -84,6 +85,7 @@ export default definePlugin(() => {
     icon: <FaMusic />,
     onDismount() {
       unpatchQam?.();
+      stopFollowing();
       unwatchGames();
       setSleepTimer(null);
       player.destroy();

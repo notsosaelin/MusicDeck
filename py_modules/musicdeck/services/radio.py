@@ -30,6 +30,9 @@ STREAM_URL = re.compile(rb"StreamUrl='(.*?)';", re.S)
 # iHeart and other broadcast automation systems put tags in the title:
 #   Artist - text="Song" song_spot="M" amgArtworkURL="https://…" length="00:03:05" …
 TITLE_TAG = re.compile(r'(\w+)="([^"]*)"')
+# iHeart marks music "M"; the rest are station idents, ads and talk. Some streams send an unclosed
+# url=" just before it, so it's found on its own rather than as a tag.
+SONG_SPOT = re.compile(r'song_spot="?(\w)')
 IMAGE_URL = re.compile(r"^https?://\S+\.(?:jpe?g|png|webp)(?:\?\S*)?$", re.I)
 COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")  # ISO 3166-1 alpha-2; the settings dialog offers a list
 
@@ -41,9 +44,10 @@ def parse_on_air(title: str, stream_url: str = "") -> Optional[dict[str, Any]]:
     text= (or title=), the artist in artist= or before the first tag, and the cover in amgArtworkURL=.
     A few send the cover as StreamUrl instead. None when nothing (or no song) is on air.
     """
+    spot = SONG_SPOT.search(title)
+    if spot and spot.group(1).upper() != "M":
+        return None
     tags = {k.lower(): v.strip() for k, v in TITLE_TAG.findall(title)}
-    if tags.get("song_spot", "M").upper() != "M":
-        return None  # iHeart marks music "M"; the rest are station idents, ads and talk
     if tags:
         lead = TITLE_TAG.split(title, 1)[0].strip().rstrip("-–").strip()
         song = tags.get("text") or tags.get("title") or tags.get("song") or ""
@@ -145,11 +149,10 @@ class RadioService(MusicService):
     # --- mapping ---
 
     def _station(self, s: dict[str, Any]) -> dict[str, Any]:
-        quality = " ".join(x for x in [s.get("codec") or "", f"{s['bitrate']} kbps" if s.get("bitrate") else ""] if x)
         place = s.get("state") or s.get("country") or ""
         tags = ", ".join(t for t in (s.get("tags") or "").split(",")[:3] if t)
         uuid = s["stationuuid"]
-        return models.track(uuid, (s.get("name") or "").strip(), " · ".join(x for x in [place, quality] if x), tags,
+        return models.track(uuid, (s.get("name") or "").strip(), place, tags,
                             art=s.get("favicon") or None, starred=uuid in self._favourite_ids(), live=True)
 
     @staticmethod
@@ -178,7 +181,9 @@ class RadioService(MusicService):
                                            reverse=True)
         got = dict(zip(jobs, await asyncio.gather(*jobs.values(), return_exceptions=True)))
         sections = []
-        favourites = [{**f, "starred": True} for f in self.config.get("favourites") or []]
+        # favourites saved before stations dropped "MP3 128 kbps" from their subtitle keep only the place
+        favourites = [{**f, "artist": f.get("artist", "").split(" · ")[0], "starred": True}
+                      for f in self.config.get("favourites") or []]
         if favourites:
             sections.append(models.section("Your stations", [], favourites))
         if isinstance(got.get("local"), list) and got["local"]:

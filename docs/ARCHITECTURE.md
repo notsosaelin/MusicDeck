@@ -138,7 +138,7 @@ Details worth knowing:
 | `player.ts` | `Player`: queue, shuffle/repeat, the audio element and Web Audio graph, HLS, recovery, play reports, session persistence, radio extension. |
 | `qam.tsx` | Takes over the Quick Access Menu's Soundtracks tab (or adds a tab) by wrapping Decky's `__TABS_HOOK_INSTANCE.render`. |
 | `nav.ts` | Panel navigation (Library/Search stacks), kept outside React so it survives the QAM closing. |
-| `sources.ts` | Switching or deleting the live source (stops playback, clears the queue). |
+| `sources.ts` | Switching or deleting the live source; `followSourceChanges` stops playback and clears the queue whenever the live source changes, whoever changed it. |
 | `signIn.ts` | The browser sign-in flow shared by Qobuz, Spotify and TIDAL; `browseThenReturn` for opening a page and coming back. |
 | `sleep.ts` | Sleep timer. |
 | `steam.ts` | What only Steam's UI knows, for the Steam soundtracks source: owned soundtracks, their games and art, the running game. |
@@ -149,7 +149,7 @@ Details worth knowing:
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |
 | `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, ListenBrainz, troubleshooting. |
 | `components/ServiceModal.tsx` | Add/edit dialog for a source, with a fields component per source type. |
-| `components/common.tsx` | Shared rows, artwork, marquee text, dialog footer. |
+| `components/common.tsx` | Shared rows, artwork, dialog footer, and `ScrollingText`: a line that ends in "…" and scrolls (Steam's marquee) while its row is focused, or always in headers and the now-playing card. |
 
 ## Data model
 
@@ -289,6 +289,13 @@ itself: it holds a `PanelHost`, which draws whatever panel is in `window.__music
 registry every loaded copy shares. Each copy puts its panel there on load, so an old host switches to
 the new panel at once. The newest copy also owns the patching (`window.__musicdeckQamOwner`);
 wrappers left by older copies pass straight through.
+
+The Decky menu has the same problem the other way round: it keeps showing the plugin page from
+before a reload, and that page's buttons talk to the unloaded copy. So the backend emits
+`state_changed` after every change to sources or settings (`_announce_change` in `main.py`), and
+each copy reloads the state when it hears it. Resetting playback on a source switch happens in
+`followSourceChanges` (`sources.ts`), which watches the state, so it runs in the copy that's playing
+whichever page made the change.
 
 ## Constraints that shaped the code
 

@@ -148,8 +148,10 @@ source (`MusicService.remove`).
 - **Song on air**: `on_air()` opens the stream with `Icy-MetaData: 1`, reads one metadata block
   (`StreamTitle='…'`), and closes it. The Now Playing view polls every 20 seconds. `parse_on_air()`
   splits "Artist - Title", and also reads the tagged titles of iHeart and other broadcast systems
-  (`Artist - text="Song" song_spot="M" amgArtworkURL="…"`), whose cover then replaces the station
-  logo while the song plays. An image link in `StreamUrl` counts as a cover too.
+  (`Artist - text="Song" song_spot="M" amgArtworkURL="…"`, or `title="…",artist="…"`); anything
+  not marked as music (`song_spot` other than "M": idents, ads, talk) is skipped. The now-playing
+  card then shows song, artist and station next to the song's cover (an image link in `StreamUrl`
+  counts too) instead of the station's logo, place and genres.
 - **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse
   requests without a user agent, so `art()` sends MusicDeck's.
 - **Favourites**: stored in this source's config (`favourites`) via `save_config`.

@@ -27,7 +27,7 @@ import { useStore } from "../store";
 import { ROOTS, StackName, dataVersion, navigation, pushView, resultCache, setStack } from "../nav";
 import { notify } from "../notify";
 import { MenuContext, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
-import { Art, ButtonRow, CollectionRow, IconButton, Message, RowText, TrackRow, ellipsis } from "./common";
+import { Art, ButtonRow, CollectionRow, IconButton, Message, RowText, ScrollingText, TrackRow } from "./common";
 
 function useResult<T>(key: string, load: () => Promise<Result<T>>): Result<T> | null {
   const [result, setResult] = useState<Result<T> | null>(() => resultCache.get(key) ?? null);
@@ -275,7 +275,7 @@ const Header: FC<{
     <PanelSectionRow>
       <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "4px 0 8px" }}>
         {art !== undefined && <Art instanceId={instanceId} art={art} size={56} />}
-        <RowText size="large" title={title} subtitle={subtitle} />
+        <RowText size="large" scroll="always" title={title} subtitle={subtitle} />
       </div>
     </PanelSectionRow>
     {children}
@@ -394,7 +394,7 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
         </PanelSectionRow>
         {query && (
           <PanelSectionRow>
-            <div style={{ ...ellipsis, fontSize: 12, opacity: 0.6, paddingTop: 6 }}>Results for “{query}”</div>
+            <ScrollingText play text={`Results for “${query}”`} style={{ fontSize: 12, opacity: 0.6, paddingTop: 6 }} />
           </PanelSectionRow>
         )}
       </PanelSection>

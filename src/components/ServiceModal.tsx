@@ -14,7 +14,7 @@ import {
 import { browseThenReturn, readClipboard, signIn } from "../signIn";
 import { FC, useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
-import { DialogActions, countryName } from "./common";
+import { DialogActions, ScrollingText, countryName } from "./common";
 import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart, saveService, testService } from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
@@ -59,16 +59,7 @@ const LocalFields: FC<{
           }}
           flow-children="row"
         >
-          <div
-            style={{
-              flex: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {p}
-          </div>
+          <ScrollingText play text={p} style={{ flex: 1, minWidth: 0 }} />
           <DialogButton
             style={{ minWidth: 0, width: 40, padding: "6px 0" }}
             onClick={() =>

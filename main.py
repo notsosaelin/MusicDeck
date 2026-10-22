@@ -50,6 +50,13 @@ def _when_ready(method):
     return wrapper
 
 
+async def _announce_change() -> None:
+    """Tells every loaded copy of the frontend to reload the state (see sources.ts). Decky can keep
+    showing a plugin page from before a reload, and changes made there must still reach the copy
+    that's playing."""
+    await decky.emit("state_changed")
+
+
 class Plugin:
     """MusicDeck's backend. Decky calls _main/_unload; every other public method is an endpoint the
     frontend calls through `callable()` (typed in src/api.ts).
@@ -174,6 +181,7 @@ class Plugin:
         self.settings.set(key, value)
         if key == "debug_log":
             debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(value))
+        await _announce_change()
 
     @_when_ready
     async def save_service(self, service: dict[str, Any]) -> dict[str, Any]:
@@ -197,6 +205,7 @@ class Plugin:
                 "config": config,
             })
             await self._start_instance(saved)
+            await _announce_change()
             return self._public_service(saved)
         return await _result(work())
 
@@ -209,11 +218,13 @@ class Plugin:
         decky.logger.info(f"Removed source {instance_id} ({getattr(instance, 'type', '?')})")
         self.settings.remove_service(instance_id)
         self.playlists.delete_for_instance(instance_id)
+        await _announce_change()
 
     @_when_ready
     async def set_active_service(self, instance_id: str) -> None:
         if self.settings.find_service(instance_id):
             self.settings.set("active_service", instance_id)
+            await _announce_change()
 
     @_when_ready
     async def test_service(self, instance_id: str) -> dict[str, Any]:
