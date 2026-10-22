@@ -124,6 +124,16 @@ export interface PluginState {
   planned_types: ServiceType[];
   /** linked ListenBrainz account ("" when not linked) and listens waiting to be sent */
   listenbrainz: { user: string; pending: number };
+  game_music: GameMusic[];
+}
+
+/** An album or playlist that plays when a game starts (for one source, while it's live). */
+export interface GameMusic {
+  instance_id: string;
+  appid: number;
+  /** the game's name when it was set */
+  game: string;
+  collection: Collection;
 }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -202,5 +212,9 @@ export interface OnAir {
   artist: string;
   art: string | null;
 }
+export const setGameMusic = callable<
+  [id: string, appid: number, game: string, collection: Collection | null],
+  Result<GameMusic[]>
+>("set_game_music");
 export const onAir = callable<[id: string, trackId: string], Result<OnAir | null>>("on_air");
 export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");

@@ -9,7 +9,7 @@ import {
   TextField,
 } from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useState } from "react";
-import { FaDownload, FaExternalLinkAlt, FaPlay, FaPlus, FaRandom, FaSearch } from "react-icons/fa";
+import { FaDownload, FaExternalLinkAlt, FaGamepad, FaPlay, FaPlus, FaRandom, FaSearch } from "react-icons/fa";
 import {
   Collection,
   CollectionKind,
@@ -22,8 +22,9 @@ import {
   openCollection,
   search,
 } from "../api";
+import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
 import { hasFeature, player } from "../player";
-import { useStore } from "../store";
+import { pluginState, useStore } from "../store";
 import { ROOTS, StackName, dataVersion, navigation, pushView, resultCache, setStack } from "../nav";
 import { notify } from "../notify";
 import { MenuContext, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
@@ -82,7 +83,8 @@ const trackActions = (instanceId: string, track: Track, ctx: MenuContext = {}) =
 /** Remote playlists/albums can be saved as MusicDeck playlists when the source has no playlists of its own. */
 const canSave = (instanceId: string, c: Collection) =>
   (c.kind === "playlist" || c.kind === "album") && !isLocalPlaylist(c.id) && !hasFeature(instanceId, "playlists");
-const hasCollectionMenu = (instanceId: string, c: Collection) => isLocalPlaylist(c.id) || canSave(instanceId, c);
+const hasCollectionMenu = (instanceId: string, c: Collection) =>
+  isLocalPlaylist(c.id) || canSave(instanceId, c) || (!!runningGame.get() && canPlayWithGame(c));
 
 const CollectionList: FC<{
   instanceId: string;
@@ -92,6 +94,7 @@ const CollectionList: FC<{
   limit?: number;
 }> = ({ instanceId, stack, title, items, limit = 5 }) => {
   const [expanded, setExpanded] = useState(false);
+  useStore(runningGame); // rows get a menu (play with the game) while one runs
   const shown = expanded ? items : items.slice(0, limit);
   return (
     <PanelSection title={title}>
@@ -301,6 +304,9 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
     openCollection(instanceId, collection.kind, collection.id),
   );
   const page = result?.ok ? result.data : null;
+  const game = useStore(runningGame);
+  useStore(pluginState); // the game music choices
+  const withGame = !!game && musicFor(game.appid, instanceId)?.collection.id === collection.id;
   return (
     <>
       <Header
@@ -324,6 +330,16 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
                 onClick={() => saveCollection(instanceId, collection)}
               >
                 <FaPlus />
+              </IconButton>
+            )}
+            {game && canPlayWithGame(collection) && (
+              <IconButton
+                label={withGame ? `Don't play with ${game.name}` : `Play when ${game.name} starts`}
+                active={withGame}
+                grow={0.45}
+                onClick={() => toggleGameMusic(instanceId, collection)}
+              >
+                <FaGamepad />
               </IconButton>
             )}
           </ButtonRow>

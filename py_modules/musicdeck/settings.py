@@ -18,6 +18,9 @@ DEFAULTS: dict[str, Any] = {
     "playback": {"levelling": "track", "scrobble": True, "queue_sync": True, "resume": True, "autoplay": True},
     # ListenBrainz scrobbling for every source; the token never goes to the frontend
     "listenbrainz": {"token": "", "user": ""},
+    # music that starts with a game: [{"instance_id", "appid", "game", "collection": {id, kind, title, art}}],
+    # one per source and game (it only plays while its source is live)
+    "game_music": [],
 }
 
 

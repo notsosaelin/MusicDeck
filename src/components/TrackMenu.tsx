@@ -20,6 +20,7 @@ import {
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
 import { notify } from "../notify";
 import { SleepChoice, setSleepTimer, sleepTimerLabel } from "../sleep";
+import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
 import { hasFeature, player } from "../player";
 import { pluginState } from "../store";
 import { NameModal } from "./NameModal";
@@ -252,12 +253,25 @@ export async function saveCollection(instanceId: string, c: Collection) {
   notify("Saved to your playlists", c.title);
 }
 
-/** Options for a collection row: save remote playlists, or manage MusicDeck playlists. */
+/** "Play when <game> starts" while a game runs (album and playlist rows). */
+function gameMusicItem(instanceId: string, c: Collection) {
+  const game = runningGame.get();
+  if (!game || !canPlayWithGame(c)) return null;
+  const on = musicFor(game.appid, instanceId)?.collection.id === c.id;
+  return (
+    <MenuItem onSelected={() => toggleGameMusic(instanceId, c)}>
+      {on ? `Don't play with ${game.name}` : `Play when ${game.name} starts`}
+    </MenuItem>
+  );
+}
+
+/** Options for a collection row: save remote playlists, manage MusicDeck playlists, play with a game. */
 export function showCollectionMenu(instanceId: string, c: Collection, parent?: EventTarget | null) {
   const target = parent ?? window;
   if (isLocalPlaylist(c.id)) {
     showContextMenu(
       <Menu label={c.title}>
+        {gameMusicItem(instanceId, c)}
         <MenuItem
           onSelected={() =>
             showModal(
@@ -318,7 +332,10 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
   if (c.kind === "playlist" || c.kind === "album") {
     showContextMenu(
       <Menu label={c.title}>
-        <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
+        {gameMusicItem(instanceId, c)}
+        {!hasFeature(instanceId, "playlists") && (
+          <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
+        )}
       </Menu>,
       target,
     );

@@ -59,7 +59,7 @@ source (`MusicService.remove`).
   `0x2000`) from `collectionStore`, their game (`optional_parent_app_id`), Steam's album art
   (`appStore.GetAlbumCoverURLsForApp`) and the running game (`SteamUIStore.MainRunningAppID`), and
   sends them to `Plugin.steam_library` at start-up, when a source is saved, and whenever a game
-  starts or stops (`GameSessions.RegisterForAppLifetimeNotifications`). The backend keeps the last
+  starts or stops (`src/games.ts`). The backend keeps the last
   copy in `steam-<id>-owned.json`. Cover URLs are only fetched from Steam's image hosts.
 - **Home**: "From <game>" (the running game's soundtracks), "Recently installed", "Installed",
   Library (favourites, composers, all tracks), then "Not installed".

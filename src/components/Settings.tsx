@@ -22,6 +22,7 @@ import {
   FaCompactDisc,
   FaEllipsisH,
   FaFolderOpen,
+  FaGamepad,
   FaPlus,
   FaServer,
   FaSoundcloud,
@@ -30,7 +31,18 @@ import {
   FaYoutube,
 } from "react-icons/fa";
 import { SiJellyfin, SiTidal } from "react-icons/si";
-import { PlaybackSettings, ServiceInfo, rescan, setListenBrainz, setSetting, testService, youtubeUpdate } from "../api";
+import {
+  GameMusic,
+  PlaybackSettings,
+  PluginState,
+  ServiceInfo,
+  rescan,
+  setGameMusic,
+  setListenBrainz,
+  setSetting,
+  testService,
+  youtubeUpdate,
+} from "../api";
 import { notify } from "../notify";
 import { deleteSource, switchSource } from "../sources";
 import { player } from "../player";
@@ -157,6 +169,57 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
 };
 
 const LISTENBRAINZ_TOKEN_PAGE = "https://listenbrainz.org/settings/";
+
+/** The music set to play with games, from every source; each can be removed here. */
+const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
+  const entries = [...state.game_music].sort((a, b) => a.game.localeCompare(b.game));
+  if (!entries.length) {
+    return (
+      <PanelSectionRow>
+        <div style={{ fontSize: 12, opacity: 0.6, padding: "8px 0", lineHeight: 1.4 }}>
+          While a game is running, open an album or playlist in MusicDeck and press <FaGamepad /> to play it whenever
+          that game starts.
+        </div>
+      </PanelSectionRow>
+    );
+  }
+  const remove = async (m: GameMusic) => {
+    const result = await setGameMusic(m.instance_id, m.appid, m.game, null);
+    if (!result.ok) return notify("Game music", result.error);
+    await refreshState();
+  };
+  return (
+    <>
+      {entries.map((m) => {
+        const source = state.services.find((s) => s.id === m.instance_id)?.name ?? "";
+        const live = m.instance_id === state.active_service;
+        const open = (e: any) =>
+          showContextMenu(
+            <Menu label={m.game}>
+              <MenuItem tone="destructive" onSelected={() => remove(m)}>
+                Don't play with {m.game}
+              </MenuItem>
+            </Menu>,
+            e?.currentTarget ?? window,
+          );
+        return (
+          <PanelSectionRow key={`${m.instance_id}:${m.appid}`}>
+            <Field
+              focusable
+              highlightOnFocus
+              label={m.game}
+              description={`${m.collection.title} · ${source}${live ? "" : " (when it's the live source)"}`}
+              onActivate={open}
+              onClick={open}
+            >
+              <FaEllipsisH style={{ opacity: 0.6 }} />
+            </Field>
+          </PanelSectionRow>
+        );
+      })}
+    </>
+  );
+};
 
 /** Link ListenBrainz with a user token, or show the linked account. Plays from every source go there. */
 const ListenBrainzRows: FC<{ user: string; pending: number }> = ({ user, pending }) => {
@@ -285,6 +348,10 @@ export const Settings: FC = () => {
         {state.services.map((s) => (
           <ServiceRow key={s.id} service={s} typeName={typeName(s.type)} active={s.id === state.active_service} />
         ))}
+      </PanelSection>
+
+      <PanelSection title="Game music">
+        <GameMusicRows state={state} />
       </PanelSection>
 
       <PanelSection title="Add a source">

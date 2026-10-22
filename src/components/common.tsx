@@ -125,10 +125,13 @@ export const ScrollingText: FC<{ text: string; play: boolean; style?: CSSPropert
     return () => observer.disconnect();
   }, [text, scrolling]);
   return scrolling ? (
-    // speed is in pixels per second; 30 is Steam's own
-    <Marquee play delay={1} speed={30} fadeLength={8} resetOnPause style={style}>
-      {text}
-    </Marquee>
+    // Marquee puts `style` on its inner element; this outer box is what keeps it inside a row
+    <div style={{ minWidth: 0, flex: "0 1 auto", overflow: "hidden" }}>
+      {/* speed is in pixels per second; 30 is Steam's own */}
+      <Marquee play delay={1} speed={30} fadeLength={8} resetOnPause style={style}>
+        {text}
+      </Marquee>
+    </div>
   ) : (
     <div ref={ref} style={{ ...ellipsis, ...style }}>
       {text}

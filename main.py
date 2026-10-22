@@ -24,6 +24,8 @@ from musicdeck.settings import DEFAULTS, Settings
 SECRET_KEYS = {"password", "token", "refresh_token", "salt", "secret", "cookies", "auth"}
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
 FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log"}
+# What can be set to play with a game: things with a track list of their own
+GAME_MUSIC_KINDS = {"album", "playlist"}
 # The same play report for the same track within this many seconds is a duplicate (see scrobble)
 SCROBBLE_DEDUPE = 90
 
@@ -172,6 +174,7 @@ class Plugin:
             "planned_types": PLANNED_TYPES,
             "listenbrainz": {"user": self.settings.get("listenbrainz").get("user", ""),
                              "pending": self.listenbrainz.pending_count()},
+            "game_music": self.settings.get("game_music"),
         }
 
     @_when_ready
@@ -221,6 +224,7 @@ class Plugin:
         decky.logger.info(f"Removed source {instance_id} ({getattr(instance, 'type', '?')})")
         self.settings.remove_service(instance_id)
         self.playlists.delete_for_instance(instance_id)
+        self._forget_game_music(lambda m: m["instance_id"] == instance_id)
         await _announce_change()
 
     @_when_ready
@@ -545,6 +549,41 @@ class Plugin:
     @_when_ready
     async def playlist_delete(self, playlist_id: str) -> None:
         self.playlists.delete(playlist_id)
+        if self._forget_game_music(lambda m: m["collection"]["id"] == playlist_id):
+            await _announce_change()
+
+    # --- music that starts with a game (src/games.ts plays it) ---
+
+    @_when_ready
+    async def set_game_music(self, instance_id: str, appid: int, game: str,
+                             collection: Optional[dict[str, Any]]) -> dict[str, Any]:
+        """Sets the album or playlist that plays when a game starts, for one source; None removes it."""
+        async def work():
+            if not self.settings.find_service(instance_id):
+                raise ServiceError("That source is no longer configured")
+            if not isinstance(appid, int) or isinstance(appid, bool) or appid <= 0:
+                raise ServiceError("That isn't a game")
+            entries = [m for m in self.settings.get("game_music")
+                       if not (m["instance_id"] == instance_id and m["appid"] == appid)]
+            if collection is not None:
+                if not isinstance(collection, dict) or collection.get("kind") not in GAME_MUSIC_KINDS \
+                        or not collection.get("id"):
+                    raise ServiceError("Only an album or a playlist can play with a game")
+                keep = ("id", "kind", "title", "subtitle", "art")
+                entries.append({"instance_id": instance_id, "appid": appid, "game": str(game or appid),
+                                "collection": {k: collection.get(k) for k in keep}})
+            self.settings.set("game_music", entries)
+            await _announce_change()
+            return entries
+        return await _result(work())
+
+    def _forget_game_music(self, gone) -> bool:
+        """Drops game music whose source or playlist went away; True if any did."""
+        entries = self.settings.get("game_music")
+        kept = [m for m in entries if not gone(m)]
+        if len(kept) != len(entries):
+            self.settings.set("game_music", kept)
+        return len(kept) != len(entries)
 
 
 def _clean_session(session: Any) -> dict[str, Any]:

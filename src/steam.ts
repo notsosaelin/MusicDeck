@@ -48,18 +48,9 @@ export async function syncSteam() {
   await Promise.all(sources.map((s) => steamLibrary(s.id, owned, running)));
 }
 
-/**
- * Keeps the running game current: its soundtrack leads the home view while it's played. Returns
- * the unregister function.
- */
-export function watchRunningGame(): () => void {
-  const registration = window.SteamClient?.GameSessions?.RegisterForAppLifetimeNotifications?.(() => {
-    // the store updates just after the notification
-    setTimeout(async () => {
-      await syncSteam();
-      const active = pluginState.get()?.active_service;
-      if (steamSources().some((s) => s.id === active)) invalidateBrowserCache();
-    }, 1000);
-  });
-  return () => registration?.unregister();
+/** After a game starts or stops: resends it, and refreshes the library if the Steam source is live. */
+export async function refreshRunningGame() {
+  await syncSteam();
+  const active = pluginState.get()?.active_service;
+  if (steamSources().some((s) => s.id === active)) invalidateBrowserCache();
 }

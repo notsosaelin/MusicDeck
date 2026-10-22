@@ -685,6 +685,38 @@ async def run():
         await plugin.log_events([{"t": 1, "event": "audio pause", "data": {"at": 12.5, "event": "x", "source": "y"}}])
         check(True, "events with their own at/event/source fields are accepted")
 
+        print("game music")
+        mix = await plugin.create_playlist(sid, "Boss fights", [])
+        album = {"id": album_one["id"], "kind": "album", "title": "Album One", "art": None, "extra": "dropped"}
+        emitted.clear()
+        r = await plugin.set_game_music(sid, 1245620, "ELDEN RING", album)
+        check(r["ok"] and r["data"] == [{"instance_id": sid, "appid": 1245620, "game": "ELDEN RING",
+                                         "collection": {"id": album_one["id"], "kind": "album", "title": "Album One",
+                                                        "subtitle": None, "art": None}}]
+              and emitted == ["state_changed"], "an album set to play with a game, announced")
+        await plugin.set_game_music(sid, 1245620, "ELDEN RING", mix)
+        await plugin.set_game_music(sid, 570, "Dota 2", album)
+        music = (await plugin.get_state())["game_music"]
+        check(sorted((m["appid"], m["collection"]["title"]) for m in music) == [(570, "Album One"), (1245620, "Boss fights")],
+              "one choice per game: a new one replaces the old")
+        for bad in [(gone, 570, "x", album), (sid, 0, "x", album), (sid, "570", "x", album), (sid, True, "x", album),
+                    (sid, 570, "x", {"id": "a", "kind": "artist"}), (sid, 570, "x", {"kind": "album"}),
+                    (sid, 570, "x", "album")]:
+            check(not (await plugin.set_game_music(*bad))["ok"], f"refused: {str(bad[1:])[:50]}")
+        await plugin.playlist_delete(mix["id"])
+        check([m["appid"] for m in (await plugin.get_state())["game_music"]] == [570],
+              "deleting a playlist drops the game music it was")
+        r = await plugin.set_game_music(sid, 570, "Dota 2", None)
+        check(r["ok"] and r["data"] == [], "None removes a game's music")
+        other = await plugin.save_service({"type": "radio", "name": "Other", "config": {}})
+        await plugin.set_game_music(other["data"]["id"], 570, "Dota 2", {"id": "tag:pop", "kind": "playlist", "title": "Pop"})
+        await plugin.set_game_music(sid, 570, "Dota 2", album)
+        check(len((await plugin.get_state())["game_music"]) == 2, "each source keeps its own choice for a game")
+        await plugin.remove_service(other["data"]["id"])
+        check([m["instance_id"] for m in (await plugin.get_state())["game_music"]] == [sid],
+              "removing a source drops its game music")
+        await plugin.set_game_music(sid, 570, "Dota 2", None)
+
         print("abuse: nothing a confused user (or a stale UI) does may crash an endpoint")
         failures = []
 

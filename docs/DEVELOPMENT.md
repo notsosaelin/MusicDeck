@@ -117,6 +117,8 @@ m.sourceDialog("tidal")                   // open a source's add dialog (or pass
 m.nameDialog()                            // the playlist name prompt
 m.setSleepTimer(0.25)                     // a 15-second sleep timer
 m.syncSteam()                             // resend owned soundtracks and the running game
+m.games.reconcile([2149420])              // pretend a game started (by app id); reconcile([]) stops it
+m.games.runningGame.set({ appid, name })  // show the "play with this game" buttons without a game
 m.navigation / m.panelTab                 // the QAM panel's navigation state
 ```
 

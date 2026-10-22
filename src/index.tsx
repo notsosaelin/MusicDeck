@@ -12,7 +12,8 @@ import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
 import { player } from "./player";
 import { setSleepTimer, sleepTimer } from "./sleep";
-import { syncSteam, watchRunningGame } from "./steam";
+import { syncSteam } from "./steam";
+import { reconcile, runningGame, toggleGameMusic, watchGames } from "./games";
 import { installQamPatch } from "./qam";
 import { pluginState, refreshState } from "./store";
 
@@ -44,7 +45,7 @@ export default definePlugin(() => {
     .catch((e) => console.error("[MusicDeck] Failed to load state", e));
 
   const stopFollowing = followSourceChanges();
-  const unwatchGames = watchRunningGame();
+  const unwatchGames = watchGames();
   const unpatchQam = installQamPatch(
     <MusicPanel />,
     // Native tabs pass a pre-styled element; a bare string renders unstyled
@@ -66,6 +67,8 @@ export default definePlugin(() => {
     setSleepTimer,
     sleepTimer,
     syncSteam,
+    // pretend which games are running, e.g. games.reconcile([570]) then games.reconcile([])
+    games: { reconcile, runningGame, toggle: toggleGameMusic },
     // open dialogs for on-device layout checks: a source's edit dialog, or the add dialog for a type
     sourceDialog: (idOrType: string) => {
       const state = pluginState.get();

@@ -182,6 +182,11 @@ export class Player {
     this.ctx?.close();
   }
 
+  /** Changes whenever the queue is replaced or cleared (see queueGeneration). */
+  get queueId(): number {
+    return this.queueGeneration;
+  }
+
   get current(): QueueItem | undefined {
     const { queue, index } = this.state.get();
     return queue[index];
