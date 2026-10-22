@@ -199,6 +199,7 @@ DESCRIPTION = """<?xml version="1.0"?>
 <UDN>uuid:1234</UDN><serviceList>
 <service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>/av</controlURL></service>
 <service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><controlURL>/rc</controlURL></service>
+<service><serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType><controlURL>/cm</controlURL></service>
 </serviceList></device></root>"""
 
 
@@ -213,6 +214,7 @@ class FakeRenderer:
         app.router.add_get("/evil.xml", lambda r: web.Response(text='<!DOCTYPE x [<!ENTITY a "b">]><root/>'))
         app.router.add_post("/av", self.control)
         app.router.add_post("/rc", self.control)
+        app.router.add_post("/cm", self.control)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
         site = web.TCPSite(self.runner, "127.0.0.1", 0)
@@ -236,6 +238,9 @@ class FakeRenderer:
             out = "<RelTime>0:01:05</RelTime><TrackDuration>0:03:20</TrackDuration>"
         elif action == "GetVolume":
             out = "<CurrentVolume>35</CurrentVolume>"
+        elif action == "GetProtocolInfo":
+            out = ("<Source></Source><Sink>http-get:*:audio/mpeg:*,http-get:*:audio/x-flac:*,"
+                   "http-get:*:audio/mp4:DLNA.ORG_PN=AAC_ISO</Sink>")
         return web.Response(text=f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
                                  f'<u:{action}Response xmlns:u="x">{out}</u:{action}Response></s:Body></s:Envelope>',
                             content_type="text/xml")
@@ -265,7 +270,16 @@ async def upnp_tests(http):
     renderer = upnp.Renderer(device, http, statuses.append, gone.append)
     await renderer.connect()
     check(renderer.volume == 0.35, "connecting reads the volume")
+    check(renderer.formats == {"audio/mpeg", "audio/x-flac", "audio/mp4"}, "and the formats the renderer plays")
+    check(renderer.name_for("audio/flac") == "audio/x-flac" and renderer.name_for("audio/x-m4a") == "audio/mp4"
+          and renderer.name_for("audio/mpeg") == "audio/mpeg",
+          "a format goes by the name the renderer lists (Samsung's TVs know FLAC only as audio/x-flac)")
+    await renderer.load("http://deck/c/x", "audio/flac", {"title": "T"}, 0, True, False)
+    check(not fake.of("Stop"), "nothing is stopped before loading when nothing was playing")
+    check("audio/x-flac" in fake.of("SetAVTransportURI")[0], "the renderer's name for the format is sent")
+    fake.calls.clear()
     await renderer.load("http://deck/c/x", "audio/mpeg", {"title": "T"}, 0, True, False)
+    check(fake.of("Stop"), "a playing track is stopped before the next one loads")
     set_uri = fake.of("SetAVTransportURI")[0]
     check("<CurrentURI>http://deck/c/x</CurrentURI>" in set_uri and "&lt;DIDL-Lite" in set_uri,
           "the link and its metadata (escaped once more inside SOAP) are sent")

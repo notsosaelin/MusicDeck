@@ -6,6 +6,13 @@ import { dlog } from "./log";
 const TICK_MS = 500;
 /** Volume changes are sent at most this often (the sleep timer fades in steps of 100 ms). */
 const VOLUME_EVERY_MS = 250;
+/**
+ * How long reports that disagree with what we just asked for are put down to the device not having
+ * caught up yet. UPnP renderers are polled and slow to act (a Samsung TV takes seconds to pause or
+ * seek), so for a while they keep reporting the old state; taking that as the device's own controls
+ * undid the pause, or jumped the seek bar back.
+ */
+const CATCH_UP_MS = 6000;
 
 type DeviceState = NonNullable<CastStatus["state"]>;
 
@@ -42,6 +49,8 @@ export class RemoteAudio extends EventTarget {
   private generation = 0;
   /** A load is on its way to the device; its reports so far are about the previous track */
   private loading = false;
+  /** What we last asked the device for, until it reports it (or CATCH_UP_MS passes) */
+  private expected?: { playing?: boolean; position?: number; until: number };
 
   get currentTime(): number {
     if (this.state !== "playing" || this.paused) return this.base;
@@ -51,7 +60,10 @@ export class RemoteAudio extends EventTarget {
 
   set currentTime(seconds: number) {
     this.moveTo(seconds);
-    if (this.item && !this.loading) this.send("seek", seconds);
+    if (this.item && !this.loading) {
+      this.expect({ position: this.base });
+      this.send("seek", seconds);
+    }
     this.fire("timeupdate");
   }
 
@@ -85,6 +97,7 @@ export class RemoteAudio extends EventTarget {
     this.readyState = 0;
     this.duration = item.track.duration || NaN;
     this.loading = true;
+    this.expected = undefined;
     this.state = "idle";
     this.moveTo(startAt);
     this.paused = !autoplay;
@@ -109,7 +122,16 @@ export class RemoteAudio extends EventTarget {
       if (!this.loading) {
         // a track that played to its end starts again, as an element does
         if (this.ended) this.open(this.item, 0, true);
-        else this.send("play");
+        else {
+          this.expect({ playing: true });
+          this.send("play");
+          // shown as playing at once: a slow device's Play button otherwise looks unpressed, and the
+          // second press pauses (if it never starts, its reports say so once the wait is over)
+          this.moveTo(this.base);
+          this.state = "playing";
+          this.fire("playing");
+          this.startTicking();
+        }
       }
     }
     return Promise.resolve();
@@ -119,7 +141,10 @@ export class RemoteAudio extends EventTarget {
     if (this.paused) return;
     this.base = this.currentTime;
     this.paused = true;
-    if (this.item) this.send("pause");
+    if (this.item) {
+      this.expect({ playing: false });
+      this.send("pause");
+    }
     this.fire("pause");
   }
 
@@ -147,6 +172,7 @@ export class RemoteAudio extends EventTarget {
     this.paused = true;
     this.ended = false;
     this.loading = false;
+    this.expected = undefined;
     this.state = "idle";
     this.base = 0;
     this.duration = NaN;
@@ -162,6 +188,8 @@ export class RemoteAudio extends EventTarget {
     // the device is still reporting on the track before; a fresh LOAD answers with the new one
     if (this.loading && status.state === "idle" && !status.error) return;
     this.loading = false;
+    status = this.caughtUp(status);
+    if (!status.state) return;
     if (typeof status.duration === "number" && status.duration !== this.duration) {
       this.duration = status.duration;
       this.fire("durationchange");
@@ -191,6 +219,34 @@ export class RemoteAudio extends EventTarget {
     }
     this.fire("timeupdate");
     if (status.ended) this.finish();
+  }
+
+  private expect(what: { playing?: boolean; position?: number }) {
+    this.expected = { ...this.expected, ...what, until: Date.now() + CATCH_UP_MS };
+  }
+
+  /**
+   * A report with what the device hasn't caught up on yet left out: a state other than the one we
+   * asked for (`state` dropped: nothing to act on), a position far from where we sought.
+   */
+  private caughtUp(status: CastStatus): CastStatus {
+    const expected = this.expected;
+    if (!expected || Date.now() > expected.until || status.ended || status.error) {
+      this.expected = undefined;
+      return status;
+    }
+    const result = { ...status };
+    if (expected.playing !== undefined) {
+      const playing = status.state === "playing" || status.state === "buffering";
+      if (playing === expected.playing && status.state !== "idle") expected.playing = undefined;
+      else result.state = undefined;
+    }
+    if (expected.position !== undefined && typeof status.position === "number") {
+      if (Math.abs(status.position - expected.position) < 3) expected.position = undefined;
+      else result.position = undefined;
+    }
+    if (expected.playing === undefined && expected.position === undefined) this.expected = undefined;
+    return result;
   }
 
   private finish() {

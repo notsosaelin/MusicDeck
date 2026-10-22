@@ -20,6 +20,12 @@ SSDP = ("239.255.255.250", 1900)
 RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 AV_TRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
 RENDERING = "urn:schemas-upnp-org:service:RenderingControl:1"
+CONNECTION = "urn:schemas-upnp-org:service:ConnectionManager:1"
+# one format, several names: renderers list one of them and can be slow (or refuse) with another
+ALIASES = [{"audio/flac", "audio/x-flac"}, {"audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aac"},
+           {"audio/wav", "audio/x-wav", "audio/wave"}, {"audio/mpeg", "audio/mp3"}, {"audio/ogg", "application/ogg"}]
+# states in which there's nothing to stop before loading the next track
+IDLE_STATES = {"STOPPED", "NO_MEDIA_PRESENT", ""}
 MAX_XML = 256 * 1024  # a device description or SOAP reply is a few KiB
 POLL_EVERY = 1.0
 # DLNA flags: byte-range seeking, streaming transfer; renderers like Samsung's refuse media without them
@@ -129,7 +135,7 @@ async def describe(session: aiohttp.ClientSession, location: str, answered_from:
         if _local(service.tag) != "service":
             continue
         fields = {_local(e.tag): (e.text or "").strip() for e in service}
-        if fields.get("serviceType") in (AV_TRANSPORT, RENDERING) and fields.get("controlURL"):
+        if fields.get("serviceType") in (AV_TRANSPORT, RENDERING, CONNECTION) and fields.get("controlURL"):
             url = urljoin(location, fields["controlURL"])
             if urlparse(url).hostname == answered_from:
                 controls[fields["serviceType"]] = url
@@ -142,6 +148,7 @@ async def describe(session: aiohttp.ClientSession, location: str, answered_from:
         "host": answered_from,
         "transport": controls[AV_TRANSPORT],
         "rendering": controls.get(RENDERING),
+        "connection": controls.get(CONNECTION),
     }
 
 
@@ -199,9 +206,18 @@ class Renderer:
         self.started_at = 0.0
         self.duration = 0.0
         self.failures = 0
+        self.state = ""
+        # MIME types the renderer says it plays (empty: it didn't say)
+        self.formats: set[str] = set()
 
     async def connect(self) -> None:
-        await self._transport_info()  # answers at all?
+        self.state = await self._transport_info()  # answers at all?
+        if self.device.get("connection"):
+            try:
+                sink = (await self._call(CONNECTION, "GetProtocolInfo", {}, instance=False)).get("Sink") or ""
+                self.formats = {entry.split(":")[2].lower() for entry in sink.split(",") if entry.count(":") >= 3}
+            except UpnpError:
+                pass
         if self.device.get("rendering"):
             try:
                 reply = await self._call(RENDERING, "GetVolume", {"Channel": "Master"})
@@ -221,10 +237,12 @@ class Renderer:
 
     async def load(self, url: str, content_type: str, meta: dict, start: float, autoplay: bool, live: bool) -> None:
         self.want_playing = False
-        try:
-            await self._call(AV_TRANSPORT, "Stop", {})
-        except UpnpError:
-            pass  # some renderers refuse Stop when nothing's loaded
+        if self.state not in IDLE_STATES:
+            try:
+                await self._call(AV_TRANSPORT, "Stop", {})
+            except UpnpError:
+                pass
+        content_type = self.name_for(content_type)
         await self._call(AV_TRANSPORT, "SetAVTransportURI",
                          {"CurrentURI": url, "CurrentURIMetaData": didl(url, content_type, meta)})
         self.loaded = True
@@ -235,16 +253,34 @@ class Renderer:
             await self._wait_until_playing()
             await self.seek(start)
 
+    def name_for(self, content_type: str) -> str:
+        """The renderer's own name for a format, where it lists one."""
+        if not self.formats or content_type in self.formats:
+            return content_type
+        for names in ALIASES:
+            if content_type in names:
+                listed = names & self.formats
+                if listed:
+                    return sorted(listed)[0]
+        return content_type
+
     async def play(self) -> None:
         await self._call(AV_TRANSPORT, "Play", {"Speed": "1"})
-        self.want_playing, self.started_at = True, time.time()
+        self.want_playing, self.started_at, self.state = True, time.time(), "PLAYING"
 
     async def pause(self) -> None:
         self.want_playing = False
         await self._call(AV_TRANSPORT, "Pause", {})
+        self.state = "PAUSED_PLAYBACK"
 
     async def seek(self, seconds: float) -> None:
-        await self._call(AV_TRANSPORT, "Seek", {"Unit": "REL_TIME", "Target": _clock(seconds)})
+        target = {"Unit": "REL_TIME", "Target": _clock(seconds)}
+        try:
+            await self._call(AV_TRANSPORT, "Seek", target)
+        except UpnpError:
+            # renderers refuse seeking while they're still opening or buffering (error 701): once more, shortly
+            await asyncio.sleep(1)
+            await self._call(AV_TRANSPORT, "Seek", target)
 
     async def stop(self) -> None:
         self.want_playing = False
@@ -263,7 +299,8 @@ class Renderer:
 
     async def _transport_info(self) -> str:
         reply = await self._call(AV_TRANSPORT, "GetTransportInfo", {})
-        return reply.get("CurrentTransportState") or ""
+        self.state = reply.get("CurrentTransportState") or ""
+        return self.state
 
     async def _poll(self) -> None:
         while True:
@@ -295,11 +332,13 @@ class Renderer:
                 report["ended"] = True
             self.on_status(report)
 
-    async def _call(self, service: str, action: str, arguments: dict[str, str]) -> dict[str, str]:
-        url = self.device["transport"] if service == AV_TRANSPORT else self.device.get("rendering")
+    async def _call(self, service: str, action: str, arguments: dict[str, str], instance: bool = True) -> dict[str, str]:
+        url = {AV_TRANSPORT: self.device["transport"], RENDERING: self.device.get("rendering"),
+               CONNECTION: self.device.get("connection")}[service]
         if not url:
             raise UpnpError("Not supported by this device")
-        body = "".join(f"<{k}>{escape(v)}</{k}>" for k, v in {"InstanceID": "0", **arguments}.items())
+        arguments = {"InstanceID": "0", **arguments} if instance else arguments
+        body = "".join(f"<{k}>{escape(v)}</{k}>" for k, v in arguments.items())
         envelope = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '

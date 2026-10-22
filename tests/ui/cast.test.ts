@@ -75,6 +75,27 @@ describe("casting", () => {
     assert.deepEqual(controls, ["pause", "seek 30", "volume 0.5"]);
   });
 
+  test("reports from a device that hasn't caught up yet don't undo a pause or a seek", async () => {
+    await player.castTo(device);
+    await settle();
+    status({ state: "playing", position: 10 });
+    player.toggle();
+    status({ state: "playing", position: 10.5 }); // a slow TV, still playing at the next poll
+    assert.equal(player.state.get().playing, false, "still paused");
+    assert.deepEqual(sent("cast_control").map(([a]) => a), ["pause"], "and nothing more is sent");
+    status({ state: "paused", position: 11 });
+    player.toggle();
+    status({ state: "paused", position: 11 });
+    assert.equal(player.state.get().playing, true, "play isn't undone either");
+    status({ state: "playing", position: 11 });
+    player.seek(120);
+    status({ state: "playing", position: 12 });
+    assert.ok(player.position.get().current >= 120, "the seek bar stays where it was moved");
+    status({ state: "playing", position: 120.4 });
+    status({ state: "paused", position: 121 });
+    assert.equal(player.state.get().playing, false, "once caught up, the device's own controls count again");
+  });
+
   test("a track ending on the device plays the next one there", async () => {
     await player.castTo(device);
     await settle();

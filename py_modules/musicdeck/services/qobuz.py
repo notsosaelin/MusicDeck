@@ -347,7 +347,13 @@ class QobuzService(MusicService):
     # --- media ---
 
     async def stream(self, track_id: str) -> StreamSource:
-        quality = int(self.config.get("quality") or 6)
+        return await self._stream(track_id, int(self.config.get("quality") or 6))
+
+    async def compatible_stream(self, track_id: str) -> StreamSource:
+        # TVs and receivers often struggle with hi-res FLAC (slow to start, or no sound): CD quality at most
+        return await self._stream(track_id, min(int(self.config.get("quality") or 6), 6))
+
+    async def _stream(self, track_id: str, quality: int) -> StreamSource:
         for attempt in range(2):
             app = await self._ensure_app(refresh=attempt > 0)
             ts = str(int(time.time()))
