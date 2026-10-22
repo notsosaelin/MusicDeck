@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
 import { notify } from "../notify";
+import { SleepChoice, setSleepTimer, sleepTimerLabel } from "../sleep";
 import { hasFeature, player } from "../player";
 import { pluginState } from "../store";
 import { NameModal } from "./NameModal";
@@ -106,6 +107,34 @@ export interface MenuContext {
  * Everything you can do with a track, as a native context menu. Items only appear when the track's
  * source supports them, so the menu stays short.
  */
+const SLEEP_MINUTES = [15, 30, 45, 60, 90];
+
+function showSleepMenu(parent: EventTarget) {
+  const choose = (choice: SleepChoice, message: string) => {
+    setSleepTimer(choice);
+    notify("Sleep timer", message);
+  };
+  showContextMenu(
+    <Menu label="Sleep timer">
+      {SLEEP_MINUTES.map((m) => (
+        <MenuItem key={m} onSelected={() => choose(m, `Pausing in ${m} minutes`)}>
+          {m} minutes
+        </MenuItem>
+      ))}
+      <MenuItem onSelected={() => choose("track", "Pausing when this track ends")}>End of this track</MenuItem>
+      {sleepTimerLabel() && (
+        <>
+          <MenuSeparator />
+          <MenuItem tone="destructive" onSelected={() => choose(null, "Off")}>
+            Turn off
+          </MenuItem>
+        </>
+      )}
+    </Menu>,
+    parent,
+  );
+}
+
 export function showTrackMenu(instanceId: string, track: Track, parent?: EventTarget | null, ctx: MenuContext = {}) {
   const target = parent ?? window;
   const item = { instanceId, track };
@@ -152,6 +181,12 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
           }}
         >
           Remove from this playlist
+        </MenuItem>
+      )}
+      {isCurrent && <MenuSeparator />}
+      {isCurrent && (
+        <MenuItem onSelected={() => showSleepMenu(target)}>
+          {sleepTimerLabel() ? `Sleep timer · ${sleepTimerLabel()}` : "Sleep timer…"}
         </MenuItem>
       )}
       {browsable && (track.album_id || track.artist_id) && <MenuSeparator />}

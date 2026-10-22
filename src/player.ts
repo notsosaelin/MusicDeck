@@ -108,6 +108,8 @@ export class Player {
   /** Recovery attempts for the current track; one fresh re-resolve before giving up */
   private recoveries = 0;
   private stallWatch?: number;
+  /** Sleep timer "end of track": pause when the current track finishes instead of moving on */
+  stopAfterCurrent = false;
   private lastProgress = { time: 0, at: 0 };
 
   constructor() {
@@ -576,7 +578,24 @@ export class Player {
     this.position.set({ current: this.audio.currentTime, duration });
   }
 
+  /** Lowers the volume to silence over `seconds`, pauses, then restores the volume for next time. */
+  async fadeOutAndPause(seconds: number) {
+    const volume = this.audio.volume;
+    const steps = Math.max(1, Math.round(seconds * 10));
+    for (let i = 1; i <= steps && !this.audio.paused; i++) {
+      this.audio.volume = volume * (1 - i / steps);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    this.audio.pause();
+    this.audio.volume = volume;
+  }
+
   private onEnded() {
+    if (this.stopAfterCurrent) {
+      this.stopAfterCurrent = false;
+      dlog("sleep timer: stopped after track");
+      return;
+    }
     // a live stream only "ends" when the station drops the connection: reconnect instead of skipping
     if (this.current?.track.live) return this.recover("live stream ended");
     if (this.state.get().repeat !== "one") this.next(true);

@@ -11,6 +11,7 @@ import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
 import { player } from "./player";
+import { setSleepTimer, sleepTimer } from "./sleep";
 import { installQamPatch } from "./qam";
 import { pluginState, refreshState } from "./store";
 
@@ -58,6 +59,8 @@ export default definePlugin(() => {
     showTrackMenu,
     notify,
     switchSource,
+    setSleepTimer,
+    sleepTimer,
     // open dialogs for on-device layout checks: a source's edit dialog, or the add dialog for a type
     sourceDialog: (idOrType: string) => {
       const state = pluginState.get();
@@ -77,6 +80,7 @@ export default definePlugin(() => {
     icon: <FaMusic />,
     onDismount() {
       unpatchQam?.();
+      setSleepTimer(null);
       player.destroy();
       // a reload can mount the new instance before this one unmounts; only remove our own handle
       if ((window as any).__musicdeck === debugHandle) delete (window as any).__musicdeck;
