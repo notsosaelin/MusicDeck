@@ -16,6 +16,13 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   switch between them like any other source.
 - **Native Quick Access tab:** Now playing (with lyrics), Library, Search, Queue and Equalizer, with a mini player while you browse, built from Steam's
   own components and controller conventions.
+- **Media center:** the player full screen in Steam's main window, laid out like Steam's library: Now Playing
+  with lyrics, Home's rows as shelves of covers, album and playlist pages, Search and the Queue, all on the
+  controller.
+- **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
+- **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, plus UPnP/DLNA
+  devices (Sonos, AV receivers, smart TVs). The speaker fetches the music itself; the queue, play reports and
+  controls stay on the Deck.
 - **Jump back in:** each source's home starts with the albums and playlists you played last, and an empty
   search shows your recent searches.
 - **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
@@ -83,6 +90,7 @@ Add your own free app's Client ID in the Spotify source (the dialog links to Spo
 | --- | --- |
 | Decky → MusicDeck | Add and manage sources, pick the live one, playback options, ListenBrainz, debug log |
 | Quick Access → Soundtracks tab | The player. Takes over the tab by default, or gets its own tab |
+| The expand button on the panel's tab strip (or the lyrics) | The media center, full screen |
 
 Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the Queue) or plays an album or
 playlist without opening it, **Y** opens a
@@ -93,6 +101,17 @@ Re-selecting Library or Search returns to its start. The Queue lists tracks in t
 up so the d-pad carries it until **A** or **B** puts it down.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
+
+**Media center:** **L1**/**R1** switch between Now Playing, Home, Search and Queue; **A** opens an album or
+playlist, **X** plays it straight away, **B** goes back a page; **Start** plays or pauses from anywhere; **Y** on
+Now Playing turns the screen off. Handhelds only switch the backlight fully off for root, so "off" is Steam's
+lowest brightness under a black screen: nearly dark, on any device.
+
+**Casting:** **X** on the volume slider lists the speakers and TVs on your network (and This Deck). The
+volume slider then sets the device's volume and shows its name. The equalizer, volume levelling and
+crossfade only apply on the Deck. Spotify can't be cast from MusicDeck (use Spotify Connect); TVs and
+receivers get CD quality from Qobuz, and AAC rather than Opus from YouTube. UPnP renderers can't play
+HLS streams (some radio stations, SoundCloud, TIDAL).
 
 **Game music:** with a game running, open an album or playlist in MusicDeck and press the gamepad button
 next to Play (or choose "Play when … starts" from a row's options). From then on it plays whenever that

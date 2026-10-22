@@ -126,7 +126,8 @@ Details worth knowing:
 | `musicdeck/services/__init__.py` | `CATALOGUE` and `SERVICE_TYPES`: every source type, in "Add a source" order; a type's module is imported the first time it's needed. |
 | `musicdeck/net.py`, `musicdeck/cache.py` | The one TLS context every HTTPS connection shares (certifi's bundle costs ~1 MB per context), and the bounded, expiring cache every in-memory cache uses. |
 | `musicdeck/services/*.py` | One file per source. See [SOURCES.md](SOURCES.md). |
-| `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; downloaded files first, then range proxying, HLS rewriting, resolved-source cache. |
+| `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; downloaded files first, then range proxying, HLS rewriting, resolved-source cache. While casting, a second site on the home network (`open_lan`) serves the one device being cast to: a fresh random link per track, only that device's address answered, HLS pieces only from that track's own hosts. |
+| `musicdeck/cast/` | Casting. `mdns.py` (one-shot mDNS browse) and `upnp.py` (SSDP search) find devices; `castv2.py` is a Google Cast sender (hand-encoded protobuf over TLS, the Default Media Receiver); `upnp.py` drives UPnP AVTransport/RenderingControl renderers by SOAP, polled once a second, with each renderer's own names for formats. `CastManager` (`__init__.py`) connects, loads tracks from the network site and passes the device's state on as `cast_status` events. Services can offer a `compatible_stream` (YouTube: AAC; Qobuz: CD quality) and opt out with `castable = False` (Spotify). |
 | `musicdeck/settings.py` | `Settings`: atomic JSON store for preferences and configured sources (credentials included, so `chmod 600`). |
 | `musicdeck/recents.py` | `Recents`: the albums and playlists played lately per source, for the "Jump back in" row (`played_collection`; recorded by `playFrom` in nav.ts), and recent searches (recorded by `search`; `search_history`, `forget_search`). |
 | `musicdeck/playlists.py` | `PlaylistStore`: MusicDeck's own playlists (`md:` ids) with custom artwork (`mdart:` ids), stored on the Deck, and which are downloaded. |
@@ -147,7 +148,8 @@ Details worth knowing:
 | `index.tsx` | Plugin entry: loads state, restores the session, installs the QAM patch, exposes the `window.__musicdeck` debug handle, cleans up on unload. |
 | `api.ts` | Typed wrappers for every backend endpoint (`callable(...)`) and the shared types. |
 | `store.ts` | `Store<T>` (tiny observable used with `useSyncExternalStore`), `pluginState`, `mediaUrl()` for stream/art URLs. |
-| `player.ts` | `Player`: queue, shuffle/repeat, the two audio decks and Web Audio graph, gapless and crossfade, HLS, recovery, play reports, session persistence, radio extension. |
+| `player.ts` | `Player`: queue, shuffle/repeat, the two audio decks and Web Audio graph, gapless and crossfade, HLS, recovery, play reports, session persistence, radio extension. While casting (`castTo`/`stopCasting`) the playing deck is the device, so everything above works unchanged. |
+| `cast.ts` | `RemoteAudio`: stands in for an `<audio>` element while casting, forwarding to the backend and turning the device's reports into element events. Reports that contradict a command just sent are ignored until the device catches up (slow, polled UPnP renderers). |
 | `qam.tsx` | Takes over the Quick Access Menu's Soundtracks tab (or adds a tab) by wrapping Decky's `__TABS_HOOK_INSTANCE.render`. |
 | `nav.ts` | Panel navigation (Library/Search stacks), kept outside React so it survives the QAM closing. |
 | `sources.ts` | Switching or deleting the live source; `followState` stops playback and clears the queue whenever the live source changes, whoever changed it. |
@@ -160,7 +162,8 @@ Details worth knowing:
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
 | `components/NowPlaying.tsx` | Now playing card, seek bar (or LIVE bar), transport, volume. |
 | `components/LyricsView.tsx` | The lyrics under Now playing, and what the full-screen page shares with it: `useLyrics` (looked up once per track; a failed lookup isn't remembered) and `SyncedLyrics`. |
-| `components/LyricsPage.tsx` | Full-screen lyrics: a route in Steam's main window (`/musicdeck/lyrics`, added in index.tsx) over the blurred album art; A/X/Y play-pause/next/previous. Unsynced lyrics scroll with the song. |
+| `components/media/` | The media center, a route in Steam's main window (`/musicdeck/player`, added in index.tsx) built on Steam's `Tabs`: `MediaCenter.tsx` (tabs, Now Playing with lyrics, the now-playing bar, screen off), `pages.tsx` (Home, collection pages, Search, Queue; each browsing tab keeps its own history in `centerNav`), `parts.tsx` (capsule cards, shelves, the track table, focus restoring). It reuses the panel's data loading and actions from `Browser.tsx`. |
+| `components/CastMenu.tsx` | "Play on": this Deck or a device found on the network, opened with X on a volume slider. |
 | `components/Queue.tsx` | The queue in play order, with moving tracks (menu items, or "Move…" mode on the d-pad; see `RowMoving` in common.tsx). |
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |
 | `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, games, ListenBrainz, troubleshooting. |

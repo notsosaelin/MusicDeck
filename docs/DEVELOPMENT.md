@@ -68,6 +68,7 @@ script's docstring). Without remote debugging it still copies; reload from Decky
 python scripts/vendor.py       # the tests use the vendored packages in py_modules/ (mutagen, ...)
 pip install aiohttp certifi    # these come with Decky on a device, so they aren't vendored
 python tests/test_backend.py
+python tests/test_cast.py      # casting: mDNS, a fake Chromecast, a fake UPnP renderer, the network site
 ```
 
 The suite stubs the `decky` module, builds a small tagged music library in a temp folder, starts the

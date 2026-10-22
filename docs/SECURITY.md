@@ -30,6 +30,8 @@ How MusicDeck protects the accounts and data it handles, what an audit of every 
 | Entry point | Guard |
 | --- | --- |
 | Stream server (`/stream`, `/art`, `/fetch`) | Bound to 127.0.0.1 on a random port; every request needs the per-session key (constant-time compare). Credentials for upstream requests are added as headers here, never put in URLs the UI sees. |
+| Casting site (while casting only) | Bound to the address on the home network that reaches the device, on a random port; answers only the device's own address; each track gets a fresh random link (four kept); its HLS relay only fetches hosts that track's own playlists named. Closed when casting stops. The Deck-only routes and key aren't on it. |
+| Cast and UPnP devices | Devices are found on the local network and are untrusted: replies are size-limited, XML with entity declarations is refused, UPnP descriptions must live on the device that answered, Cast messages over 1 MB end the connection. Spotify is never cast (it would mean handing decrypted audio to another device). |
 | Spotify helper's audio server | Bound to 127.0.0.1; every request needs a per-start key, sent as the `X-MusicDeck-Key` header (fixed in this audit; before, any local program could play through the account). |
 | Sign-in listeners (Qobuz, Spotify) | Bound to 127.0.0.1, only while a sign-in is open, closed after it. Spotify checks a random `state` and uses PKCE. Pages they answer with echo nothing from the request. |
 | Backend endpoints (`callable`) | Every argument is treated as untrusted: ids are checked against each source's id format before reaching a URL path or a tool (`[\w-]` for Audiobookshelf, digits for Plex rating keys and Steam app ids, YouTube's 11-character video ids and `UC…` channel ids), playlist tracks keep only well-formed fields, settings only take known fields of the right kind. The test suite's "abuse" section calls every endpoint with garbage, stale ids and double taps. |
@@ -69,6 +71,10 @@ How MusicDeck protects the accounts and data it handles, what an audit of every 
 - **Feeds and pages name their own images and audio** (podcast art, radio streams), which the
   backend fetches like a browser would: a hostile feed could make the Deck send a GET request to
   a device on its network, without credentials and without seeing the answer in a useful way.
+- **Casting is as private as the home network.** Cast devices present self-signed certificates, so
+  the Cast connection is encrypted but not authenticated (as for every Cast sender); UPnP control and
+  the casting site are plain HTTP, as the protocols are. Someone on the same network could see what's
+  playing and, from the device's address, fetch the current track while casting lasts.
 - **Plex servers' plain-HTTP local addresses** are tried with the server token, as Plex's own apps
   do on a home network.
 
