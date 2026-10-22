@@ -74,6 +74,18 @@ export const Art: FC<{
   );
 };
 
+/**
+ * Calls `onResize` whenever `el` changes size; returns the function that stops watching. Uses the
+ * ResizeObserver of the window the element is in: this code runs in Steam's shared context, and an
+ * observer from that window never reports elements in the Quick Access menu's or the main window.
+ */
+export function watchSize(el: Element, onResize: () => void): () => void {
+  const Observer: typeof ResizeObserver = (el.ownerDocument.defaultView as any)?.ResizeObserver ?? ResizeObserver;
+  const observer = new Observer(onResize);
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
 /** The nearest ancestor of `el` that scrolls (in the Quick Access menu, the panel itself). */
 function scrollerOf(el: Element | null): HTMLElement | null {
   for (let node = el?.parentElement; node; node = node.parentElement) {
@@ -142,9 +154,7 @@ export const ScrollingText: FC<{ text: string; play: boolean; style?: CSSPropert
       setFit((f) => (f?.text === text && f.overflows === overflows ? f : { text, overflows }));
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
+    return watchSize(el, measure);
   }, [text, scrolling]);
   return scrolling ? (
     // Marquee puts `style` on its inner element; this outer box is what keeps it inside a row

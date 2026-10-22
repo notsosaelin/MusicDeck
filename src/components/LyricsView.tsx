@@ -1,7 +1,7 @@
 import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
 import { Lyrics, getLyrics } from "../api";
-import { openFullPlayer } from "../nav";
+import { openMediaCenter } from "../nav";
 import { QueueItem, player } from "../player";
 import { RecentlyUsed, useStore } from "../store";
 import { Message, scrollIntoCentre } from "./common";
@@ -135,7 +135,6 @@ export const ScrollingPlainLyrics: FC<{ lyrics: Lyrics; height: number; fontSize
   );
 };
 
-
 /**
  * The Lyrics view in the Quick Access panel. The lyrics themselves are a focus stop, so the d-pad can
  * reach them (and the panel scrolls them wholly into view); A or a tap there opens them full screen.
@@ -163,7 +162,7 @@ export const LyricsView: FC = () => {
     <PanelSection title={lyrics.title ?? "Lyrics"}>
       <PanelSectionRow>
         <Focusable
-          onActivate={openFullPlayer}
+          onActivate={() => openMediaCenter("playing")}
           onOKActionDescription="Full screen"
           onGamepadFocus={(e: any) => {
             setFocused(true);

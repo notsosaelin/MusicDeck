@@ -5,7 +5,7 @@ import { LyricsView } from "./LyricsView";
 import { player } from "../player";
 import { pluginState, useStore } from "../store";
 import { Browser } from "./Browser";
-import { PanelTab, TAB_ORDER, openFullPlayer, panelTab, popView, resetStack, setTabStrip, showTab } from "../nav";
+import { PanelTab, TAB_ORDER, openMediaCenter, panelTab, popView, resetStack, setTabStrip, showTab } from "../nav";
 import { Equalizer } from "./Equalizer";
 import { MiniPlayer, NowPlaying } from "./NowPlaying";
 import { Queue, confirmClearQueue } from "./Queue";
@@ -65,11 +65,11 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
               )}
             </IconButton>
           ))}
-          {/* not a tab: opens the player full screen, in Steam's main window */}
+          {/* not a tab: opens the media center, full screen in Steam's main window */}
           <IconButton
             look="plain"
-            label="Full screen"
-            onClick={openFullPlayer}
+            label="Media center"
+            onClick={() => openMediaCenter()}
             style={{ height: 40, fontSize: 14, borderRadius: 0 }}
           >
             <FaExpand />

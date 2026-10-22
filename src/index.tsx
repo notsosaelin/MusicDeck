@@ -3,7 +3,7 @@ import { quickAccessMenuClasses, showModal, staticClasses } from "@decky/ui";
 import { FaMusic } from "react-icons/fa";
 import * as api from "./api";
 import { MusicPanel } from "./components/MusicPanel";
-import { FullPlayer } from "./components/FullPlayer";
+import { MediaCenter } from "./components/media/MediaCenter";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
@@ -46,7 +46,7 @@ export default definePlugin(() => {
     .catch((e) => console.error("[MusicDeck] Failed to load state", e));
 
   const stopFollowing = followState();
-  routerHook.addRoute(PLAYER_ROUTE, FullPlayer, { exact: true });
+  routerHook.addRoute(PLAYER_ROUTE, MediaCenter, { exact: true });
   const unwatchGames = watchGames();
   const unpatchQam = installQamPatch(
     <MusicPanel />,

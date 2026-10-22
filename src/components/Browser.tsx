@@ -71,11 +71,11 @@ import {
 } from "./common";
 
 /**
- * A view's data, cached per key so going back doesn't refetch. With `revalidate` (the home view, whose
+ * A view's data, cached per key so going back doesn't refetch (shared with the media center). With `revalidate` (the home view, whose
  * rows change as you listen: "Jump back in", "Continue listening"), the cached copy shows at once and
  * a fresh one replaces it when it arrives.
  */
-function useResult<T>(key: string, load: () => Promise<Result<T>>, revalidate = false): Result<T> | null {
+export function useResult<T>(key: string, load: () => Promise<Result<T>>, revalidate = false): Result<T> | null {
   const [result, setResult] = useState<Result<T> | null>(() => resultCache.get(key) ?? null);
   const [shownKey, setShownKey] = useState(key);
   const { v } = useStore(dataVersion);
@@ -117,7 +117,7 @@ const Loading: FC<{ result: Result<any> | null }> = ({ result }) =>
     <Message>{result.error}</Message>
   ) : null;
 
-const trackActions = (instanceId: string, track: Track, ctx: MenuContext = {}) => ({
+export const trackActions = (instanceId: string, track: Track, ctx: MenuContext = {}) => ({
   onSecondary: () => {
     player.enqueue(instanceId, [track]);
     notify("Added to queue", track.title, { instanceId, track });
@@ -128,16 +128,16 @@ const trackActions = (instanceId: string, track: Track, ctx: MenuContext = {}) =
 });
 
 /** Remote playlists/albums can be saved as MusicDeck playlists when the source has no playlists of its own. */
-const canSave = (instanceId: string, c: Collection) =>
+export const canSave = (instanceId: string, c: Collection) =>
   (c.kind === "playlist" || c.kind === "album") && !isLocalPlaylist(c.id) && !hasFeature(instanceId, "playlists");
-const hasCollectionMenu = (instanceId: string, c: Collection) =>
+export const hasCollectionMenu = (instanceId: string, c: Collection) =>
   isLocalPlaylist(c.id) || canSave(instanceId, c) || (!!runningGame.get() && canPlayWithGame(c));
 
 /**
  * Plays an album or playlist straight from its row (X). Uses the page if it's been opened already;
  * says why when there's nothing to play (a Steam soundtrack that isn't installed, an empty playlist).
  */
-async function playCollection(instanceId: string, c: Collection) {
+export async function playCollection(instanceId: string, c: Collection) {
   const key = `${instanceId}:${c.kind}:${c.id}`;
   const result: Result<Page> = resultCache.get(key) ?? (await openCollection(instanceId, c.kind, c.id));
   // the live source changed while it loaded: this belongs to the old one
@@ -218,7 +218,7 @@ const HomeView: FC<{ instanceId: string }> = ({ instanceId }) => {
   );
 };
 
-const KIND_TITLES: Record<CollectionKind, string> = {
+export const KIND_TITLES: Record<CollectionKind, string> = {
   artist: "Artists",
   album: "Albums",
   playlist: "Playlists",
@@ -227,13 +227,13 @@ const KIND_TITLES: Record<CollectionKind, string> = {
 };
 const KIND_ORDER: CollectionKind[] = ["artist", "album", "playlist", "folder", "list"];
 
-function mostCommon(values: string[]): string | undefined {
+export function mostCommon(values: string[]): string | undefined {
   const counts = new Map<string, number>();
   for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
-function groupByKind(items: Collection[]): [CollectionKind, Collection[]][] {
+export function groupByKind(items: Collection[]): [CollectionKind, Collection[]][] {
   return KIND_ORDER.map((k) => [k, items.filter((c) => c.kind === k)] as [CollectionKind, Collection[]]).filter(
     ([, list]) => list.length > 0,
   );
@@ -380,7 +380,7 @@ const Header: FC<{
 );
 
 /** A page's button that asks the source to do something (e.g. subscribe); the page reloads after. */
-async function callAction(instanceId: string, c: Collection, call: string) {
+export async function callAction(instanceId: string, c: Collection, call: string) {
   const result = await collectionAction(instanceId, c.kind, c.id, call);
   notify(c.title, result.ok ? result.data : result.error);
   if (result.ok) invalidateBrowserCache();
@@ -392,7 +392,7 @@ async function callAction(instanceId: string, c: Collection, call: string) {
  * a page asks for.
  */
 const STEAM_INSTALL = /^steam:\/\/install\/\d+$/;
-const runAction = (url: string) => {
+export const runAction = (url: string) => {
   if (url.startsWith("steam://") ? !STEAM_INSTALL.test(url) : !/^https:\/\//.test(url)) return;
   Navigation.CloseSideMenus();
   // (@decky/ui's typings mistake SteamClient.URL for the DOM's URL class)

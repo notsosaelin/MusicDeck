@@ -87,10 +87,14 @@ export const invalidateBrowserCache = () => {
   dataVersion.set({ v: dataVersion.get().v + 1 });
 };
 
-/** The full-screen player (components/FullPlayer.tsx), in Steam's main window. */
+/** The media center (components/media), full screen in Steam's main window, and its open tab. */
 export const PLAYER_ROUTE = "/musicdeck/player";
+export type CenterTab = "playing" | "home" | "search" | "queue";
+export const centerTab = new Store<{ tab: CenterTab }>({ tab: "playing" });
 
-export function openFullPlayer() {
+/** Opens the media center, at `tab` (by default where it was left). */
+export function openMediaCenter(tab?: CenterTab) {
+  if (tab) centerTab.set({ tab });
   Navigation.CloseSideMenus();
   Navigation.Navigate(PLAYER_ROUTE);
 }
