@@ -13,6 +13,7 @@ import certifi
 import decky
 
 from musicdeck import debuglog, lyrics
+from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError
@@ -73,6 +74,8 @@ class Plugin:
         self.http = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where())),
             timeout=aiohttp.ClientTimeout(total=10))
+        self.listenbrainz = ListenBrainz(self.http, os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR,
+                                                                 "listenbrainz-pending.json"))
         try:
             await self.server.start()
             for service in self.settings.services():
@@ -153,6 +156,8 @@ class Plugin:
             "server": {"base": self.server.base_url, "key": self.server.key},
             "service_types": [{"type": c.type, "display_name": c.display_name} for c in SERVICE_TYPES.values()],
             "planned_types": PLANNED_TYPES,
+            "listenbrainz": {"user": self.settings.get("listenbrainz").get("user", ""),
+                             "pending": self.listenbrainz.pending_count()},
         }
 
     @_when_ready
@@ -426,9 +431,10 @@ class Plugin:
         return await _result(work())
 
     @_when_ready
-    async def scrobble(self, instance_id: str, track_id: str, submission: bool) -> dict[str, Any]:
-        if not self.settings.get("playback").get("scrobble", True):
-            return {"ok": True, "data": None}
+    async def scrobble(self, instance_id: str, track_id: str, submission: bool,
+                       track: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """A play started (submission=False) or counts as a listen (True). Goes to the source's own
+        server when it keeps play history and "Report plays" is on, and to ListenBrainz if linked."""
         # Safety net against double counting (reloads, retries): the same report for the same track
         # within SCROBBLE_DEDUPE seconds is dropped. A genuine replay can only start after the song
         # ends, so it's never inside the window.
@@ -439,7 +445,34 @@ class Plugin:
             return {"ok": True, "data": None}
         self.recent_scrobbles = {k: t for k, t in self.recent_scrobbles.items() if now - t < SCROBBLE_DEDUPE}
         self.recent_scrobbles[key] = now
+
+        token = self.settings.get("listenbrainz").get("token")
+        instance = self.instances.get(instance_id)
+        if token and track and instance:
+            report = self.listenbrainz.listen if submission else self.listenbrainz.now_playing
+            asyncio.get_event_loop().create_task(report(token, track, instance.display_name))
+        if not self.settings.get("playback").get("scrobble", True) or not instance \
+                or "scrobble" not in instance.features:
+            return {"ok": True, "data": None}
         return await _result(self._call(instance_id, lambda s: s.scrobble(track_id, submission)))
+
+    @_when_ready
+    async def set_listenbrainz(self, token: str) -> dict[str, Any]:
+        """Links ListenBrainz with a user token (from listenbrainz.org/settings), or unlinks with ""."""
+        async def work():
+            token_ = (token or "").strip()
+            if not token_:
+                self.settings.set("listenbrainz", {"token": "", "user": ""})
+                return {"user": ""}
+            try:
+                user = await self.listenbrainz.validate(token_)
+            except aiohttp.ClientError as e:
+                raise ServiceError(f"Could not reach ListenBrainz: {e}") from e
+            if not user:
+                raise ServiceError("ListenBrainz didn't accept that token")
+            self.settings.set("listenbrainz", {"token": token_, "user": user})
+            return {"user": user}
+        return await _result(work())
 
     @_when_ready
     async def get_lyrics(self, instance_id: str, track: dict[str, Any]) -> dict[str, Any]:

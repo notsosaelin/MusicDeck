@@ -117,6 +117,8 @@ export interface PluginState {
   server: { base: string; key: string };
   service_types: ServiceType[];
   planned_types: ServiceType[];
+  /** linked ListenBrainz account ("" when not linked) and listens waiting to be sent */
+  listenbrainz: { user: string; pending: number };
 }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -142,7 +144,9 @@ export const openCollection = callable<[id: string, kind: CollectionKind, collec
 export const search = callable<[id: string, query: string], Result<Page>>("search");
 
 export const star = callable<[id: string, trackId: string, starred: boolean], Result<null>>("star");
-export const scrobble = callable<[id: string, trackId: string, submission: boolean], Result<null>>("scrobble");
+export const scrobble = callable<[id: string, trackId: string, submission: boolean, track: Track], Result<null>>(
+  "scrobble",
+);
 export const getLyrics = callable<[id: string, track: Track], Result<Lyrics | null>>("get_lyrics");
 export const getRadio = callable<[id: string, track: Track], Result<Track[]>>("radio");
 export const getUserPlaylists = callable<[id: string], Result<Collection[]>>("user_playlists");
@@ -211,3 +215,4 @@ export const jellyfinLoginPoll = callable<
 >("jellyfin_login_poll");
 export const jellyfinLoginCancel = callable<[loginId: string], void>("jellyfin_login_cancel");
 export const onAir = callable<[id: string, trackId: string], Result<string | null>>("on_air");
+export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");

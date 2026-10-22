@@ -15,6 +15,8 @@ DEFAULTS: dict[str, Any] = {
     "eq": {"enabled": False, "preset": "Flat", "gains": [0.0] * 10, "preamp": 0.0},
     # levelling: "off" | "track" | "album" (ReplayGain); scrobble/queue_sync talk to the source's server
     "playback": {"levelling": "track", "scrobble": True, "queue_sync": True, "resume": True, "autoplay": True},
+    # ListenBrainz scrobbling for every source; the token never goes to the frontend
+    "listenbrainz": {"token": "", "user": ""},
 }
 
 

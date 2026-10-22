@@ -29,6 +29,10 @@ export const hasFeature = (instanceId: string, feature: Feature) =>
     ?.services.find((s) => s.id === instanceId)
     ?.features?.includes(feature);
 
+/** Plays are reported when the source keeps its own play history, or ListenBrainz is linked. */
+const reportsPlays = (instanceId: string) =>
+  hasFeature(instanceId, "scrobble") || !!pluginState.get()?.listenbrainz?.user;
+
 export interface QueueItem {
   /** Service instance the track belongs to; the queue can mix services. */
   instanceId: string;
@@ -493,9 +497,9 @@ export class Player {
       );
     }
     const item = this.current;
-    if (item && !this.nowPlayingSent && hasFeature(item.instanceId, "scrobble")) {
+    if (item && !this.nowPlayingSent && reportsPlays(item.instanceId)) {
       this.nowPlayingSent = true;
-      scrobble(item.instanceId, item.track.id, false).catch(() => {});
+      scrobble(item.instanceId, item.track.id, false, item.track).catch(() => {});
     }
   }
 
@@ -509,12 +513,12 @@ export class Player {
     }
     this.lastTime = t;
     const item = this.current;
-    if (!item || this.submitted || !hasFeature(item.instanceId, "scrobble")) return;
+    if (!item || this.submitted || !reportsPlays(item.instanceId)) return;
     const duration = this.position.get().duration;
     if (duration < 30) return; // too short to count, per the usual scrobbling rules
     if (this.audio.currentTime >= Math.min(duration * SCROBBLE_FRACTION, SCROBBLE_MAX_SECONDS)) {
       this.submitted = true;
-      scrobble(item.instanceId, item.track.id, true).catch(() => {});
+      scrobble(item.instanceId, item.track.id, true, item.track).catch(() => {});
     }
   }
 

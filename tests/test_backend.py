@@ -5,6 +5,7 @@ tagged library in a temp dir, then drives main.Plugin and the stream server over
     python tests/test_backend.py      (needs aiohttp + certifi installed; mutagen comes from py_modules)
 """
 import asyncio
+import json
 import logging
 import os
 import struct
@@ -365,6 +366,65 @@ async def run():
         check(await rs.on_air("s2") is None, "HLS stations have no ICY title")
         await rs.stop()
         await icy_runner.cleanup()
+
+        print("listenbrainz")
+        from aiohttp import web as lbweb
+        from musicdeck import listenbrainz as lbmod
+        received = []
+        lb_state = {"up": True}
+
+        async def lb_validate(request):
+            ok = request.headers.get("Authorization") == "Token good"
+            return lbweb.json_response({"valid": ok, "user_name": "listener" if ok else None})
+
+        async def lb_submit(request):
+            if not lb_state["up"]:
+                return lbweb.Response(status=503)
+            if request.headers.get("Authorization") != "Token good":
+                return lbweb.Response(status=401)
+            received.append(await request.json())
+            return lbweb.json_response({"status": "ok"})
+        lb_app = lbweb.Application()
+        lb_app.router.add_get("/1/validate-token", lb_validate)
+        lb_app.router.add_post("/1/submit-listens", lb_submit)
+        lb_runner = lbweb.AppRunner(lb_app)
+        await lb_runner.setup()
+        lb_site = lbweb.TCPSite(lb_runner, "127.0.0.1", 0)
+        await lb_site.start()
+        lbmod.API = f"http://127.0.0.1:{lb_site._server.sockets[0].getsockname()[1]}/1"
+
+        bad = await plugin.set_listenbrainz("nope")
+        check(not bad["ok"] and "accept" in bad["error"], "an invalid token is refused")
+        good = await plugin.set_listenbrainz(" good ")
+        state = await plugin.get_state()
+        check(good["ok"] and state["listenbrainz"] == {"user": "listener", "pending": 0}
+              and "token" not in json.dumps(state["listenbrainz"]), "linked; the token stays in the backend")
+        song = {"id": "lb1", "title": "Song", "artist": "Band", "album": "Record", "duration": 200}
+        lb = plugin.listenbrainz
+        await lb.now_playing("good", song, "Local files")
+        check(received[-1]["listen_type"] == "playing_now"
+              and received[-1]["payload"][0]["track_metadata"]["additional_info"]["duration_ms"] == 200000,
+              "now playing in ListenBrainz's format")
+        await lb.listen("good", {**song, "live": True, "title": "Station"}, "Internet radio")
+        check(len(received) == 1, "radio stations aren't listens")
+        lb_state["up"] = False
+        await lb.listen("good", song, "Local files", listened_at=1000)
+        check(lb.pending_count() == 1 and len(received) == 1, "a listen made offline is kept")
+        lb_state["up"] = True
+        await lb.listen("good", {**song, "title": "Next"}, "Local files", listened_at=2000)
+        check(lb.pending_count() == 0 and received[-1]["listen_type"] == "import"
+              and [x["listened_at"] for x in received[-1]["payload"]] == [1000, 2000], "kept listens sent with the next")
+        before = len(received)
+        # the play-report test gave local files a fake play history; take it away again
+        plugin.instances[sid].features = frozenset(f for f in plugin.instances[sid].features if f != "scrobble")
+        local_track = page["tracks"][1]  # [0] was reported moments ago, inside the duplicate window
+        await plugin.scrobble(sid, local_track["id"], True, local_track)
+        await asyncio.sleep(0.3)  # sent in the background
+        check(len(received) == before + 1 and received[-1]["payload"][0]["track_metadata"]["track_name"]
+              == local_track["title"], "plays from a source without its own history reach ListenBrainz")
+        await plugin.set_listenbrainz("")
+        check((await plugin.get_state())["listenbrainz"]["user"] == "", "unlinked")
+        await lb_runner.cleanup()
 
         print("decky's python")
         import re as _re

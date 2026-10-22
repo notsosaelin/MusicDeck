@@ -1,17 +1,20 @@
 import {
+  ButtonItem,
   ConfirmModal,
   DropdownItem,
   Field,
   Menu,
   MenuItem,
   MenuSeparator,
+  Navigation,
   PanelSection,
   PanelSectionRow,
+  TextField,
   ToggleField,
   showContextMenu,
   showModal,
 } from "@decky/ui";
-import { FC, ReactNode, useEffect } from "react";
+import { FC, ReactNode, useEffect, useState } from "react";
 import {
   FaCheckCircle,
   FaBroadcastTower,
@@ -25,7 +28,7 @@ import {
   FaYoutube,
 } from "react-icons/fa";
 import { SiJellyfin, SiTidal } from "react-icons/si";
-import { PlaybackSettings, ServiceInfo, rescan, setSetting, testService, youtubeUpdate } from "../api";
+import { PlaybackSettings, ServiceInfo, rescan, setListenBrainz, setSetting, testService, youtubeUpdate } from "../api";
 import { notify } from "../notify";
 import { deleteSource, switchSource } from "../sources";
 import { player } from "../player";
@@ -145,6 +148,61 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
   );
 };
 
+const LISTENBRAINZ_TOKEN_PAGE = "https://listenbrainz.org/settings/";
+
+/** Link ListenBrainz with a user token, or show the linked account. Plays from every source go there. */
+const ListenBrainzRows: FC<{ user: string; pending: number }> = ({ user, pending }) => {
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const link = async (value: string) => {
+    setBusy(true);
+    const result = await setListenBrainz(value);
+    setBusy(false);
+    if (!result.ok) return notify("ListenBrainz", result.error);
+    setToken("");
+    await refreshState();
+    notify("ListenBrainz", result.data.user ? `Linked as ${result.data.user}` : "Unlinked");
+  };
+  if (user) {
+    return (
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          label="ListenBrainz"
+          description={`Linked as ${user}${pending ? ` · ${pending} listen${pending === 1 ? "" : "s"} waiting to send` : ""}`}
+          disabled={busy}
+          onClick={() => link("")}
+        >
+          Unlink
+        </ButtonItem>
+      </PanelSectionRow>
+    );
+  }
+  return (
+    <>
+      <PanelSectionRow>
+        <Field
+          label="ListenBrainz"
+          description="Records what you play from any source on listenbrainz.org. Paste your user token from its settings page."
+          childrenLayout="below"
+        >
+          <TextField bIsPassword value={token} placeholder="User token" onChange={(e) => setToken(e.target.value)} />
+        </Field>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" disabled={busy || !token.trim()} onClick={() => link(token)}>
+          {busy ? "Checking…" : "Link"}
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => Navigation.NavigateToExternalWeb(LISTENBRAINZ_TOKEN_PAGE)}>
+          Get your token
+        </ButtonItem>
+      </PanelSectionRow>
+    </>
+  );
+};
+
 /** The plugin's page in the Decky menu: sources, the active source, and QAM placement. */
 export const Settings: FC = () => {
   const state = useStore(pluginState);
@@ -248,11 +306,11 @@ export const Settings: FC = () => {
         )}
       </PanelSection>
 
-      <PanelSection title="Server sync">
+      <PanelSection title="Plays and sync">
         <PanelSectionRow>
           <ToggleField
-            label="Report plays"
-            description="Updates play counts and recently played on your server, and Last.fm if it's linked there."
+            label="Report plays to sources"
+            description="Updates play counts and recently played on your server or service, and Last.fm if it's linked there."
             checked={state.playback.scrobble}
             onChange={(scrobble) => setPlayback({ scrobble })}
           />
@@ -265,6 +323,7 @@ export const Settings: FC = () => {
             onChange={(queue_sync) => setPlayback({ queue_sync })}
           />
         </PanelSectionRow>
+        <ListenBrainzRows user={state.listenbrainz?.user ?? ""} pending={state.listenbrainz?.pending ?? 0} />
       </PanelSection>
 
       <PanelSection title="Quick Access">
