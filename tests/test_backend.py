@@ -426,6 +426,24 @@ async def run():
         check((await plugin.get_state())["listenbrainz"]["user"] == "", "unlinked")
         await lb_runner.cleanup()
 
+        print("bandcamp")
+        from musicdeck.services import bandcamp as bcmod
+        check(bcmod._unescape("&quot;A&amp;B&quot; &#39;x&#x27; &lt;3") == '"A&B" \'x\' <3', "page entities unescaped")
+        bc = bcmod.BandcampService("bc", {}, tmp)
+        tralbum = {"url": "https://band.bandcamp.com/album/rec", "item_type": "album", "artist": "Band", "art_id": 724507428,
+                   "current": {"title": "Rec"},
+                   "trackinfo": [{"title": "Open", "title_link": "/track/open", "duration": 61.5,
+                                  "file": {"mp3-128": "https://t4.bcbits.com/stream/x"}},
+                                 {"title": "Buyers only", "title_link": "/track/paid", "duration": 99, "file": None}]}
+        tracks = bc._tracks(tralbum)
+        check([t["id"] for t in tracks] == ["https://band.bandcamp.com/track/open"], "buyers-only tracks left out")
+        check(tracks[0]["album_id"] == "https://band.bandcamp.com/album/rec" and tracks[0]["artist_id"]
+              == "https://band.bandcamp.com" and tracks[0]["art"] == "https://f4.bcbits.com/img/a0724507428_2.jpg",
+              "album, artist and art ids from the page")
+        page_html = '<div id="x" data-tralbum="' + json.dumps(tralbum).replace("&", "&amp;").replace('"', "&quot;") + '"></div>'
+        check(json.loads(bcmod._unescape(bcmod.TRALBUM.search(page_html).group(1))) == tralbum,
+              "album data read back out of a page attribute")
+
         print("decky's python")
         import re as _re
         # Decky's frozen interpreter ships without these; a top-level import stops the whole plugin loading

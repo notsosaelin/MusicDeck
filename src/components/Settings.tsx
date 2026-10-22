@@ -17,6 +17,7 @@ import {
 import { FC, ReactNode, useEffect, useState } from "react";
 import {
   FaCheckCircle,
+  FaBandcamp,
   FaBroadcastTower,
   FaCompactDisc,
   FaEllipsisH,
@@ -43,6 +44,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   jellyfin: <SiJellyfin />,
   soundcloud: <FaSoundcloud />,
   youtube: <FaYoutube />,
+  bandcamp: <FaBandcamp />,
   radio: <FaBroadcastTower />,
   qobuz: <FaCompactDisc />,
   spotify: <FaSpotify />,
@@ -54,7 +56,7 @@ const describeStatus = (s: ServiceInfo) => {
     if (s.status.update) return s.status.update;
     return s.status.ytdlp ? `yt-dlp ${s.status.ytdlp} · no account` : "No account";
   }
-  if (s.type === "soundcloud") return "No account";
+  if (s.type === "soundcloud" || s.type === "bandcamp") return "No account";
   if (s.type === "radio")
     return ["No account", s.config.country && countryName(s.config.country)].filter(Boolean).join(" · ");
   if (s.type === "spotify") return `${s.config.display_name ?? "Spotify"} · ${s.config.bitrate ?? 320} kbps`;
