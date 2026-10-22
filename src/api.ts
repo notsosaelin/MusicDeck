@@ -18,6 +18,8 @@ export interface Track {
     track_peak: number;
     album_peak: number;
   } | null;
+  /** an endless stream (radio station): no length, no seeking */
+  live?: boolean;
 }
 
 export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists";
@@ -208,3 +210,4 @@ export const jellyfinLoginPoll = callable<
   { status: "starting" | "waiting" | "done" | "error"; error?: string; service?: ServiceInfo }
 >("jellyfin_login_poll");
 export const jellyfinLoginCancel = callable<[loginId: string], void>("jellyfin_login_cancel");
+export const onAir = callable<[id: string, trackId: string], Result<string | null>>("on_air");

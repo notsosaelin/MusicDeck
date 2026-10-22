@@ -171,7 +171,7 @@ class StreamServer:
             url = _unb64(request.query["u"])
         except (KeyError, ValueError):
             raise web.HTTPBadRequest()
-        if not url.startswith("https://"):
+        if not url.startswith(("https://", "http://")):  # some radio stations still serve plain HTTP
             raise web.HTTPBadRequest()
         if ".m3u8" in url.split("?")[0]:
             return await self._playlist(url, {})

@@ -14,6 +14,7 @@ import {
 import { FC, ReactNode, useEffect } from "react";
 import {
   FaCheckCircle,
+  FaBroadcastTower,
   FaCompactDisc,
   FaEllipsisH,
   FaFolderOpen,
@@ -31,7 +32,7 @@ import { player } from "../player";
 import { pluginState, refreshState, useStore } from "../store";
 import { invalidateBrowserCache } from "../nav";
 import { ACCENT } from "./common";
-import { ServiceModal } from "./ServiceModal";
+import { ServiceModal, countryName } from "./ServiceModal";
 
 const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,
@@ -39,6 +40,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   jellyfin: <SiJellyfin />,
   soundcloud: <FaSoundcloud />,
   youtube: <FaYoutube />,
+  radio: <FaBroadcastTower />,
   qobuz: <FaCompactDisc />,
   spotify: <FaSpotify />,
   tidal: <SiTidal />,
@@ -50,6 +52,8 @@ const describeStatus = (s: ServiceInfo) => {
     return s.status.ytdlp ? `yt-dlp ${s.status.ytdlp} · no account` : "No account";
   }
   if (s.type === "soundcloud") return "No account";
+  if (s.type === "radio")
+    return ["No account", s.config.country && countryName(s.config.country)].filter(Boolean).join(" · ");
   if (s.type === "spotify") return `${s.config.display_name ?? "Spotify"} · ${s.config.bitrate ?? 320} kbps`;
   if (s.type === "tidal") {
     const q: Record<string, string> = { LOW: "AAC 96", HIGH: "AAC 320", LOSSLESS: "FLAC CD" };

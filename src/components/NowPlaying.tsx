@@ -1,5 +1,5 @@
 import { Field, PanelSection, PanelSectionRow, SliderField } from "@decky/ui";
-import { FC, ReactNode } from "react";
+import { FC, ReactNode, useEffect, useState } from "react";
 import {
   FaHeart,
   FaPause,
@@ -13,8 +13,8 @@ import {
   FaVolumeUp,
 } from "react-icons/fa";
 import { MdRepeatOne } from "react-icons/md";
-import { setSetting } from "../api";
-import { hasFeature, player } from "../player";
+import { onAir, setSetting } from "../api";
+import { QueueItem, hasFeature, player } from "../player";
 import { showTrackMenu, toggleStar } from "./TrackMenu";
 import { useStore } from "../store";
 import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime } from "./common";
@@ -38,6 +38,40 @@ const Seek: FC = () => {
         }
         onChange={(v) => player.seek(v)}
       />
+    </PanelSectionRow>
+  );
+};
+
+const ON_AIR_POLL_MS = 20_000;
+
+/** In place of the seek bar for live streams: a "Live" marker and the song the station is playing. */
+const LiveBar: FC<{ item: QueueItem; playing: boolean }> = ({ item, playing }) => {
+  const [title, setTitle] = useState<string | null>(null);
+  useEffect(() => {
+    setTitle(null);
+    if (!playing) return;
+    let cancelled = false;
+    const poll = () =>
+      onAir(item.instanceId, item.track.id)
+        .then((r) => !cancelled && setTitle(r.ok ? r.data : null))
+        .catch(() => {});
+    poll();
+    const timer = window.setInterval(poll, ON_AIR_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [item.instanceId, item.track.id, playing]);
+  return (
+    <PanelSectionRow>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "6px 0", minWidth: 0 }}>
+        <span style={{ color: "#ff5c5c", fontWeight: "bold", letterSpacing: 1, flexShrink: 0 }}>● LIVE</span>
+        {title && (
+          <span style={{ opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {title}
+          </span>
+        )}
+      </div>
     </PanelSectionRow>
   );
 };
@@ -97,7 +131,7 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
           </div>
         </Field>
       </PanelSectionRow>
-      {item && <Seek />}
+      {item && (item.track.live ? <LiveBar item={item} playing={state.playing} /> : <Seek />)}
       <ButtonRow>
         <IconButton label="Shuffle" active={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
           <FaRandom />

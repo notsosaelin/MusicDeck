@@ -2,8 +2,9 @@
 Plain-dict data model shared by every service, so the frontend renders one shape regardless of source.
 
 Track:      {"id", "title", "artist", "album", "duration", "art",
-             "album_id", "artist_id", "starred", "gain"}
+             "album_id", "artist_id", "starred", "gain", "live"?}
             gain: {"track", "album", "track_peak", "album_peak"} in dB / linear peak, or None
+            live: present (True) only for endless streams such as radio stations: no length, no seeking
 Collection: {"id", "kind", "title", "subtitle", "art"}   kind: album | artist | playlist | folder
 Page:       {"title", "subtitle", "art", "collections": [Collection], "tracks": [Track],
              "extra": [{"title", "tracks": [Track]}]}   extra = more titled track lists (e.g. "Videos")
@@ -17,9 +18,12 @@ from typing import Any, Optional
 
 def track(id: str, title: str, artist: str = "", album: str = "", duration: float = 0,
           art: Optional[str] = None, album_id: Optional[str] = None, artist_id: Optional[str] = None,
-          starred: bool = False, gain: Optional[dict[str, float]] = None) -> dict[str, Any]:
-    return {"id": id, "title": title, "artist": artist, "album": album, "duration": duration, "art": art,
-            "album_id": album_id, "artist_id": artist_id, "starred": starred, "gain": gain}
+          starred: bool = False, gain: Optional[dict[str, float]] = None, live: bool = False) -> dict[str, Any]:
+    t = {"id": id, "title": title, "artist": artist, "album": album, "duration": duration, "art": art,
+         "album_id": album_id, "artist_id": artist_id, "starred": starred, "gain": gain}
+    if live:
+        t["live"] = True
+    return t
 
 
 def gain(track_db: Optional[float] = None, album_db: Optional[float] = None,

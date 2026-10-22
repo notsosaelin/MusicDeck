@@ -191,8 +191,9 @@ export class Player {
     this.nowPlayingSent = at > 5;
     this.submitted = at >= Math.min((item.track.duration || 0) * SCROBBLE_FRACTION, SCROBBLE_MAX_SECONDS);
     this.prefetched = false;
-    this.position.set({ current: session.position || 0, duration: item.track.duration || 0 });
-    void this.prepare(index, false, session.position || 0);
+    const position = item.track.live ? 0 : session.position || 0;
+    this.position.set({ current: position, duration: item.track.duration || 0 });
+    void this.prepare(index, false, position);
   }
 
   /** Patch a track everywhere it appears in the queue (e.g. after starring it). */
@@ -479,6 +480,8 @@ export class Player {
   }
 
   private onPlaying() {
+    // a live stream can drop any number of times over hours; each reconnect that plays starts afresh
+    if (this.current?.track.live) this.recoveries = 0;
     if (!this.prefetched) {
       this.prefetched = true;
       this.prefetchNext();
@@ -570,6 +573,8 @@ export class Player {
   }
 
   private onEnded() {
+    // a live stream only "ends" when the station drops the connection: reconnect instead of skipping
+    if (this.current?.track.live) return this.recover("live stream ended");
     if (this.state.get().repeat !== "one") this.next(true);
   }
 
@@ -585,7 +590,7 @@ export class Player {
       return;
     }
     this.recoveries++;
-    const at = this.audio.currentTime || 0;
+    const at = item.track.live ? 0 : this.audio.currentTime || 0; // live streams rejoin at "now"
     dlog("recover", { reason, at, id: item.track.id });
     forgetStream(item.instanceId, item.track.id)
       .catch(() => {})

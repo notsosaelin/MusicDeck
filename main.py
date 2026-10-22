@@ -418,6 +418,14 @@ class Plugin:
         return await _result(self._call(instance_id, lambda s: s.star(track_id, starred)))
 
     @_when_ready
+    async def on_air(self, instance_id: str, track_id: str) -> dict[str, Any]:
+        """What a live station is playing right now (radio), or None."""
+        async def work():
+            instance = self._instance(instance_id)
+            return await instance.on_air(track_id) if hasattr(instance, "on_air") else None
+        return await _result(work())
+
+    @_when_ready
     async def scrobble(self, instance_id: str, track_id: str, submission: bool) -> dict[str, Any]:
         if not self.settings.get("playback").get("scrobble", True):
             return {"ok": True, "data": None}

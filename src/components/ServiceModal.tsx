@@ -96,6 +96,40 @@ const LocalFields: FC<{
   );
 };
 
+// Countries offered for radio's "Popular near you" (ISO codes; names come from the browser's own list)
+// prettier-ignore
+const RADIO_COUNTRIES = [
+  "US", "GB", "CA", "AU", "DE", "FR", "NL", "ES", "IT", "BR", "MX", "JP", "KR", "SE", "NO", "PL",
+  "IE", "NZ", "AT", "CH", "BE", "DK", "FI", "PT", "AR", "IN", "RU", "TR", "ZA",
+];
+
+export const countryName = (code: string) => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+};
+
+/** Internet radio: no account; a country only adds "Popular near you" to the home view. */
+const RadioFields: FC<{ draft: ServiceDraft; setConfig: (c: Record<string, any>) => void }> = ({
+  draft,
+  setConfig,
+}) => (
+  <DropdownItem
+    label="Country"
+    description="Adds the most popular stations there to the home view."
+    rgOptions={[
+      { data: "", label: "None" },
+      ...RADIO_COUNTRIES.map((c) => ({ data: c, label: countryName(c) })).sort((a, b) =>
+        a.label.localeCompare(b.label),
+      ),
+    ]}
+    selectedOption={draft.config.country ?? ""}
+    onChange={(o) => setConfig({ ...draft.config, country: o.data })}
+  />
+);
+
 const TIDAL_QUALITIES = [
   { data: "LOW", label: "AAC 96 kbps" },
   { data: "HIGH", label: "AAC 320 kbps" },
@@ -470,6 +504,7 @@ export const ServiceModal: FC<{
             openDashboard={openDashboard}
           />
         )}
+        {type === "radio" && <RadioFields draft={draft} setConfig={setConfig} />}
         {type === "youtube" && (
           <ToggleField
             label="Include all YouTube videos in search"

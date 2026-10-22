@@ -330,6 +330,42 @@ async def run():
         check(t["artist"] == "A, B" and t["duration"] == 180 and t["art"] == "al1" and t["starred"]
               and t["artist_id"] == "a1" and t["gain"]["track"] == -6.2, "track mapping (ticks, album art fallback)")
 
+        print("internet radio")
+        from aiohttp import web as aioweb
+        from musicdeck.services.radio import RadioService
+        cfg = RadioService.prepare_config({"country": "de", "favourites": [{"id": "x"}]}, {"favourites": [{"id": "kept"}]})
+        check(cfg == {"country": "DE", "favourites": [{"id": "kept"}]}, "country normalised; stored favourites survive edits")
+        check(RadioService.prepare_config({"country": "Germany"}, None)["country"] == "", "only ISO codes accepted")
+        rs = RadioService("rd", {"favourites": [{"id": "s1"}]}, tmp)
+        station = rs._station({"stationuuid": "s1", "name": " Jazz FM ", "codec": "MP3", "bitrate": 128,
+                               "country": "Germany", "tags": "jazz,smooth,lounge,extra", "favicon": ""})
+        check(station["live"] and station["title"] == "Jazz FM" and station["artist"] == "Germany · MP3 128 kbps"
+              and station["album"] == "jazz, smooth, lounge" and station["starred"] and station["art"] is None,
+              "stations are live tracks with place, quality and genres")
+        from musicdeck import models as md_models
+        check("live" not in md_models.track("t", "Song"), "ordinary tracks carry no live flag")
+
+        async def icy(request):
+            # 16 bytes of audio, then a metadata block announcing the song, as Icecast sends it
+            meta = b"StreamTitle='Artist - Song';StreamUrl='';"
+            meta += b"\0" * (-len(meta) % 16)
+            body = b"A" * 16 + bytes([len(meta) // 16]) + meta + b"B" * 16
+            return aioweb.Response(body=body, headers={"icy-metaint": "16", "Content-Type": "audio/mpeg"})
+        icy_app = aioweb.Application()
+        icy_app.router.add_get("/stream", icy)
+        icy_runner = aioweb.AppRunner(icy_app)
+        await icy_runner.setup()
+        icy_site = aioweb.TCPSite(icy_runner, "127.0.0.1", 0)
+        await icy_site.start()
+        icy_port = icy_site._server.sockets[0].getsockname()[1]
+        await rs.start()
+        rs.stations["s1"] = (time.time(), {"stationuuid": "s1", "url_resolved": f"http://127.0.0.1:{icy_port}/stream"})
+        check(await rs.on_air("s1") == "Artist - Song", "song on air read from ICY metadata")
+        rs.stations["s2"] = (time.time(), {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})
+        check(await rs.on_air("s2") is None, "HLS stations have no ICY title")
+        await rs.stop()
+        await icy_runner.cleanup()
+
         print("decky's python")
         import re as _re
         # Decky's frozen interpreter ships without these; a top-level import stops the whole plugin loading
