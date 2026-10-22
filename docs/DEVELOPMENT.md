@@ -14,6 +14,7 @@ backend/spotify-helper/    Rust source of bin/spotify-helper
 bin/                       built native helpers: spotify-helper, qjs (not in git)
 scripts/                   vendor, package, deploy, helper build, CDP tool
 tests/test_backend.py      backend test suite (no device, no network)
+tests/ui/                  frontend logic tests (Node's test runner; Steam's pieces are stand-ins)
 docs/                      this documentation
 decky.pyi                  type stubs for Decky's `decky` module (from the plugin template)
 ```
@@ -108,6 +109,21 @@ ListenBrainz and an Icecast station, so it needs no network. It covers:
   triple taps run at once (saves, removals, switches, rescans), corrupt saved files, and bad
   requests to the stream server. Nothing may raise, lose data, or answer with a server error;
 - that no MusicDeck module imports a standard-library package Decky's Python lacks.
+
+The frontend's logic has its own tests, run by Node (22.15 or later) with nothing to install:
+
+```sh
+pnpm test        # node --import ./tests/ui/setup.mjs --test tests/ui/*.test.ts
+```
+
+`tests/ui/setup.mjs` compiles the TypeScript with the project's own compiler (`loader.mjs`), resolves
+imports as the bundler does, and puts stand-ins in place of what only exists inside Steam
+(`tests/ui/fakes/`: Decky's packages, whose `callable` answers from a `backend` object the test fills,
+hls.js, toasts), plus an `<audio>` element that plays at once and a silent Web Audio graph. They
+cover the player's queue (playing, Play next and Add to queue shuffled or not, moving, removing,
+stale stream answers), its transport (wrapping, repeat, previous, volume and seek limits), stores
+and bounded caches, and media URLs. Logic that draws nothing belongs here; what Steam draws is
+checked on a device (below).
 
 Also run `npx tsc --noEmit` (or `pnpm typecheck`) for the frontend.
 

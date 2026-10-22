@@ -6,7 +6,8 @@
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./tests/ui/setup.mjs --test tests/ui/*.test.ts"
   },
   "keywords": [
     "decky",
