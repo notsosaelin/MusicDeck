@@ -74,6 +74,26 @@ export const Art: FC<{
   );
 };
 
+/** The nearest ancestor of `el` that scrolls (in the Quick Access menu, the panel itself). */
+function scrollerOf(el: Element | null): HTMLElement | null {
+  for (let node = el?.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) return node;
+  }
+  return null;
+}
+
+/**
+ * Steam only scrolls a focused element just into view, so focusing the top of the panel can leave its
+ * header hidden. Call from the topmost focusable's onGamepadFocus to show the panel from the very top.
+ */
+export const scrollPanelToTop = (evt: { currentTarget: EventTarget | null }) =>
+  scrollerOf(evt.currentTarget as Element)?.scrollTo({ top: 0, behavior: "smooth" });
+
+/** Bring a focused block that's taller than a row (the lyrics) wholly into view, centred. */
+export const scrollIntoCentre = (evt: { currentTarget: EventTarget | null }) =>
+  (evt.currentTarget as Element | null)?.scrollIntoView({ block: "center", behavior: "smooth" });
+
 export const ellipsis: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
 /**

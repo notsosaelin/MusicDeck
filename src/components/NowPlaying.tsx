@@ -17,7 +17,7 @@ import { OnAir, onAir, setSetting } from "../api";
 import { QueueItem, hasFeature, player } from "../player";
 import { showTrackMenu, toggleStar } from "./TrackMenu";
 import { useStore } from "../store";
-import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime } from "./common";
+import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime, scrollPanelToTop } from "./common";
 
 const Seek: FC = () => {
   const { current, duration } = useStore(player.position);
@@ -105,6 +105,7 @@ export const NowPlaying: FC<{ children?: ReactNode }> = ({ children }) => {
           onActivate={(e: any) => item && showTrackMenu(item.instanceId, item.track, e?.currentTarget)}
           onClick={(e: any) => item && showTrackMenu(item.instanceId, item.track, e?.currentTarget)}
           onOKActionDescription="Options"
+          onGamepadFocus={scrollPanelToTop}
           onSecondaryButton={() =>
             item && hasFeature(item.instanceId, "star") && toggleStar(item.instanceId, item.track)
           }
