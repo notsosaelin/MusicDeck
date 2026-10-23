@@ -335,9 +335,9 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
         <Notice>Nothing playing. Find something in Home or Search.</Notice>
       ) : (
         <Focusable
+          // Y and R2 work without a hint: the moon and the Lyrics/Queue pills are on screen, and the
+          // hint bar keeps to what can't be seen
           onOptionsButton={onSleep}
-          onOptionsActionDescription="Screen off"
-          actionDescriptionMap={{ [R2]: side === "lyrics" ? "Queue" : "Lyrics" }}
           onButtonDown={(e: any) => {
             if (e?.detail?.button === R2) {
               toggleSide();
@@ -677,8 +677,8 @@ export const MediaCenter: FC = () => {
   return (
     <Focusable
       className="mc-center"
+      // Start plays or pauses anywhere (unhinted: the player's own button shows which it'll do)
       onMenuButton={() => player.toggle()}
-      onMenuActionDescription={item ? (playing ? "Pause" : "Play") : undefined}
       actionDescriptionMap={{ [VIEW_BUTTON]: "Quick Access" }}
       onButtonDown={(e: any) => {
         if (e?.detail?.button === VIEW_BUTTON && !screenOff) backToPanel();

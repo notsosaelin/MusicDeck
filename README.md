@@ -22,7 +22,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   pages; Search; and Settings (the equalizer; what it opens on, background, cover and lyrics sizes, screen
   off when idle), all on the controller.
 - **Genres, moods and charts** from SoundCloud, YouTube Music, Qobuz, Navidrome/Subsonic, Bandcamp, radio and
-  podcasts, as rows of tiles on the media center's Home.
+  podcasts, each a row of its albums, playlists or stations on the media center's Home.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
 - **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, plus UPnP/DLNA
   devices (Sonos, AV receivers, smart TVs). The speaker fetches the music itself; the queue, play reports and

@@ -1,5 +1,5 @@
 import { Focusable, TextField } from "@decky/ui";
-import { FC, Fragment, useEffect, useState } from "react";
+import { FC, Fragment, useEffect, useRef, useState } from "react";
 import {
   FaCheck,
   FaDownload,
@@ -43,7 +43,20 @@ import {
 } from "../Browser";
 import { confirmClearQueue } from "../Queue";
 import { saveCollection, showCollectionMenu, showTrackMenu } from "../TrackMenu";
-import { Card, Cover, Loading, Notice, PageButton, SectionTitle, Shelf, Tile, TrackLine, TrackTable } from "./parts";
+import {
+  Card,
+  Cover,
+  Loading,
+  Notice,
+  PageButton,
+  SectionTitle,
+  Shelf,
+  Tile,
+  TrackCard,
+  TrackLine,
+  TrackTable,
+  useNear,
+} from "./parts";
 
 /** Where each browsing tab of the media center is: a history of views, B steps back through it. */
 export type CenterStack = "home" | "library" | "search";
@@ -177,21 +190,75 @@ export const HomePage: FC<{ instanceId: string; withoutCategories?: boolean; wit
           )}
         </Fragment>
       ))}
-      {/* the source's genres, moods and charts (MusicService.browse), each a row of colour tiles */}
+      {/* the source's genres, moods and charts (MusicService.browse), each a row of its music */}
       {browse?.ok &&
-        browse.data.map((s) => (
-          <Shelf key={`browse:${s.title}`} title={s.title}>
-            {s.items.map((c) => (
-              <Tile
+        browse.data.flatMap((s) =>
+          s.items.map((c) => <CategoryRow key={`browse:${c.kind}:${c.id}`} instanceId={instanceId} category={c} />),
+        )}
+    </>
+  );
+};
+
+/** Cards a category row shows before its "All" card */
+const ROW_SIZE = 16;
+
+/**
+ * One genre, mood or chart on Home: a row of its albums and playlists (or songs and stations), ending
+ * in a card for its whole page. Loaded once it comes near the screen; a category with nothing in it
+ * leaves no row.
+ */
+const CategoryRow: FC<{ instanceId: string; category: Collection }> = ({ instanceId, category }) => {
+  const box = useRef<HTMLDivElement>(null);
+  const near = useNear(box);
+  return (
+    <div ref={box} style={{ minHeight: near ? undefined : 260 }}>
+      {near ? (
+        <CategoryShelf instanceId={instanceId} category={category} />
+      ) : (
+        <SectionTitle>{category.title}</SectionTitle>
+      )}
+    </div>
+  );
+};
+
+const CategoryShelf: FC<{ instanceId: string; category: Collection }> = ({ instanceId, category }) => {
+  const key = `${instanceId}:${category.kind}:${category.id}`;
+  const result = useResult<Page>(key, () => openCollection(instanceId, category.kind, category.id));
+  if (!result) return <SectionTitle>{category.title}</SectionTitle>;
+  if (!result.ok || (!result.data.collections.length && !result.data.tracks.length)) return null;
+  const { collections, tracks } = result.data;
+  const open = () => pushCenter("home", { type: "collection", collection: category });
+  return (
+    <Shelf title={category.title}>
+      {collections.length
+        ? collections
+            .slice(0, ROW_SIZE)
+            .map((c) => (
+              <Card
                 key={c.kind + c.id}
+                instanceId={instanceId}
                 c={c}
-                colour
                 onOpen={() => pushCenter("home", { type: "collection", collection: c })}
+                onPlay={c.kind === "album" || c.kind === "playlist" ? () => playCollection(instanceId, c) : undefined}
+              />
+            ))
+        : tracks
+            .slice(0, ROW_SIZE)
+            .map((t, i) => (
+              <TrackCard
+                key={t.id + i}
+                instanceId={instanceId}
+                track={t}
+                onPlay={() => player.playList(instanceId, tracks, i)}
+                onSecondary={() => addToQueue(instanceId, t)}
               />
             ))}
-          </Shelf>
-        ))}
-    </>
+      <Card
+        instanceId={instanceId}
+        c={{ ...category, title: "All", subtitle: category.title, art: null }}
+        onOpen={open}
+      />
+    </Shelf>
   );
 };
 

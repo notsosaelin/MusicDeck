@@ -1,5 +1,5 @@
 import { Focusable, Spinner } from "@decky/ui";
-import { FC, ReactNode, useState } from "react";
+import { FC, ReactNode, RefObject, useEffect, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
@@ -336,18 +336,8 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   return node;
 }
 
-/** A tile's colour, from its title: the same every visit, varied from tile to tile. */
-function hueOf(title: string): number {
-  let h = 0;
-  for (const ch of title) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-}
-
-/**
- * A big labelled tile for a part of the library ("All albums", "Artists"), Media Center style, or with
- * `colour`, a genre or mood in its own colour, as music apps show them.
- */
-export const Tile: FC<{ c: Collection; onOpen: () => void; colour?: boolean }> = ({ c, onOpen, colour }) => (
+/** A big labelled tile for a part of the library ("All albums", "Artists"), Media Center style. */
+export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) => (
   <Focusable
     className="mc-tile"
     data-mc={c.kind + ":" + c.id}
@@ -364,16 +354,67 @@ export const Tile: FC<{ c: Collection; onOpen: () => void; colour?: boolean }> =
       display: "flex",
       flexDirection: "column",
       justifyContent: "space-between",
-      background: colour
-        ? `linear-gradient(135deg, hsl(${hueOf(c.title)}, 55%, 42%), hsl(${(hueOf(c.title) + 40) % 360}, 60%, 26%))`
-        : "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
+      background: "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
     }}
   >
-    {colour ? (
-      <div style={{ fontSize: 12, opacity: 0.75, color: "#ffffff" }}>{c.subtitle}</div>
-    ) : (
-      <div style={{ fontSize: 20, opacity: 0.7 }}>{KIND_ICON[c.kind]}</div>
-    )}
+    <div style={{ fontSize: 20, opacity: 0.7 }}>{KIND_ICON[c.kind]}</div>
     <div style={{ fontSize: 15, fontWeight: 600, color: "#ffffff", lineHeight: 1.2 }}>{c.title}</div>
   </Focusable>
 );
+
+/** A track on a shelf (a station, a song): its cover, title and artist. A plays it, X queues it. */
+export const TrackCard: FC<{
+  instanceId: string;
+  track: Track;
+  onPlay: () => void;
+  onSecondary?: () => void;
+}> = ({ instanceId, track, onPlay, onSecondary }) => {
+  const [focused, setFocused] = useState(false);
+  const size = useCardSize();
+  return (
+    <Focusable
+      className="mc-card"
+      noFocusRing
+      onActivate={onPlay}
+      onClick={onPlay}
+      onOKActionDescription="Play"
+      onSecondaryButton={onSecondary}
+      onSecondaryActionDescription={onSecondary ? "Add to queue" : undefined}
+      onGamepadFocus={() => setFocused(true)}
+      onGamepadBlur={() => setFocused(false)}
+      style={{ width: size, flexShrink: 0, padding: 2 }}
+    >
+      <Cover instanceId={instanceId} c={{ art: track.art, kind: "album" }} size={size} />
+      <div style={{ marginTop: 10 }}>
+        <ScrollingText text={track.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
+        {track.artist && (
+          <ScrollingText text={track.artist} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
+        )}
+      </div>
+    </Focusable>
+  );
+};
+
+/**
+ * Whether `ref` has come near the visible part of the page, so rows far down can wait to load.
+ * Stays true once it has. Uses the IntersectionObserver of the window the element is in (this code
+ * runs in Steam's shared context; see watchSize).
+ */
+export function useNear(ref: RefObject<HTMLElement | null>): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    const Observer: typeof IntersectionObserver =
+      (el.ownerDocument.defaultView as any)?.IntersectionObserver ?? IntersectionObserver;
+    // measured against the tab's own scrolling area: rows below it are hidden by it, so against the
+    // window they'd never come near, and with nothing to focus there the controller can't scroll on
+    const observer = new Observer((entries) => entries.some((e) => e.isIntersecting) && setNear(true), {
+      root: scrollParent(el),
+      rootMargin: "600px 0px",
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [near]);
+  return near;
+}
