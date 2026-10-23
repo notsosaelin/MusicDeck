@@ -27,7 +27,11 @@ SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "se
 # Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
 RESTORED_SIGNED_OUT = "sign_in_again"
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
-FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log"}
+FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log", "center"}
+# the media center's choices (settings.DEFAULTS["center"]); anything else is refused
+CENTER_CHOICES = {"open_on": {"last", "playing", "home", "library"}, "background": {"art", "plain"},
+                  "cards": {"small", "medium", "large"}, "lyrics": {"small", "medium", "large"},
+                  "idle_off": {0, 1, 2, 5, 10}}
 # What can be set to play with a game: things with a track list of their own
 GAME_MUSIC_KINDS = {"album", "playlist"}
 # The same play report for the same track within this many seconds is a duplicate (see scrobble)
@@ -201,6 +205,7 @@ class Plugin:
                              "pending": self.listenbrainz.pending_count()},
             "game_music": self.settings.get("game_music"),
             "offline": self.offline.status(),
+            "center": {**DEFAULTS["center"], **self.settings.get("center")},
         }
 
     @_when_ready
@@ -862,6 +867,10 @@ def _valid_setting(key: str, value: Any) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
     if key == "qam_mode":
         return value in ("replace", "separate")
+    if key == "center" and isinstance(value, dict):
+        if any(k in CENTER_CHOICES and (not isinstance(value[k], (str, int)) or value[k] not in CENTER_CHOICES[k])
+               for k in value):
+            return False
     if isinstance(default, dict):
         # only known fields, each of its default's kind (EQ gains: as many numbers as there are bands)
         return isinstance(value, dict) and all(k in default and _same_kind(v, default[k]) for k, v in value.items())

@@ -3,7 +3,7 @@ import { FC, ReactNode, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
-import { mediaUrl, useStore } from "../../store";
+import { mediaUrl, pluginState, useStore } from "../../store";
 import { ACCENT, ScrollingText, formatTime } from "../common";
 
 /**
@@ -20,10 +20,20 @@ export const CENTER_CSS = `
 .mc-row.gpfocus, .mc-row:hover { background: rgba(255, 255, 255, 0.12); }
 .mc-row.gpfocus { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .mc-shelf::-webkit-scrollbar { display: none; }
+.mc-tile { border-radius: 6px; outline: none; transition: transform 0.12s ease-out; }
+.mc-tile.gpfocus, .mc-tile:hover { transform: scale(1.04); box-shadow: 0 0 0 3px #ffffff, 0 10px 28px rgba(0, 0, 0, 0.55); }
+/* sliders sit on the page like the rest, not in the grey box Steam's settings give them; focus lights them */
+.mc-center :has([class*="SliderControlPanelGroup"]) { background: transparent !important; }
+.mc-center [class*="SliderControlPanelGroup"].gpfocus { background: rgba(255, 255, 255, 0.08); border-radius: 6px; }
 `;
 
-/** A shelf card's width: about six across, whatever the screen and Steam's UI scale */
-export const CARD = "clamp(96px, 14vw, 190px)";
+/** A shelf card's width by the Customize choice: about eight, six or four across, whatever the screen and Steam's UI scale */
+const CARD_SIZES = {
+  small: "clamp(80px, 10.5vw, 150px)",
+  medium: "clamp(96px, 14vw, 190px)",
+  large: "clamp(120px, 20vw, 260px)",
+};
+const useCardSize = () => CARD_SIZES[useStore(pluginState)?.center?.cards ?? "medium"] ?? CARD_SIZES.medium;
 
 const KIND_ICON: Record<Collection["kind"], ReactNode> = {
   album: <FaCompactDisc />,
@@ -77,6 +87,7 @@ export const Card: FC<{
   onOptions?: (e: any) => void;
 }> = ({ instanceId, c, onOpen, onPlay, onOptions }) => {
   const [focused, setFocused] = useState(false);
+  const size = useCardSize();
   return (
     <Focusable
       className="mc-card"
@@ -91,9 +102,9 @@ export const Card: FC<{
       onOptionsActionDescription={onOptions ? "Options" : undefined}
       onGamepadFocus={() => setFocused(true)}
       onGamepadBlur={() => setFocused(false)}
-      style={{ width: CARD, flexShrink: 0, padding: 2 }}
+      style={{ width: size, flexShrink: 0, padding: 2 }}
     >
-      <Cover instanceId={instanceId} c={c} size={CARD} />
+      <Cover instanceId={instanceId} c={c} size={size} />
       <div style={{ marginTop: 10, textAlign: c.kind === "artist" ? "center" : "left" }}>
         <ScrollingText text={c.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
         {c.subtitle && (
@@ -288,15 +299,19 @@ export const Notice: FC<{ children: ReactNode }> = ({ children }) => (
  * Puts the controller on something in `container` once its view has rendered: the element marked
  * `data-mc={key}` (the card a page was opened from, going back), else the first search result, else
  * the first thing to press.
- * Only when nothing there has focus, since replacing a view (opening a page, searching) drops it.
- * Retries for a moment, as a view's contents arrive after it loads.
+ * Retries for a moment, as a view's contents arrive after it loads, unless the user moves first.
  */
 export function focusInto(container: HTMLElement | null, key?: string): () => void {
   let tries = 0;
+  // where focus was at the first look: Steam's own pick on a tab change (which can be the bottom of the
+  // page, from where the tab bar was), overridden; once the user moves it, it's theirs
+  let seen: Element | null | undefined;
   const timer = window.setInterval(() => {
     const doc = container?.ownerDocument;
     if (!container || !doc || ++tries > 30) return window.clearInterval(timer);
-    if (container.contains(doc.activeElement)) return window.clearInterval(timer);
+    const active = doc.activeElement;
+    if (seen === undefined) seen = active;
+    else if (active !== seen && container.contains(active)) return window.clearInterval(timer);
     const target =
       (key && container.querySelector<HTMLElement>(`[data-mc="${CSS.escape(key)}"]`)) ||
       container.querySelector<HTMLElement>(".mc-results .mc-row, .mc-results .mc-card") ||
@@ -309,3 +324,28 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
   }, 100);
   return () => window.clearInterval(timer);
 }
+
+/** A big labelled square for a part of the library ("All albums", "Artists"), Media Center style. */
+export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) => (
+  <Focusable
+    className="mc-tile"
+    data-mc={c.kind + ":" + c.id}
+    noFocusRing
+    onActivate={onOpen}
+    onClick={onOpen}
+    onOKActionDescription="Open"
+    style={{
+      width: "clamp(120px, 17vw, 230px)",
+      height: "clamp(64px, 9vw, 120px)",
+      padding: "12px 14px",
+      boxSizing: "border-box",
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-between",
+      background: "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
+    }}
+  >
+    <div style={{ fontSize: 20, opacity: 0.7 }}>{KIND_ICON[c.kind]}</div>
+    <div style={{ fontSize: 15, fontWeight: 600, color: "#ffffff", lineHeight: 1.2 }}>{c.title}</div>
+  </Focusable>
+);

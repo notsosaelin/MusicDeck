@@ -1,4 +1,4 @@
-import { Focusable, SliderField, Tabs } from "@decky/ui";
+import { DropdownItem, Focusable, Navigation, SliderField, Tabs, ToggleField } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
   FaMoon,
@@ -13,10 +13,12 @@ import {
   FaVolumeUp,
 } from "react-icons/fa";
 import { MdRepeatOne } from "react-icons/md";
-import { setSetting } from "../../api";
+import { CenterSettings, setSetting } from "../../api";
 import { CenterTab, centerTab } from "../../nav";
 import { player } from "../../player";
-import { mediaUrl, pluginState, useStore } from "../../store";
+import { mediaUrl, pluginState, refreshState, useStore } from "../../store";
+import { openMusicDeck } from "../../qam";
+import { Equalizer } from "../Equalizer";
 import { canCast, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
@@ -25,6 +27,7 @@ import {
   CenterStack,
   CollectionPage,
   HomePage,
+  LibraryPage,
   QueuePage,
   SearchPage,
   cardKey,
@@ -265,7 +268,10 @@ const Seek: FC = () => {
  * title and the song's lyrics beside it, and the seek bar, volume and transport underneath. Y turns
  * the screen off.
  */
-const NowPlayingTab: FC<{ onSleep: () => void }> = ({ onSleep }) => {
+const LYRICS_SIZES = { small: [18, 14], medium: [22, 17], large: [28, 21] } as const;
+
+const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyrics"] }> = ({ onSleep, lyricsSize }) => {
+  const [syncedSize, plainSize] = LYRICS_SIZES[lyricsSize] ?? LYRICS_SIZES.medium;
   const state = useStore(player.state);
   const item = state.queue[state.index];
   const lyrics = useLyrics(item);
@@ -330,9 +336,9 @@ const NowPlayingTab: FC<{ onSleep: () => void }> = ({ onSleep }) => {
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>
                 ) : lyrics && !("error" in lyrics) && height > 0 ? (
                   lyrics.synced ? (
-                    <SyncedLyrics lyrics={lyrics} height={height} fontSize={22} />
+                    <SyncedLyrics lyrics={lyrics} height={height} fontSize={syncedSize} />
                   ) : (
-                    <ScrollingPlainLyrics lyrics={lyrics} height={height} fontSize={17} />
+                    <ScrollingPlainLyrics lyrics={lyrics} height={height} fontSize={plainSize} />
                   )
                 ) : null}
               </div>
@@ -394,7 +400,11 @@ const NowPlayingBar: FC = () => {
 };
 
 /** One browsing tab: its history's latest view, with the controller put back where it belongs. */
-const Browse: FC<{ stack: CenterStack; instanceId: string }> = ({ stack, instanceId }) => {
+const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: boolean }> = ({
+  stack,
+  instanceId,
+  withoutCategories,
+}) => {
   const views = useStore(centerNav)[stack];
   const view = views[views.length - 1];
   const box = useRef<HTMLDivElement>(null);
@@ -410,7 +420,11 @@ const Browse: FC<{ stack: CenterStack; instanceId: string }> = ({ stack, instanc
       }}
     >
       {view.type === "home" ? (
-        <HomePage instanceId={instanceId} />
+        stack === "library" ? (
+          <LibraryPage instanceId={instanceId} />
+        ) : (
+          <HomePage instanceId={instanceId} withoutCategories={withoutCategories} />
+        )
       ) : view.type === "search" ? (
         <SearchPage key={view.query} instanceId={instanceId} query={view.query} />
       ) : (
@@ -428,54 +442,215 @@ const Browse: FC<{ stack: CenterStack; instanceId: string }> = ({ stack, instanc
 const TAB_TITLES: Record<CenterTab, string> = {
   playing: "Now Playing",
   home: "Home",
+  library: "Library",
   search: "Search",
   queue: "Queue",
+  sound: "Sound",
+  customize: "Customize",
+};
+
+/** The tabs Customize leaves showing, in order. */
+function visibleTabs(center: CenterSettings): CenterTab[] {
+  return (Object.keys(TAB_TITLES) as CenterTab[]).filter(
+    (t) => (t !== "library" || center.show_library) && (t !== "sound" || center.show_sound),
+  );
+}
+
+const DEFAULT_CENTER: CenterSettings = {
+  open_on: "last",
+  background: "art",
+  cards: "medium",
+  lyrics: "medium",
+  show_library: true,
+  show_sound: true,
+  idle_off: 0,
+};
+
+// GamepadButton.SELECT from @decky/ui (an ambient enum, which isolated builds can't import)
+const VIEW_BUTTON = 13;
+
+/** Leaves the media center for the Quick Access panel, where MusicDeck is. */
+function backToPanel() {
+  Navigation.NavigateBack();
+  window.setTimeout(openMusicDeck, 150);
+}
+
+/**
+ * Turns the screen off after `minutes` without input while Now Playing shows and music plays (Customize;
+ * 0 = never). Any controller input, or the music stopping, starts the wait again.
+ */
+function useIdleScreenOff(minutes: number, active: boolean, sleep: () => void) {
+  useEffect(() => {
+    if (!minutes || !active) return;
+    let last = Date.now();
+    const input = (window as any).SteamClient?.Input?.RegisterForControllerInputMessages?.(() => {
+      last = Date.now();
+    });
+    const timer = window.setInterval(() => {
+      if (Date.now() - last >= minutes * 60_000) {
+        last = Date.now();
+        sleep();
+      }
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+      input?.unregister?.();
+    };
+  }, [minutes, active]);
+}
+
+const CHOICES: { key: keyof CenterSettings; label: string; options: { data: any; label: string }[] }[] = [
+  {
+    key: "open_on",
+    label: "Open on",
+    options: [
+      { data: "last", label: "Where I left it" },
+      { data: "playing", label: "Now Playing" },
+      { data: "home", label: "Home" },
+      { data: "library", label: "Library" },
+    ],
+  },
+  {
+    key: "background",
+    label: "Background",
+    options: [
+      { data: "art", label: "Blurred album art" },
+      { data: "plain", label: "Plain" },
+    ],
+  },
+  {
+    key: "cards",
+    label: "Cover size",
+    options: [
+      { data: "small", label: "Small" },
+      { data: "medium", label: "Medium" },
+      { data: "large", label: "Large" },
+    ],
+  },
+  {
+    key: "lyrics",
+    label: "Lyrics size",
+    options: [
+      { data: "small", label: "Small" },
+      { data: "medium", label: "Medium" },
+      { data: "large", label: "Large" },
+    ],
+  },
+  {
+    key: "idle_off",
+    label: "Screen off when idle",
+    options: [
+      { data: 0, label: "Never" },
+      { data: 1, label: "After 1 minute" },
+      { data: 2, label: "After 2 minutes" },
+      { data: 5, label: "After 5 minutes" },
+      { data: 10, label: "After 10 minutes" },
+    ],
+  },
+];
+
+async function setCenter(patch: Partial<CenterSettings>) {
+  const center = { ...DEFAULT_CENTER, ...pluginState.get()?.center, ...patch };
+  await setSetting("center", center);
+  await refreshState();
+}
+
+/** The media center's own settings, in Steam's settings style. */
+const CustomizePage: FC = () => {
+  const center = { ...DEFAULT_CENTER, ...useStore(pluginState)?.center };
+  return (
+    <div style={{ maxWidth: 760 }}>
+      {CHOICES.map((c) => (
+        <DropdownItem
+          key={c.key}
+          label={c.label}
+          rgOptions={c.options}
+          selectedOption={center[c.key]}
+          onChange={(o) => setCenter({ [c.key]: o.data })}
+        />
+      ))}
+      <ToggleField
+        label="Library tab"
+        description="Your playlists and the source's albums, artists and folders"
+        checked={center.show_library}
+        onChange={(on) => setCenter({ show_library: on })}
+      />
+      <ToggleField
+        label="Sound tab"
+        description="The equalizer"
+        checked={center.show_sound}
+        onChange={(on) => setCenter({ show_sound: on })}
+      />
+      <div style={{ fontSize: 13, opacity: 0.55, marginTop: 16, lineHeight: 1.5 }}>
+        Volume levelling, crossfade and the rest of playback are in Decky → MusicDeck. Press the View button to go back
+        to the Quick Access panel.
+      </div>
+    </div>
+  );
 };
 
 /**
  * MusicDeck's media center, full screen in Steam's main window and laid out like Steam's own library:
- * tabs along the top (L1/R1), Home's rows as shelves of covers, albums and playlists as pages with
- * their track lists, a Now Playing view with lyrics, and the queue. Start plays or pauses from
- * anywhere; B steps back through a tab's pages, then leaves.
+ * tabs along the top (L1/R1), Home's rows as shelves of covers, the Library's playlists and
+ * categories, albums and playlists as pages with their track lists, a Now Playing view with lyrics,
+ * the queue, the equalizer and its own settings. Start plays or pauses from anywhere; B steps back
+ * through a tab's pages, then up to the tabs, then to the Quick Access panel; so does View, at once.
  */
 export const MediaCenter: FC = () => {
   const { tab } = useStore(centerTab);
   const state = useStore(pluginState);
+  const center = { ...DEFAULT_CENTER, ...state?.center };
   const { queue, index, playing } = useStore(player.state);
   const [screenOff, sleep, wake] = useScreenOff();
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const live = state?.active_service ?? null;
+  const tabs = visibleTabs(center);
+  // a tab Customize just hid: back to the first
+  const shown = tabs.includes(tab) ? tab : tabs[0];
+  useIdleScreenOff(center.idle_off, shown === "playing" && playing && !screenOff, sleep);
 
   const browse = (stack: CenterStack) =>
     live ? (
-      <Browse stack={stack} instanceId={live} />
+      <Browse stack={stack} instanceId={live} withoutCategories={center.show_library} />
     ) : (
       <Notice>Add a music source in Decky → MusicDeck to browse it here.</Notice>
     );
   const content: Record<CenterTab, ReactNode> = {
-    playing: <NowPlayingTab onSleep={sleep} />,
+    playing: <NowPlayingTab onSleep={sleep} lyricsSize={center.lyrics} />,
     home: browse("home"),
+    library: browse("library"),
     search: browse("search"),
     queue: <QueuePage />,
+    sound: (
+      <div style={{ maxWidth: 760 }}>
+        <Equalizer />
+      </div>
+    ),
+    customize: <CustomizePage />,
   };
 
   return (
     <Focusable
+      className="mc-center"
       onMenuButton={() => player.toggle()}
       onMenuActionDescription={item ? (playing ? "Pause" : "Play") : undefined}
+      actionDescriptionMap={{ [VIEW_BUTTON]: "Quick Access" }}
+      onButtonDown={(e: any) => {
+        if (e?.detail?.button === VIEW_BUTTON && !screenOff) backToPanel();
+      }}
       onCancelButton={(e: any) => {
-        if (screenOff) {
-          wake();
-          e?.stopPropagation?.();
-        }
+        e?.stopPropagation?.();
+        // reaching here, B wasn't taken by a page (going back) or by Steam's tabs (up to the tab bar)
+        if (screenOff) wake();
+        else backToPanel();
       }}
       // clip, not hidden: Steam's focus scrolling can move an overflow:hidden box, and did, by the
       // background's overhang
       style={{ position: "absolute", inset: 0, overflow: "clip", background: "#0e141b", color: "#dcdedf" }}
     >
       <style>{PLAYER_CSS + CENTER_CSS}</style>
-      {art && (
+      {art && center.background === "art" && (
         // blurred past its edges, in a layer of its own that clips the overhang
         <div style={{ position: "absolute", inset: 0, overflow: "clip" }}>
           <div
@@ -485,7 +660,7 @@ export const MediaCenter: FC = () => {
               backgroundImage: `url("${art}")`,
               backgroundSize: "cover",
               backgroundPosition: "center",
-              filter: `blur(60px) brightness(${tab === "playing" ? 0.32 : 0.18}) saturate(1.2)`,
+              filter: `blur(60px) brightness(${shown === "playing" ? 0.32 : 0.18}) saturate(1.2)`,
               transition: "filter 0.3s",
             }}
           />
@@ -505,14 +680,14 @@ export const MediaCenter: FC = () => {
       >
         <div style={{ flex: 1, minHeight: 0 }}>
           <Tabs
-            activeTab={tab}
+            activeTab={shown}
             onShowTab={(t: string) => centerTab.set({ tab: t as CenterTab })}
             autoFocusContents
-            tabs={(Object.keys(TAB_TITLES) as CenterTab[]).map((id) => ({
+            tabs={tabs.map((id) => ({
               id,
               title: TAB_TITLES[id],
-              // Now Playing fits the screen itself; the browsing tabs scroll, down only (clip, not
-              // hidden: a card growing at the edge mustn't make the whole tab scroll sideways)
+              // Now Playing fits the screen itself; the others scroll, down only (clip, not hidden: a
+              // card growing at the edge mustn't make the whole tab scroll sideways)
               content:
                 id === "playing" ? (
                   content[id]
@@ -522,7 +697,7 @@ export const MediaCenter: FC = () => {
             }))}
           />
         </div>
-        {tab !== "playing" && <NowPlayingBar />}
+        {shown !== "playing" && <NowPlayingBar />}
       </div>
       {screenOff && <Blackout onWake={wake} />}
     </Focusable>

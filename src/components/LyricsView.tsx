@@ -1,5 +1,5 @@
 import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
-import { FC, useEffect, useRef, useState } from "react";
+import { FC, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Lyrics, getLyrics } from "../api";
 import { openMediaCenter } from "../nav";
 import { QueueItem, player } from "../player";
@@ -48,6 +48,10 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
 }) => {
   const { current } = useStore(player.position);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  // the lines are measured from their elements, which don't exist on the first render: draw once
+  // more as soon as they do (while paused, nothing else would)
+  const [, remeasure] = useState(0);
+  useLayoutEffect(() => remeasure((n) => n + 1), [lyrics, height, fontSize]);
   let active = -1;
   for (let i = 0; i < lyrics.lines.length; i++) {
     if ((lyrics.lines[i].t ?? 0) <= current + 0.25) active = i;

@@ -1,7 +1,7 @@
 import { Navigation } from "@decky/ui";
 import { Collection, Result, Track, playedCollection } from "./api";
 import { player } from "./player";
-import { RecentlyUsed, Store } from "./store";
+import { RecentlyUsed, Store, pluginState } from "./store";
 
 /**
  * Panel navigation state, kept outside React so it survives the QAM closing, and in its own module
@@ -89,12 +89,14 @@ export const invalidateBrowserCache = () => {
 
 /** The media center (components/media), full screen in Steam's main window, and its open tab. */
 export const PLAYER_ROUTE = "/musicdeck/player";
-export type CenterTab = "playing" | "home" | "search" | "queue";
+export type CenterTab = "playing" | "home" | "library" | "search" | "queue" | "sound" | "customize";
 export const centerTab = new Store<{ tab: CenterTab }>({ tab: "playing" });
 
-/** Opens the media center, at `tab` (by default where it was left). */
+/** Opens the media center, at `tab` (by default the one Customize says, or where it was left). */
 export function openMediaCenter(tab?: CenterTab) {
-  if (tab) centerTab.set({ tab });
+  const openOn = pluginState.get()?.center?.open_on;
+  const start = tab ?? (openOn && openOn !== "last" ? openOn : undefined);
+  if (start) centerTab.set({ tab: start });
   Navigation.CloseSideMenus();
   Navigation.Navigate(PLAYER_ROUTE);
 }

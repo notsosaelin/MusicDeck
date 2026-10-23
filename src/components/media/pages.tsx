@@ -17,6 +17,8 @@ import {
   Section,
   Track,
   getHome,
+  getUserPlaylists,
+  localPlaylists,
   isLocalPlaylist,
   openCollection,
   search,
@@ -40,17 +42,19 @@ import {
 } from "../Browser";
 import { confirmClearQueue } from "../Queue";
 import { saveCollection, showCollectionMenu, showTrackMenu } from "../TrackMenu";
-import { Card, Cover, Loading, Notice, PageButton, SectionTitle, Shelf, TrackLine, TrackTable } from "./parts";
+import { Card, Cover, Loading, Notice, PageButton, SectionTitle, Shelf, Tile, TrackLine, TrackTable } from "./parts";
 
 /** Where each browsing tab of the media center is: a history of views, B steps back through it. */
-export type CenterStack = "home" | "search";
+export type CenterStack = "home" | "library" | "search";
 export const centerNav = new Store<Record<CenterStack, View[]>>({
   home: [{ type: "home" }],
+  // the Library tab's start is its own page (LibraryPage), marked as "home"
+  library: [{ type: "home" }],
   search: [{ type: "search", query: "" }],
 });
 
 /** Per tab and depth, the card a page was opened from, so B can put the controller back on it. */
-const openedFrom: Record<CenterStack, string[]> = { home: [], search: [] };
+const openedFrom: Record<CenterStack, string[]> = { home: [], library: [], search: [] };
 export const cardKey = (c: Collection) => c.kind + ":" + c.id;
 
 export function pushCenter(stack: CenterStack, view: View) {
@@ -107,14 +111,27 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
   );
 };
 
+/** A home row that's a way into the library ("All albums", "Artists"), not music to pick from. */
+const isCategories = (s: Section) =>
+  s.items.length > 0 && !s.tracks?.length && s.items.every((c) => c.kind === "list" || c.kind === "folder");
+
+/** A home row of things the user keeps ("Your playlists", "Favourite albums", "Liked songs"), as sources name them. */
+const isYours = (s: Section) => s.items.length > 0 && /\b(your|my|liked|saved|favou?rites?|playlists)\b/i.test(s.title);
+
 /** The source's home rows, each a shelf (or, for rows of songs, a short list). */
-export const HomePage: FC<{ instanceId: string }> = ({ instanceId }) => {
+
+export const HomePage: FC<{ instanceId: string; withoutCategories?: boolean }> = ({
+  instanceId,
+  withoutCategories,
+}) => {
   const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
   if (!result?.ok) return <Loading result={result} />;
-  if (!result.data.length) return <Notice>Nothing here yet</Notice>;
+  // with a Library tab, the library's categories live there
+  const sections = withoutCategories ? result.data.filter((s) => !isCategories(s)) : result.data;
+  if (!sections.length) return <Notice>Nothing here yet</Notice>;
   return (
     <>
-      {result.data.map((s) => (
+      {sections.map((s) => (
         <Fragment key={s.title}>
           {s.items.length > 0 && (
             <Shelf title={s.title}>
@@ -445,6 +462,93 @@ export const QueuePage: FC = () => {
           Clear queue
         </PageButton>
       </div>
+    </>
+  );
+};
+
+/**
+ * The Library tab, as music apps have it: your playlists (MusicDeck's and the source's own) as covers,
+ * then the source's ways into its library ("All albums", "Artists", folders) as tiles.
+ */
+export const LibraryPage: FC<{ instanceId: string }> = ({ instanceId }) => {
+  const home = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
+  const remote = useResult<Collection[]>(`${instanceId}:user-playlists`, () =>
+    hasFeature(instanceId, "playlists")
+      ? getUserPlaylists(instanceId)
+      : Promise.resolve({ ok: true as const, data: [] }),
+  );
+  const [mine, setMine] = useState<Collection[] | null>(null);
+  useEffect(() => {
+    localPlaylists(instanceId)
+      .then(setMine)
+      .catch(() => setMine([]));
+  }, [instanceId]);
+  if (!home?.ok) return <Loading result={home} />;
+  const yours = home.data.filter((s) => isYours(s) && !isCategories(s));
+  const seen = new Set<string>();
+  // one Playlists shelf: MusicDeck's, then the source's (from its playlist list or its home rows)
+  const playlists = [
+    ...(mine ?? []),
+    ...(remote?.ok ? remote.data : []),
+    ...yours.flatMap((s) => s.items.filter((c) => c.kind === "playlist")),
+  ].filter((c) => !seen.has(c.kind + c.id) && !!seen.add(c.kind + c.id));
+  // the rest of what's yours (favourite albums, followed artists), a shelf each
+  const kept = yours
+    .map((s) => ({ title: s.title, items: s.items.filter((c) => c.kind !== "playlist") }))
+    .filter((s) => s.items.length > 0);
+  const categories = home.data.filter(isCategories).flatMap((s) => s.items);
+  const open = (c: Collection) => pushCenter("library", { type: "collection", collection: c });
+  return (
+    <>
+      {playlists.length > 0 && (
+        <Shelf title="Playlists">
+          {playlists.map((c) => (
+            <Card
+              key={c.kind + c.id}
+              instanceId={instanceId}
+              c={c}
+              onOpen={() => open(c)}
+              onPlay={() => playCollection(instanceId, c)}
+              onOptions={
+                hasCollectionMenu(instanceId, c)
+                  ? (e) => showCollectionMenu(instanceId, c, e?.currentTarget)
+                  : undefined
+              }
+            />
+          ))}
+        </Shelf>
+      )}
+      {kept.map((s) => (
+        <Shelf key={s.title} title={s.title}>
+          {s.items.map((c) => (
+            <Card
+              key={c.kind + c.id}
+              instanceId={instanceId}
+              c={c}
+              onOpen={() => open(c)}
+              onPlay={c.kind === "album" ? () => playCollection(instanceId, c) : undefined}
+              onOptions={
+                hasCollectionMenu(instanceId, c)
+                  ? (e) => showCollectionMenu(instanceId, c, e?.currentTarget)
+                  : undefined
+              }
+            />
+          ))}
+        </Shelf>
+      ))}
+      {categories.length > 0 && (
+        <>
+          <SectionTitle>Browse</SectionTitle>
+          <Focusable style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+            {categories.map((c) => (
+              <Tile key={c.kind + c.id} c={c} onOpen={() => open(c)} />
+            ))}
+          </Focusable>
+        </>
+      )}
+      {!playlists.length && !kept.length && !categories.length && mine !== null && (
+        <Notice>Nothing in this source's library yet. Playlists you make in MusicDeck show here.</Notice>
+      )}
     </>
   );
 };

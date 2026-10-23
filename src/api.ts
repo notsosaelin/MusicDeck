@@ -143,6 +143,18 @@ export interface ServiceType {
   display_name: string;
 }
 
+/** The media center's choices (settings.DEFAULTS["center"]) */
+export interface CenterSettings {
+  open_on: "last" | "playing" | "home" | "library";
+  background: "art" | "plain";
+  cards: "small" | "medium" | "large";
+  lyrics: "small" | "medium" | "large";
+  show_library: boolean;
+  show_sound: boolean;
+  /** minutes idle on Now Playing before the screen goes off; 0 = never */
+  idle_off: 0 | 1 | 2 | 5 | 10;
+}
+
 export interface PluginState {
   services: ServiceInfo[];
   active_service: string | null;
@@ -160,6 +172,7 @@ export interface PluginState {
   listenbrainz: { user: string; pending: number };
   game_music: GameMusic[];
   offline: DownloadStatus;
+  center: CenterSettings;
 }
 
 /** An album or playlist that plays when a game starts (for one source, while it's live). */

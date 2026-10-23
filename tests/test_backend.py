@@ -232,6 +232,18 @@ async def run():
         check(emitted == ["state_changed", "state_changed"],
               "every loaded frontend hears about a source switch or a setting change")
 
+        print("media center settings")
+        center = (await plugin.get_state())["center"]
+        check(center["open_on"] == "last" and center["idle_off"] == 0, "the media center starts with its defaults")
+        await plugin.set_setting("center", {**center, "cards": "large", "idle_off": 5, "show_sound": False})
+        center = (await plugin.get_state())["center"]
+        check(center["cards"] == "large" and center["idle_off"] == 5 and center["show_sound"] is False,
+              "its choices are kept")
+        for bad in ({"cards": "huge"}, {"idle_off": 3}, {"idle_off": True}, {"open_on": ["home"]}, {"theme": "x"},
+                    {"show_library": "yes"}):
+            await plugin.set_setting("center", {**center, **bad})
+            check((await plugin.get_state())["center"] == center, f"an unknown choice is refused: {bad}")
+
         print("soundcloud streams")
         from musicdeck.services.soundcloud import SoundCloudService
 

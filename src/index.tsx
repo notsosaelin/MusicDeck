@@ -7,7 +7,7 @@ import { MediaCenter } from "./components/media/MediaCenter";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
-import { PLAYER_ROUTE, navigation, panelTab } from "./nav";
+import { PLAYER_ROUTE, centerTab, navigation, openMediaCenter, panelTab } from "./nav";
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
@@ -61,6 +61,9 @@ export default definePlugin(() => {
     player,
     pluginState,
     panelTab,
+    // the media center: centerTab.set({ tab: "playing" }) shows a tab, openMediaCenter() opens it
+    centerTab,
+    openMediaCenter,
     navigation,
     api,
     showTrackMenu,
