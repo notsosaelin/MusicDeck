@@ -20,7 +20,7 @@ import aiohttp
 
 from .. import debuglog, models
 from ..net import tls
-from .base import MusicService, ServiceError, SignIn, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
 
 CLIENT = "MusicDeck"
 VERSION = "0.1.0"
@@ -217,7 +217,55 @@ class JellyfinService(MusicService):
         ]))
         return sections
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
+            ("library", "Library"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            return [s for s in await self.home() if s["title"] != "Playlists" and not models.is_categories(s)]
+        if tab_id == "albums":
+            lists = [("Recently added", dict(SortBy="DateCreated", SortOrder="Descending")),
+                     ("Most played", dict(SortBy="PlayCount", SortOrder="Descending", Filters="IsPlayed")),
+                     ("Random", dict(SortBy="Random"))]
+            found = await asyncio.gather(*[self._items(IncludeItemTypes="MusicAlbum", Limit=30, **q) for _, q in lists],
+                                         self._items(IncludeItemTypes="MusicAlbum", SortBy="SortName", Limit=LIST_LIMIT),
+                                         return_exceptions=True)
+            sections = [models.section(title, [self._album(a) for a in albums])
+                        for (title, _), albums in zip(lists, found) if isinstance(albums, list)]
+            if isinstance(found[-1], list):
+                sections.append(models.section("All albums", [self._album(a) for a in found[-1]], display="grid"))
+            return sections
+        if tab_id == "artists":
+            return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
+        if tab_id == "genres":
+            data = await self._get("/MusicGenres", userId=self.config.get("user_id"), Recursive=True,
+                                   SortBy="SortName", Limit=200)
+            genres = [models.collection(f"genre:{g['Id']}#{g.get('Name', '')}", "list", g.get("Name") or "Genre")
+                      for g in (data or {}).get("Items") or [] if g.get("Id")]
+            return [rows_or_tiles(models.section("Genres", genres))]
+        if tab_id == "library":
+            playlists, albums, artists, tracks = await asyncio.gather(
+                self._items(IncludeItemTypes="Playlist", SortBy="SortName", **self.PLAYLIST_FILTER),
+                self._items(IncludeItemTypes="MusicAlbum", Filters="IsFavorite", SortBy="SortName", Limit=LIST_LIMIT),
+                self._items(IncludeItemTypes="MusicArtist", Filters="IsFavorite", SortBy="SortName", Limit=LIST_LIMIT),
+                self.open("list", "favourite-tracks"), return_exceptions=True)
+            ok = lambda r: r if isinstance(r, list) else []  # noqa: E731
+            return [models.section("Playlists", [self._playlist(p) for p in ok(playlists)], display="grid", mine=True),
+                    models.section("Favourite albums", [self._album(a) for a in ok(albums)], display="grid"),
+                    models.section("Favourite artists", [self._artist(a) for a in ok(artists)]),
+                    models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
+                                   display="grid")]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("genre:"):
+            genre, _, name = id[6:].partition("#")
+            albums = await self._items(IncludeItemTypes="MusicAlbum", GenreIds=genre, SortBy="SortName",
+                                       Limit=LIST_LIMIT)
+            return models.page(name or "Genre", models.count(len(albums), "album"),
+                               collections=[self._album(a) for a in albums])
         if kind == "list":
             if id == "favourite-tracks":
                 tracks = [self._track(t) for t in await self._items(IncludeItemTypes="Audio", Filters="IsFavorite",

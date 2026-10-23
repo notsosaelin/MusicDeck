@@ -27,7 +27,7 @@ import aiohttp
 
 from .. import debuglog, lyrics, models
 from ..net import tls
-from .base import MusicService, ServiceError, SignIn, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
 
 PRODUCT = "MusicDeck"
 VERSION = "0.1.0"
@@ -322,7 +322,56 @@ class PlexService(MusicService):
         ]))
         return sections
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
+            ("library", "Library"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            return [s for s in await self.home() if s["title"] != "Playlists" and not models.is_categories(s)]
+        if tab_id == "albums":
+            lists = [("Recently added", "addedAt:desc"), ("Most played", "viewCount:desc"), ("Random", "random")]
+            found = await asyncio.gather(*[self._all(ALBUM, 30, sort=sort) for _, sort in lists],
+                                         self._all(ALBUM, sort="titleSort"), return_exceptions=True)
+            sections = [models.section(title, [self._album(a) for a in albums])
+                        for (title, _), albums in zip(lists, found) if isinstance(albums, list)]
+            if isinstance(found[-1], list):
+                sections.append(models.section("All albums", [self._album(a) for a in found[-1]], display="grid"))
+            return sections
+        if tab_id == "artists":
+            return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
+        if tab_id == "genres":
+            found = await asyncio.gather(*[self._request("GET", f"/library/sections/{s}/genre", type=ALBUM)
+                                           for s in await self._music_sections()], return_exceptions=True)
+            seen: dict[str, str] = {}
+            for data in found:
+                if isinstance(data, dict):
+                    for d in (data.get("MediaContainer") or {}).get("Directory") or []:
+                        if str(d.get("key", "")).isdigit() and d.get("title"):
+                            seen.setdefault(d["title"], d["key"])
+            genres = [models.collection(f"genre:{key}#{title}", "list", title) for title, key in sorted(seen.items())]
+            return [rows_or_tiles(models.section("Genres", genres))]
+        if tab_id == "library":
+            playlists, albums, tracks = await asyncio.gather(
+                self._metadata("/playlists", playlistType="audio"),
+                self._all(ALBUM, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}),
+                self.open("list", "favourite-tracks"), return_exceptions=True)
+            ok = lambda r: r if isinstance(r, list) else []  # noqa: E731
+            return [models.section("Playlists", [self._playlist(p) for p in ok(playlists)], display="grid", mine=True),
+                    models.section("Favourite albums", [self._album(a) for a in ok(albums)], display="grid"),
+                    models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
+                                   display="grid")]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("genre:"):
+            genre, _, name = id[6:].partition("#")
+            if not genre.isdigit():
+                raise ServiceError("Unknown genre")
+            albums = await self._all(ALBUM, sort="titleSort", genre=genre)
+            return models.page(name or "Genre", models.count(len(albums), "album"),
+                               collections=[self._album(a) for a in albums])
         if kind == "list":
             if id == "favourite-tracks":
                 tracks = self._tracks(await self._all(TRACK, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}))

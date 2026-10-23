@@ -479,6 +479,21 @@ class SteamService(MusicService):
             sections.append(models.section("Not installed", [self._collection(a) for a in not_installed]))
         return sections
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("composers", "Composers"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            self._check_for_changes()
+            sections = [s for s in await self.home() if not models.is_categories(s)]
+            favourites = self._open_list("favourites")["tracks"]
+            return sections + ([models.section("Favourite tracks", [], favourites, display="grid")] if favourites else [])
+        if tab_id == "composers":
+            self._check_for_changes()
+            return [models.section("Composers", self._open_list("artists")["collections"], display="grid")]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         self._check_for_changes()
         if kind == "album":

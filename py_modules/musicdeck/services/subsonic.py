@@ -13,7 +13,7 @@ import aiohttp
 
 from .. import models
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
 
 API_VERSION = "1.16.1"
 CLIENT_NAME = "MusicDeck"
@@ -154,6 +154,40 @@ class SubsonicService(MusicService):
         sections.append(models.section("Decades", [models.collection(f"decade:{d}", "list", f"{d}s")
                                                    for d in range(2020, 1950, -10)]))
         return sections
+
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
+            ("library", "Library"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            return [s for s in await self.home() if s["title"] != "Playlists" and not models.is_categories(s)]
+        if tab_id == "albums":
+            lists = [("Recently added", "newest"), ("Most played", "frequent"), ("Highest rated", "highest"),
+                     ("Random", "random")]
+            found = await asyncio.gather(*[self._album_list(t, 30) for _, t in lists],
+                                         self._album_list("alphabeticalByName", 500), return_exceptions=True)
+            sections = [models.section(title, albums) for (title, _), albums in zip(lists, found)
+                        if isinstance(albums, list)]
+            if isinstance(found[-1], list):
+                sections.append(models.section("All albums", found[-1], display="grid"))
+            return sections
+        if tab_id == "artists":
+            return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
+        if tab_id == "genres":
+            return [rows_or_tiles(s) for s in await self.browse()]
+        if tab_id == "library":
+            playlists, starred = await asyncio.gather(self._call("getPlaylists"), self._call("getStarred2"))
+            starred = starred.get("starred2", {})
+            return [models.section("Playlists", [self._playlist(p) for p in
+                                                 playlists.get("playlists", {}).get("playlist", [])],
+                                   display="grid", mine=True),
+                    models.section("Starred albums", [self._album(a) for a in starred.get("album", [])]),
+                    models.section("Starred artists", [self._artist(a) for a in starred.get("artist", [])]),
+                    models.section("Starred tracks", [], [self._track(x) for x in starred.get("song", [])],
+                                   display="grid")]
+        return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("genre:"):

@@ -409,6 +409,24 @@ class LocalService(MusicService):
         ]))
         return sections
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("folders", "Folders"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            sections = [s for s in await self.home() if not models.is_categories(s)]
+            favourites = self._open_list("favourites")["tracks"]
+            return sections + ([models.section("Favourite tracks", [], favourites, display="grid")] if favourites else [])
+        if tab_id in ("albums", "artists"):
+            page = self._open_list(tab_id)
+            return [models.section(page["title"], page["collections"], display="grid")]
+        if tab_id == "folders":
+            page = self._open_folder("")
+            return [models.section(page["title"] if page["collections"] else "Folders", page["collections"],
+                                   page["tracks"], display="grid")]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list":
             return self._open_list(id)

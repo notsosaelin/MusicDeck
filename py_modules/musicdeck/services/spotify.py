@@ -503,6 +503,49 @@ class SpotifyService(MusicService):
             debuglog.debug("spotify", "rootlist over the session failed", error=str(e))
             return await self._all("/me/playlists", max_items=500)
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("top", "Your top"), ("library", "Library"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            # what's yours is the Library tab's, your tops are Your top's
+            moved = ("Your playlists", "Saved albums", "Your top tracks", "Your top artists")
+            return [s for s in await self.home() if s["title"] not in moved and not models.is_categories(s)]
+        if tab_id == "top":
+            ranges = [("short_term", "the last 4 weeks"), ("medium_term", "the last 6 months"),
+                      ("long_term", "all time")]
+            found = await asyncio.gather(*[self._get(f"/me/top/{kind}", limit=30, time_range=r)
+                                           for r, _ in ranges for kind in ("artists", "tracks")],
+                                         return_exceptions=True)
+            sections = []
+            for i, (_, when) in enumerate(ranges):
+                artists, tracks = found[2 * i], found[2 * i + 1]
+                if isinstance(artists, dict):
+                    sections.append(models.section(f"Top artists · {when}",
+                                                   [self._artist(a) for a in artists.get("items", [])]))
+                if isinstance(tracks, dict):
+                    sections.append(models.section(f"Top tracks · {when}", [], self._tracks(tracks.get("items", []))))
+            if not sections:
+                raise next(f for f in found if isinstance(f, Exception))
+            return sections
+        if tab_id == "library":
+            playlists, albums, artists = await asyncio.gather(
+                self._library_playlists(), self._all("/me/albums", max_items=500),
+                self._get("/me/following", type="artist", limit=50), return_exceptions=True)
+            sections = [models.section("Liked Songs", [models.collection("liked", "list", "Liked Songs")],
+                                       display="tiles"),
+                        models.section("Playlists", [self._playlist(p) for p in playlists if p]
+                                       if isinstance(playlists, list) else [], display="grid", mine=True)]
+            if isinstance(albums, list):
+                sections.append(models.section("Saved albums", [self._album(i["album"]) for i in albums
+                                                                if i.get("album")], display="grid"))
+            if isinstance(artists, dict):
+                sections.append(models.section("Artists you follow", [self._artist(a) for a in
+                                                                      (artists.get("artists") or {}).get("items", [])]))
+            return sections
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id == "liked":
             tracks = self._tracks(await self._all("/me/tracks", max_items=2000))

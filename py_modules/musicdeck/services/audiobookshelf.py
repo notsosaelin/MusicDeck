@@ -417,6 +417,36 @@ class AudiobookshelfService(MusicService):
                 tracks.append(current)
         return tracks
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("library", "Library"), ("authors", "Authors"), ("series", "Series"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            return [s for s in await self.home() if not models.is_categories(s)]
+        libraries = await self._libraries()
+        books = [lib for lib in libraries if lib.get("mediaType") == "book"]
+        several = len(libraries) > 1
+        if tab_id == "library":
+            pages = await asyncio.gather(*[self.open("folder", f"l:{lib['id']}") for lib in libraries],
+                                         return_exceptions=True)
+            return [models.section(lib.get("name") or "Library", page["collections"], display="grid")
+                    for lib, page in zip(libraries, pages) if isinstance(page, dict)]
+        if tab_id == "authors":
+            found = await asyncio.gather(*[self._get(f"/api/libraries/{lib['id']}/authors") for lib in books],
+                                         return_exceptions=True)
+            return [models.section(f"Authors · {lib.get('name')}" if several else "Authors",
+                                   [self._author(a) for a in (data or {}).get("authors") or []], display="grid")
+                    for lib, data in zip(books, found) if isinstance(data, dict)]
+        if tab_id == "series":
+            found = await asyncio.gather(*[self._get(f"/api/libraries/{lib['id']}/series", limit=LIST_LIMIT,
+                                                     sort="name") for lib in books], return_exceptions=True)
+            return [models.section(f"Series · {lib.get('name')}" if several else "Series",
+                                   [self._series(lib["id"], s, s.get("books") or [])
+                                    for s in (data or {}).get("results") or []], display="grid")
+                    for lib, data in zip(books, found) if isinstance(data, dict)]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         prefix, _, rest = id.partition(":")
         if prefix in ("b", "p"):

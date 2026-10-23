@@ -316,6 +316,42 @@ class TidalService(MusicService):
             raise playlists  # type: ignore[misc]
         return sections
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("library", "Library"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            moved = ("Your playlists", "Favourite albums")
+            return [s for s in await self.home() if s["title"] not in moved and not models.is_categories(s)]
+        if tab_id == "library":
+            user = self._user()
+            await self._load_favourites()
+            playlists, albums, artists, tracks, mixes = await asyncio.gather(
+                self._all(f"users/{user}/playlistsAndFavoritePlaylists", limit=500, order="DATE",
+                          orderDirection="DESC"),
+                self._all(f"users/{user}/favorites/albums", limit=500, order="DATE", orderDirection="DESC"),
+                self._all(f"users/{user}/favorites/artists", limit=200, order="DATE", orderDirection="DESC"),
+                self.open("list", "favourite-tracks"),
+                self._get("pages/my_collection_my_mixes", deviceType="BROWSER", locale="en_US"),
+                return_exceptions=True)
+            ok = lambda r: r if isinstance(r, list) else []  # noqa: E731
+            sections = [models.section("Playlists", [self._playlist(i["playlist"]) for i in ok(playlists)
+                                                     if i.get("playlist")], display="grid", mine=True)]
+            if isinstance(mixes, dict):
+                for row in mixes.get("rows") or []:
+                    for module in row.get("modules") or []:
+                        section = self._module_section(module)
+                        if section:
+                            sections.append({**section, "title": section["title"] or "Your mixes"})
+            sections += [models.section("Albums", [self._album(i["item"]) for i in ok(albums) if i.get("item")],
+                                        display="grid"),
+                         models.section("Artists", [self._artist(i["item"]) for i in ok(artists) if i.get("item")]),
+                         models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
+                                        display="grid")]
+            return sections
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         await self._load_favourites()
         if kind == "list" and id == "favourite-tracks":

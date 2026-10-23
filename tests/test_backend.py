@@ -76,6 +76,17 @@ async def _raise(error):
     raise error
 
 
+async def media_center_tabs(plugin, instance_id):
+    """Every media center tab of a source: {tab id: [(section title, display, items, tracks)]}, or the error."""
+    service = next(x for x in (await plugin.get_state())["services"] if x["id"] == instance_id)
+    found = {}
+    for tab in service["tabs"]:
+        result = await plugin.center_tab(instance_id, tab["id"])
+        found[tab["id"]] = ([(x["title"], x.get("display", "shelf"), len(x["items"]), len(x["tracks"]))
+                             for x in result["data"]] if result["ok"] else result["error"])
+    return found
+
+
 def check(condition, message):
     if not condition:
         raise AssertionError(message)
@@ -122,6 +133,15 @@ async def run():
         check(sorted(a["title"] for a in artists) == ["Artist A", "Artist B"], "artists grouped")
         artist_page = (await plugin.open_collection(sid, "artist", artists[0]["id"]))["data"]
         check(len(artist_page["collections"]) == 1, "artist page lists albums")
+
+        tabs = await media_center_tabs(plugin, sid)
+        check(list(tabs) == ["home", "albums", "artists", "folders"], f"local files' media center tabs: {list(tabs)}")
+        check(tabs["home"] == [("Playlists", "shelf", 1, 0), ("Recently added", "shelf", 2, 0)],
+              f"Home: the folder's playlists and what's new, its ways in left to the other tabs: {tabs['home']}")
+        check(tabs["albums"] == [("Albums", "grid", 2, 0)] and tabs["artists"] == [("Artists", "grid", 2, 0)],
+              f"every album and artist in a grid: {tabs['albums']} {tabs['artists']}")
+        check(tabs["folders"][0][1] == "grid" and tabs["folders"][0][2] == 2, f"the folders: {tabs['folders']}")
+        check(not (await plugin.center_tab(sid, "nowhere"))["ok"], "a tab the source doesn't have is an error")
 
         folder = (await plugin.open_collection(sid, "folder", ""))["data"]
         check(sorted(c["title"] for c in folder["collections"]) == ["Artist A", "Artist B"], "folder browsing")
@@ -446,6 +466,10 @@ async def run():
                 if request.query.get("IncludeItemTypes") == "Playlist":
                     return emweb.json_response({"Items": [{"Id": "p1", "Name": "Mix", "Type": "Playlist", "ImageTags": {}}]})
                 return emweb.json_response({"Items": []})
+            if request.path == "/Artists/AlbumArtists":
+                return emweb.json_response({"Items": [{"Id": "ar1", "Name": "A", "ImageTags": {}}]})
+            if request.path == "/MusicGenres":
+                return emweb.json_response({"Items": [{"Id": "g1", "Name": "Rock"}, {"Name": "no id"}]})
             if request.path in ("/Sessions/Playing", "/Users/eu/FavoriteItems/t1", "/Users/eu/PlayedItems/t1"):
                 return emweb.Response(status=204 if body is None or body.get("PlaySessionId") or request.path != "/Sessions/Playing" else 400)
             return emweb.Response(status=500)
@@ -481,6 +505,15 @@ async def run():
             await plugin.instances[eid].scrobble("t1", True)
             check(emby_calls[-2][1] == "/Sessions/Playing" and emby_calls[-2][3]["MediaSourceId"] == "t1"
                   and emby_calls[-1][:2] == ("POST", "/Users/eu/PlayedItems/t1"), "now playing with a session id; played under the user")
+            tabs = await media_center_tabs(plugin, eid)
+            check(list(tabs) == ["home", "albums", "artists", "genres", "library"]
+                  and all(isinstance(v, list) for v in tabs.values()),
+                  f"Emby's (Jellyfin's) media center tabs all open: {tabs}")
+            check(tabs["artists"] == [("Artists", "grid", 1, 0)] and tabs["genres"] == [("Genres", "rows", 1, 0)]
+                  and ("Playlists", "grid", 1, 0) in tabs["library"], f"its artists, genres and playlists: {tabs}")
+            genre = (await plugin.open_collection(eid, "list", "genre:g1#Rock"))["data"]
+            check(genre["title"] == "Rock" and any(c[1] == "/Items" and c[2].get("GenreIds") == "g1" for c in emby_calls),
+                  "a genre opens to its albums")
             edited = (await plugin.save_service({"id": eid, "type": "emby", "name": "Home", "config": {"url": em_url, "username": "me"}}))["data"]
             check(edited["name"] == "Home" and next(x for x in plugin.settings.services() if x["id"] == eid)["config"]["token"] == "etok", "editing keeps the token")
             await plugin.remove_service(eid)
@@ -613,6 +646,11 @@ async def run():
                   "home rows, from music libraries only")
             check([c["id"] for c in home[0]["items"]] == ["40", "41"] and [p["id"] for p in await inst.user_playlists()] == ["40"],
                   "smart playlists are shown but can't be added to")
+            tabs = await media_center_tabs(plugin, pid)
+            check(list(tabs) == ["home", "albums", "artists", "genres", "library"]
+                  and all(isinstance(v, list) for v in tabs.values())
+                  and ("Playlists", "grid", 2, 0) in tabs["library"],
+                  f"Plex's media center tabs all open, its playlists in Library: {tabs}")
             page = (await plugin.open_collection(pid, "album", "20"))["data"]
             t = page["tracks"][0]
             check(t["starred"] and not page["tracks"][1]["starred"] and t["duration"] == 61 and t["art"] == "/library/metadata/20/thumb/1",
@@ -829,6 +867,9 @@ async def run():
             for bad in ["f:B1:99", "f:B1/../x:11", "e:P1", "b:B1"]:
                 check(not (await plugin.stream_info(aid, bad))["ok"], f"refused track {bad!r}")
             check(not (await plugin.set_played(aid, {"id": "f:B1:99"}, True))["ok"], "marking a file that's gone is an error")
+            tabs = await media_center_tabs(plugin, aid)
+            check(list(tabs) == ["home", "library", "authors", "series"] and all(isinstance(v, list) for v in tabs.values()),
+                  f"Audiobookshelf's media center tabs all open: {tabs}")
             keyed = await plugin.save_service({"type": "audiobookshelf", "name": "Key", "config": {"url": ab_url, "password": "apikey"}})
             check(not keyed["ok"] and "already added" in keyed["error"], "an API key for the same user is the same account")
             await plugin.remove_service(aid)
