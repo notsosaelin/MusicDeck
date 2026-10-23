@@ -47,7 +47,7 @@ const Tabs: FC<{ tab: PanelTab }> = ({ tab }) => (
               onClick={() => {
                 // tapping the tab you're already on goes back to its start, like most music apps
                 if (tab === t.id && (t.id === "library" || t.id === "search")) resetStack(t.id);
-                panelTab.set({ tab: t.id });
+                showTab(t.id);
               }}
             >
               {t.icon}

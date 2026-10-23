@@ -15,17 +15,29 @@ export const TAB_ORDER: PanelTab[] = ["playing", "library", "search", "eq"];
 
 /** The panel's tab strip (set by MusicPanel), so a tab change can move focus there first. */
 let tabStrip: HTMLElement | null = null;
+/** A tab whose button should take focus once a new strip appears (see showTab). */
+let focusOnStrip: PanelTab | null = null;
+const focusTabButton = (strip: HTMLElement, tab: PanelTab) =>
+  strip.querySelectorAll<HTMLElement>("button")[TAB_ORDER.indexOf(tab)]?.focus();
 export const setTabStrip = (el: HTMLElement | null) => {
   tabStrip = el;
+  if (el && focusOnStrip) {
+    focusTabButton(el, focusOnStrip);
+    focusOnStrip = null;
+  }
 };
 
 /**
- * Opens a tab, moving the controller's focus to its button first: what had focus may go with the
- * old tab's content (the mini player, a row, the now-playing card), and Steam would then spend the
- * next press finding focus again, or hand it to whatever comes first in the new tab.
+ * Opens a tab, moving the controller's focus to its button: what had focus may go with the old tab's
+ * content (the mini player, a row, the now-playing card), and Steam would then spend the next press
+ * finding focus again, or hand it to whatever comes first in the new tab. Now playing's strip is part of
+ * its first page (it slides away with it), so going to or from Now playing the strip is a new one: its
+ * button takes focus as it appears.
  */
 export function showTab(tab: PanelTab) {
-  tabStrip?.querySelectorAll<HTMLElement>("button")[TAB_ORDER.indexOf(tab)]?.focus();
+  const newStrip = (panelTab.get().tab === "playing") !== (tab === "playing");
+  if (tabStrip) focusTabButton(tabStrip, tab);
+  focusOnStrip = newStrip ? tab : null;
   panelTab.set({ tab });
 }
 

@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.4.2
+
+- Moving between Now playing and the other tabs in the Quick Access panel (L1/R1, or A on a tab) no longer
+  loses the controller's place: the next press used to go to finding focus again, which could land back
+  on Now playing.
+
 ## 0.4.1
 
 - Now playing's cover in the Quick Access panel shrinks only as much as the player needs: the empty space
