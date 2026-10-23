@@ -462,9 +462,6 @@ export const IconButton: FC<{
  * where the controller is. "round" is play/pause: one filled circle the eye finds first.
  */
 export const PLAYER_CSS = `
-.md-pill { outline: none; transition: background 0.12s; }
-.md-pill.gpfocus:not(.md-on), .md-pill:hover:not(.md-on) { background: rgba(255, 255, 255, 0.24) !important; }
-.md-pill.gpfocus.md-on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
 .md-line { outline: none; transition: background 0.15s; }
 .md-line.gpfocus { background: rgba(255, 255, 255, 0.06); }
 button.DialogButton.md-plain:not(.gpfocus):not(:hover):not(:active) { background: transparent !important; }

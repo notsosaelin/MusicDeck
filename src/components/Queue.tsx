@@ -57,12 +57,15 @@ export const Queue: FC<{ titled?: boolean }> = ({ titled = true }) => {
             />
           );
         })}
-        {/* at the end and asked first: one stray press on the first row must not lose the queue */}
-        <ButtonRow>
-          <IconButton look="plain" label="Clear queue" onClick={confirmClearQueue}>
-            <FaTrash /> Clear queue
-          </IconButton>
-        </ButtonRow>
+        {/* titled, at the end and asked first: one stray press on the first row must not lose the
+            queue; untitled, its page's header has Clear */}
+        {titled && (
+          <ButtonRow>
+            <IconButton look="plain" label="Clear queue" onClick={confirmClearQueue}>
+              <FaTrash /> Clear queue
+            </IconButton>
+          </ButtonRow>
+        )}
       </PanelSection>
     </>
   );

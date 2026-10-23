@@ -121,7 +121,8 @@ export const NowPlaying: FC = () => {
           }
         >
           <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={88} />
+            {/* sized so the player and the tabs fit the panel's first page together (PlayerPages) */}
+            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={76} />
             <RowText
               size="large"
               scroll="always"

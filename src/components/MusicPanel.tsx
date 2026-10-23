@@ -35,7 +35,7 @@ const Tabs: FC<{ tab: PanelTab }> = ({ tab }) => (
         <Focusable
           flow-children="row"
           className="md-tabs"
-          style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255, 255, 255, 0.1)", marginBottom: 8 }}
+          style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255, 255, 255, 0.1)" }}
         >
           {TAB_ORDER.map((id) => ({ id, ...TAB_LOOKS[id] })).map((t) => (
             <IconButton

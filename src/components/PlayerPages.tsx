@@ -5,7 +5,7 @@ import { player } from "../player";
 import { Store, useStore } from "../store";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "./LyricsView";
 import { NowPlaying } from "./NowPlaying";
-import { Queue } from "./Queue";
+import { Queue, confirmClearQueue } from "./Queue";
 import { Visualizer } from "./media/nowplaying";
 import { watchSize } from "./common";
 
@@ -88,34 +88,58 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
   );
 };
 
-/** Lyrics | Queue at the top of the second page (the queue's own end clears it). */
+/** A word in the second page's header: small and grey as Steam's section titles, white when chosen. */
+const HeaderWord: FC<{ on?: boolean; label: string; onPick: () => void; children: ReactNode }> = ({
+  on,
+  label,
+  onPick,
+  children,
+}) => (
+  <Focusable
+    className="md-line"
+    noFocusRing
+    onActivate={onPick}
+    onClick={onPick}
+    onOKActionDescription={label}
+    style={{
+      position: "relative",
+      padding: "6px 8px",
+      borderRadius: 4,
+      fontSize: 12,
+      fontWeight: 700,
+      letterSpacing: "0.06em",
+      textTransform: "uppercase",
+      color: on ? "#ffffff" : "rgba(255, 255, 255, 0.45)",
+    }}
+  >
+    {children}
+    {on && <span style={{ position: "absolute", left: 8, right: 8, bottom: 2, height: 2, background: "#ffffff" }} />}
+  </Focusable>
+);
+
+/**
+ * The second page's header, as quiet as a section title: Lyrics and Queue to pick between and, while
+ * the queue shows, Clear at its end (always a move away, however long the queue).
+ */
 const PageSwitch: FC<{ side: "lyrics" | "queue"; upNext: number }> = ({ side, upNext }) => (
   <PanelSection>
     <PanelSectionRow>
       <Focusable
         flow-children="row"
-        style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center", height: SWITCH_HEIGHT }}
+        style={{ display: "flex", alignItems: "center", height: SWITCH_HEIGHT, margin: "0 -8px" }}
       >
-        {(["lyrics", "queue"] as const).map((s) => (
-          <Focusable
-            key={s}
-            className={side === s ? "md-pill md-on" : "md-pill"}
-            noFocusRing
-            onActivate={() => pageTwo.set({ side: s })}
-            onClick={() => pageTwo.set({ side: s })}
-            onOKActionDescription={s === "lyrics" ? "Lyrics" : "Queue"}
-            style={{
-              padding: "3px 12px",
-              borderRadius: 12,
-              fontSize: 12,
-              fontWeight: 600,
-              color: side === s ? "#0e141b" : "#dcdedf",
-              background: side === s ? "#dcdedf" : "rgba(255, 255, 255, 0.08)",
-            }}
-          >
-            {s === "lyrics" ? "Lyrics" : `Queue · ${upNext}`}
-          </Focusable>
-        ))}
+        <HeaderWord on={side === "lyrics"} label="Lyrics" onPick={() => pageTwo.set({ side: "lyrics" })}>
+          Lyrics
+        </HeaderWord>
+        <HeaderWord on={side === "queue"} label="Queue" onPick={() => pageTwo.set({ side: "queue" })}>
+          Queue <span style={{ opacity: 0.7, fontWeight: 600 }}>{upNext}</span>
+        </HeaderWord>
+        <div style={{ flex: 1 }} />
+        {side === "queue" && (
+          <HeaderWord label="Clear queue" onPick={confirmClearQueue}>
+            Clear
+          </HeaderWord>
+        )}
       </Focusable>
     </PanelSectionRow>
   </PanelSection>
