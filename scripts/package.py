@@ -1,24 +1,32 @@
-"""Builds out/MusicDeck.zip in the layout Decky expects, for "Install plugin from ZIP" in developer mode.
+"""Builds out/MusicDeck-<version>.zip in the layout Decky expects, for "Install plugin from ZIP" in
+developer mode, and its SHA-256 beside it (out/MusicDeck-<version>.zip.sha256).
 
-    pnpm build && python scripts/vendor.py && python scripts/package.py
+    pnpm build && pnpm smoke && python scripts/vendor.py && python scripts/package.py
 """
+import hashlib
 import json
 import pathlib
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 NAME = json.loads((ROOT / "plugin.json").read_text())["name"]
-FILES = ["main.py", "plugin.json", "package.json", "LICENSE", "README.md"]
+VERSION = json.loads((ROOT / "package.json").read_text())["version"]
+FILES = ["main.py", "plugin.json", "package.json", "LICENSE", "README.md", "CHANGELOG.md"]
 DIRS = ["dist", "py_modules", "assets", "bin"]
 
 if not (ROOT / "dist" / "index.js").exists():
     raise SystemExit("dist/index.js missing; run `pnpm build` first")
+# a zip of an old build would carry this version's number and the last one's code
+built = (ROOT / "dist" / "index.js").stat().st_mtime
+newer = [p for p in (ROOT / "src").rglob("*") if p.is_file() and p.stat().st_mtime > built]
+if newer:
+    raise SystemExit(f"dist/index.js is older than {newer[0].relative_to(ROOT)}; run `pnpm build` again")
 if not (ROOT / "py_modules" / "yt_dlp").exists() or not (ROOT / "bin" / "qjs").exists():
     raise SystemExit("vendored files missing; run `python scripts/vendor.py` first")
 if not (ROOT / "bin" / "spotify-helper").exists():
     raise SystemExit("bin/spotify-helper missing; run `bash scripts/build_spotify_helper.sh` first")
 
-out = ROOT / "out" / f"{NAME}.zip"
+out = ROOT / "out" / f"{NAME}-{VERSION}.zip"
 out.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     for name in FILES:
@@ -35,4 +43,8 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
                     z.writestr(info, path.read_bytes())
                 else:
                     z.write(path, arcname)
-print(f"wrote {out}")
+digest = hashlib.sha256(out.read_bytes()).hexdigest()
+(out.parent / f"{out.name}.sha256").write_text(f"{digest}  {out.name}
+")
+print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)
+sha256 {digest}")

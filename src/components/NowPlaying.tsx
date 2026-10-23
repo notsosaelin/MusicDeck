@@ -100,7 +100,7 @@ const SIDE = { height: 44, fontSize: 15 };
 const PLAY = { fontSize: 18 };
 
 /** The Now Playing tab: the cover and title, seek bar, transport and volume (lyrics follow it). */
-export const NowPlaying: FC = () => {
+export const NowPlaying: FC<{ cover?: number }> = ({ cover = 76 }) => {
   const state = useStore(player.state);
   const item = state.queue[state.index];
   const song = useOnAir(item, state.playing);
@@ -129,7 +129,7 @@ export const NowPlaying: FC = () => {
         >
           <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
             {/* sized so the player and the tabs fit the panel's first page together (PlayerPages) */}
-            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={76} />
+            <Art instanceId={item?.instanceId ?? ""} art={song?.art ?? item?.track.art ?? null} size={cover} />
             <RowText
               size="large"
               scroll="always"

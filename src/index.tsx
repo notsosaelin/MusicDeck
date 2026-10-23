@@ -11,6 +11,7 @@ import { PLAYER_ROUTE, centerTab, navigation, openMediaCenter, panelTab, reopenM
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
+import { watchCastStatus } from "./cast";
 import { player } from "./player";
 import { setSleepTimer, sleepTimer } from "./sleep";
 import { syncSteam } from "./steam";
@@ -49,6 +50,7 @@ export default definePlugin(() => {
   routerHook.addRoute(PLAYER_ROUTE, MediaCenter, { exact: true });
   reopenMediaCenterIfShowing();
   const unwatchGames = watchGames();
+  const unwatchCast = watchCastStatus();
   const unpatchQam = installQamPatch(
     <MusicPanel />,
     // Native tabs pass a pre-styled element; a bare string renders unstyled
@@ -98,6 +100,7 @@ export default definePlugin(() => {
       stopFollowing();
       routerHook.removeRoute(PLAYER_ROUTE);
       unwatchGames();
+      unwatchCast();
       setSleepTimer(null);
       releaseToastHooks();
       player.destroy();

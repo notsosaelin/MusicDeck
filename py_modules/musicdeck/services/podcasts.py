@@ -281,6 +281,7 @@ class PodcastService(MusicService):
                 "related": models.section(f"More from {podcast['title']}", [], others) if others else None}
 
     TABS = (("home", "Home"), ("yours", "Your podcasts"), ("categories", "Categories"))
+    SHARED_TABS = frozenset({"categories"})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "yours":

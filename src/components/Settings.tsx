@@ -521,6 +521,122 @@ const SOURCE_GROUPS: { group: ServiceType["group"]; label: string }[] = [
 ];
 
 /** The plugin's page in the Decky menu: sources, the active source, and QAM placement. */
+/** A titled group of settings: Decky's PanelSection in the panel, the media center's own heading there. */
+export type SectionFrame = FC<{ title: string; children?: ReactNode }>;
+
+/**
+ * Playback, Scrobbling and Games: the same settings in Decky → MusicDeck and the media center's
+ * Settings tab (sources are chosen in Decky only).
+ */
+export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }> = ({
+  state,
+  Section = PanelSection,
+}) => {
+  const setPlayback = async (patch: Partial<PlaybackSettings>) => {
+    const playback = { ...state.playback, ...patch };
+    pluginState.set({ ...state, playback });
+    player.setPlayback(playback);
+    await setSetting("playback", playback);
+  };
+  const has = (feature: Feature) => state.services.some((s) => s.features.includes(feature));
+  return (
+    <>
+        <Section title="Playback">
+          <PanelSectionRow>
+            <DropdownItem
+              label="Volume levelling"
+              rgOptions={[
+                { data: "off", label: "Off" },
+                { data: "track", label: "Per track" },
+                { data: "album", label: "Per album" },
+              ]}
+              selectedOption={state.playback.levelling}
+              onChange={(o) => setPlayback({ levelling: o.data })}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <DropdownItem
+              label="Crossfade"
+              rgOptions={[0, 2, 4, 6, 8, 12].map((s) => ({ data: s, label: s ? `${s} s` : "Off" }))}
+              selectedOption={state.playback.crossfade ?? 0}
+              onChange={(o) => setPlayback({ crossfade: o.data })}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ToggleField
+              label="Autoplay"
+              description="Similar songs when the queue ends"
+              checked={state.playback.autoplay !== false}
+              onChange={(autoplay) => setPlayback({ autoplay })}
+            />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ToggleField
+              label="Resume where you left off"
+              checked={state.playback.resume}
+              onChange={(resume) => setPlayback({ resume })}
+            />
+          </PanelSectionRow>
+          {has("queue_sync") && (
+            <PanelSectionRow>
+              <ToggleField
+                label="Sync queue"
+                description="Pick up on another device"
+                checked={state.playback.queue_sync}
+                onChange={(queue_sync) => setPlayback({ queue_sync })}
+              />
+            </PanelSectionRow>
+          )}
+        </Section>
+
+        <Section title="Scrobbling">
+          {has("scrobble") && (
+            <PanelSectionRow>
+              <ToggleField
+                label="Report plays"
+                description="Play counts on the source"
+                checked={state.playback.scrobble}
+                onChange={(scrobble) => setPlayback({ scrobble })}
+              />
+            </PanelSectionRow>
+          )}
+          <ListenBrainzRow user={state.listenbrainz?.user ?? ""} pending={state.listenbrainz?.pending ?? 0} />
+          {state.lastfm && <LastfmRow lastfm={state.lastfm} />}
+        </Section>
+
+        <Section title="Games">
+          <PanelSectionRow>
+            <DropdownItem
+              // under its label, full width: its value (a source's name, a choice) is never cut short
+              layout="below"
+              label="In games"
+              description={
+                state.playback.game_pause
+                  ? "Resumes when the game closes"
+                  : (state.playback.game_duck ?? 1) < 1
+                    ? "While the game is in front"
+                    : undefined
+              }
+              // lowering keeps a share of the volume: -6, -10 and -16 dB, about a little, half and a lot as heard
+              rgOptions={[
+                { data: 1, label: "Keep playing" },
+                { data: 0.5, label: "Lower a little" },
+                { data: 0.3, label: "Lower by half" },
+                { data: 0.15, label: "Lower a lot" },
+                { data: "pause", label: "Pause" },
+              ]}
+              selectedOption={state.playback.game_pause ? "pause" : (state.playback.game_duck ?? 1)}
+              onChange={(o) =>
+                setPlayback(o.data === "pause" ? { game_pause: true } : { game_pause: false, game_duck: o.data })
+              }
+            />
+          </PanelSectionRow>
+          <GameMusicRows state={state} />
+        </Section>
+    </>
+  );
+};
+
 export const Settings: FC = () => {
   const state = useStore(pluginState);
 
@@ -534,15 +650,8 @@ export const Settings: FC = () => {
   }, []);
 
   if (!state) return null;
-  const setPlayback = async (patch: Partial<PlaybackSettings>) => {
-    const playback = { ...state.playback, ...patch };
-    pluginState.set({ ...state, playback });
-    player.setPlayback(playback);
-    await setSetting("playback", playback);
-  };
   const typeName = (type: string) => state.service_types.find((t) => t.type === type)?.display_name ?? type;
 
-  const has = (feature: Feature) => state.services.some((s) => s.features.includes(feature));
   // sources and the kinds of source to add, A to Z
   const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
   const services = [...state.services].sort((a, b) => byName(a.name, b.name));
@@ -600,98 +709,7 @@ export const Settings: FC = () => {
         </PanelSectionRow>
       </PanelSection>
 
-      <PanelSection title="Playback">
-        <PanelSectionRow>
-          <DropdownItem
-            label="Volume levelling"
-            rgOptions={[
-              { data: "off", label: "Off" },
-              { data: "track", label: "Per track" },
-              { data: "album", label: "Per album" },
-            ]}
-            selectedOption={state.playback.levelling}
-            onChange={(o) => setPlayback({ levelling: o.data })}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <DropdownItem
-            label="Crossfade"
-            rgOptions={[0, 2, 4, 6, 8, 12].map((s) => ({ data: s, label: s ? `${s} s` : "Off" }))}
-            selectedOption={state.playback.crossfade ?? 0}
-            onChange={(o) => setPlayback({ crossfade: o.data })}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Autoplay"
-            description="Similar songs when the queue ends"
-            checked={state.playback.autoplay !== false}
-            onChange={(autoplay) => setPlayback({ autoplay })}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Resume where you left off"
-            checked={state.playback.resume}
-            onChange={(resume) => setPlayback({ resume })}
-          />
-        </PanelSectionRow>
-        {has("queue_sync") && (
-          <PanelSectionRow>
-            <ToggleField
-              label="Sync queue"
-              description="Pick up on another device"
-              checked={state.playback.queue_sync}
-              onChange={(queue_sync) => setPlayback({ queue_sync })}
-            />
-          </PanelSectionRow>
-        )}
-      </PanelSection>
-
-      <PanelSection title="Scrobbling">
-        {has("scrobble") && (
-          <PanelSectionRow>
-            <ToggleField
-              label="Report plays"
-              description="Play counts on the source"
-              checked={state.playback.scrobble}
-              onChange={(scrobble) => setPlayback({ scrobble })}
-            />
-          </PanelSectionRow>
-        )}
-        <ListenBrainzRow user={state.listenbrainz?.user ?? ""} pending={state.listenbrainz?.pending ?? 0} />
-        {state.lastfm && <LastfmRow lastfm={state.lastfm} />}
-      </PanelSection>
-
-      <PanelSection title="Games">
-        <PanelSectionRow>
-          <DropdownItem
-            // under its label, full width: its value (a source's name, a choice) is never cut short
-            layout="below"
-            label="In games"
-            description={
-              state.playback.game_pause
-                ? "Resumes when the game closes"
-                : (state.playback.game_duck ?? 1) < 1
-                  ? "While the game is in front"
-                  : undefined
-            }
-            // lowering keeps a share of the volume: -6, -10 and -16 dB, about a little, half and a lot as heard
-            rgOptions={[
-              { data: 1, label: "Keep playing" },
-              { data: 0.5, label: "Lower a little" },
-              { data: 0.3, label: "Lower by half" },
-              { data: 0.15, label: "Lower a lot" },
-              { data: "pause", label: "Pause" },
-            ]}
-            selectedOption={state.playback.game_pause ? "pause" : (state.playback.game_duck ?? 1)}
-            onChange={(o) =>
-              setPlayback(o.data === "pause" ? { game_pause: true } : { game_pause: false, game_duck: o.data })
-            }
-          />
-        </PanelSectionRow>
-        <GameMusicRows state={state} />
-      </PanelSection>
+      <PlaybackSections state={state} />
 
       {downloads && (
         <PanelSection title="Downloads">

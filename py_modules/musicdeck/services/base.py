@@ -1,4 +1,5 @@
 import secrets
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
@@ -6,6 +7,8 @@ from .. import models
 
 # a list of ways in up to this long shows as a row of music each; longer, as tiles to pick from
 ROWS_MAX = 40
+#: How long a tab that's the same for everyone (SHARED_TABS) is kept before it's fetched again.
+TAB_CACHE_SECONDS = 600
 
 
 def rows_or_tiles(s: dict[str, Any]) -> dict[str, Any]:
@@ -174,6 +177,9 @@ class MusicService:
     #: The media center's tabs for this source, between Now Playing and Search: (id, title), each a
     #: page of sections from tab(id). None: Home, and Browse for sources with feature "browse".
     TABS: Optional[tuple[tuple[str, str], ...]] = None
+    #: Tabs with nothing of the user's in them (charts, genres; not favourites or a library): kept
+    #: TAB_CACHE_SECONDS by cached_tab(), so coming back to them, or a refresh after an edit, is instant
+    SHARED_TABS: frozenset[str] = frozenset()
 
     def center_tabs(self) -> list[dict[str, str]]:
         tabs = self.TABS or (("home", "Home"),) + ((("browse", "Browse"),) if "browse" in self.features else ())
@@ -190,6 +196,20 @@ class MusicService:
         if tab_id == "browse" and "browse" in self.features:
             return [rows_or_tiles(s) for s in await self.browse()]
         raise ServiceError("This source has no such tab")
+
+    async def cached_tab(self, tab_id: str) -> list[dict[str, Any]]:
+        """tab(tab_id), from the last few minutes when it's one of SHARED_TABS."""
+        if tab_id not in self.SHARED_TABS:
+            return await self.tab(tab_id)
+        cache: dict[str, tuple[float, list[dict[str, Any]]]] = self.__dict__.setdefault("_tab_cache", {})
+        hit = cache.get(tab_id)
+        if hit and time.monotonic() - hit[0] < TAB_CACHE_SECONDS:
+            return hit[1]
+        sections = await self.tab(tab_id)
+        # nothing came (the connection dropped) or only a note: next time asks again
+        if any(s["items"] or s.get("tracks") for s in sections) and not any(s.get("notice") for s in sections):
+            cache[tab_id] = (time.monotonic(), sections)
+        return sections
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         """A Page for an album, artist, playlist or folder."""

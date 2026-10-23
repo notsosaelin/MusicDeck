@@ -27,6 +27,7 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 from .. import debuglog, models, ytdlp_update
+from ..background import spawn
 from ..cache import Cache
 from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
 
@@ -157,8 +158,11 @@ class YouTubeWorker:
         finally:
             self.pending.pop(rid, None)
             if not self.pending:
+                # one idle timer at a time (two requests finishing together would each set one)
+                if self.idle:
+                    self.idle.cancel()
                 self.idle = asyncio.get_event_loop().call_later(
-                    IDLE_STOP, lambda: asyncio.ensure_future(self._stop_if_idle()))
+                    IDLE_STOP, lambda: spawn(self._stop_if_idle(), "YouTube helper idle stop"))
 
     async def _stop_if_idle(self) -> None:
         if not self.pending:
@@ -172,6 +176,9 @@ class YouTubeWorker:
         return await self.call("version", timeout=60)
 
     async def stop(self) -> None:
+        if self.idle:
+            self.idle.cancel()
+            self.idle = None
         if self.proc and self.proc.returncode is None:
             self.proc.kill()
             await self.proc.wait()
@@ -221,6 +228,7 @@ class YouTubeService(MusicService):
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self._needs_js_until = 0.0
+        self.auto_update: Optional[asyncio.TimerHandle] = None
         # where each track's lyrics are (None: it has none), learnt from its watch playlist
         self._lyrics_ids: Cache[Optional[str]] = Cache(LYRICS_IDS_TTL, LYRICS_IDS_KEPT)
         self.worker = YouTubeWorker(runtime_dir)
@@ -241,9 +249,13 @@ class YouTubeService(MusicService):
 
         if ytdlp_update.check_due(self.runtime_dir):
             # quietly keep yt-dlp current; a minute in, so it never competes with startup
-            asyncio.get_event_loop().call_later(60, lambda: asyncio.ensure_future(self._auto_update()))
+            self.auto_update = asyncio.get_event_loop().call_later(
+                60, lambda: spawn(self._auto_update(), "yt-dlp update"))
 
     async def stop(self) -> None:
+        # a source removed (or restarted) in its first minute mustn't update and start a helper after
+        if self.auto_update:
+            self.auto_update.cancel()
         await self.worker.stop()
 
     def status(self) -> dict[str, Any]:
@@ -370,6 +382,7 @@ class YouTubeService(MusicService):
     # --- media center ---
 
     TABS = (("home", "Home"), ("new", "New"), ("charts", "Charts"), ("moods", "Moods"), ("genres", "Genres"))
+    SHARED_TABS = frozenset({"home", "new", "charts", "moods", "genres"})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "new":

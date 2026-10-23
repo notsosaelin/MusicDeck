@@ -12,6 +12,7 @@ import aiohttp
 import decky
 
 from musicdeck import backup, debuglog, lyrics
+from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
 from musicdeck import version
 from musicdeck.cast import CastManager
@@ -113,6 +114,7 @@ class Plugin:
         self.recents = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)
         debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(self.settings.get("debug_log")))
         self.instances = {}
+        self.lifecycle = asyncio.Lock()
         self.offline = OfflineStore(decky.DECKY_PLUGIN_RUNTIME_DIR, _announce_change)
         self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path,
                                    offline=self.offline)
@@ -139,6 +141,7 @@ class Plugin:
             self.ready.set()
 
     async def _unload(self):
+        await cancel_all()
         if self.output_watcher:
             await self.output_watcher.stop()
         await self.cast.disconnect()
@@ -154,6 +157,12 @@ class Plugin:
         pass
 
     async def _start_instance(self, service: dict[str, Any]) -> None:
+        # one start/stop at a time: two overlapping (a save while a token rotation restarts it) would
+        # each start an instance, and the one replaced first would never be stopped
+        async with self.lifecycle:
+            await self._start_instance_now(service)
+
+    async def _start_instance_now(self, service: dict[str, Any]) -> None:
         old = self.instances.pop(service["id"], None)
         if old:
             await old.stop()
@@ -286,6 +295,9 @@ class Plugin:
             config = cls.prepare_config(dict(service.get("config", {})), previous_config)
             config = await cls.authenticate(config, previous_config, decky.DECKY_PLUGIN_RUNTIME_DIR)
             config.pop(RESTORED_SIGNED_OUT, None)
+            if previous and not self.settings.find_service(service["id"]):
+                # removed while it signed in: saving now would bring it back
+                raise ServiceError("That source was removed")
             others = [s for s in self.settings.services() if s["type"] == cls.type and s["id"] != service.get("id")]
             account = cls.account(config)
             twin = next((s for s in others if account and cls.account(s["config"]) == account), None)
@@ -304,10 +316,11 @@ class Plugin:
 
     @_when_ready
     async def remove_service(self, instance_id: str) -> None:
-        instance = self.instances.pop(instance_id, None)
-        if instance:
-            await instance.stop()
-            instance.remove()
+        async with self.lifecycle:
+            instance = self.instances.pop(instance_id, None)
+            if instance:
+                await instance.stop()
+                instance.remove()
         decky.logger.info(f"Removed source {instance_id} ({getattr(instance, 'type', '?')})")
         self.settings.remove_service(instance_id)
         self.playlists.delete_for_instance(instance_id)
@@ -372,7 +385,7 @@ class Plugin:
         Home gets what was played lately and MusicDeck's playlists, as home() does; a section of the
         user's playlists ("mine") gets MusicDeck's playlists too."""
         async def work():
-            sections = await self._instance(instance_id).tab(tab_id)
+            sections = await self._instance(instance_id).cached_tab(tab_id)
             if tab_id == "home":
                 return self._with_ours(instance_id, sections)
             ours = self.playlists.for_instance(instance_id)
@@ -569,10 +582,10 @@ class Plugin:
         # ListenBrainz keeps music listening history; podcast episodes (feature "progress") aren't that
         if token and track and instance and "progress" not in instance.features:
             report = self.listenbrainz.listen if submission else self.listenbrainz.now_playing
-            asyncio.get_event_loop().create_task(report(token, track, instance.display_name))
+            spawn(report(token, track, instance.display_name), "ListenBrainz report")
         lastfm = self.settings.get("lastfm")
         if lastfm.get("session_key") and track and instance and "progress" not in instance.features:
-            asyncio.get_event_loop().create_task(self._report_lastfm(lastfm, track, submission))
+            spawn(self._report_lastfm(lastfm, track, submission), "Last.fm report")
         if not self.settings.get("playback").get("scrobble", True) or not instance \
                 or "scrobble" not in instance.features:
             return {"ok": True, "data": None}

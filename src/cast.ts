@@ -1,4 +1,4 @@
-import { addEventListener } from "@decky/api";
+import { addEventListener, removeEventListener } from "@decky/api";
 import { CastStatus, Track, castControl, castLoad } from "./api";
 import { dlog } from "./log";
 
@@ -301,4 +301,15 @@ export function onCastStatus(handler: ((status: CastStatus) => void) | undefined
   listener = handler;
 }
 
-addEventListener("cast_status", (status: CastStatus) => listener?.(status));
+/**
+ * Listens for the backend's "cast_status" reports while the plugin is loaded; returns the unregister
+ * (each load of the plugin listens anew, so an unloaded copy mustn't keep listening).
+ */
+export function watchCastStatus(): () => void {
+  const handler = (status: CastStatus) => listener?.(status);
+  addEventListener("cast_status", handler);
+  return () => {
+    removeEventListener("cast_status", handler);
+    listener = undefined;
+  };
+}

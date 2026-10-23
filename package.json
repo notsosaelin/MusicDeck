@@ -1,13 +1,14 @@
 {
   "name": "musicdeck",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "Turns the Soundtracks tab of the Quick Access Menu into a music player for local files, Steam soundtracks, media servers, streaming services, internet radio, podcasts and live concert recordings",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ./tests/ui/setup.mjs --test tests/ui/*.test.ts"
+    "test": "node --import ./tests/ui/setup.mjs --test tests/ui/*.test.ts",
+    "smoke": "node --import ./tests/ui/setup.mjs --test tests/smoke/*.test.mjs"
   },
   "keywords": [
     "decky",

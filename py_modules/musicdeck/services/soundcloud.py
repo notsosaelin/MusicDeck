@@ -223,6 +223,7 @@ class SoundCloudService(MusicService):
     # --- media center ---
 
     TABS = (("home", "Home"), ("charts", "Charts"), ("genres", "Genres"))
+    SHARED_TABS = frozenset({"home", "charts", "genres"})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":

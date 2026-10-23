@@ -19,6 +19,7 @@ import { player } from "../../player";
 import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
 import { Equalizer } from "../Equalizer";
+import { PlaybackSections, SectionFrame } from "../Settings";
 import { canCast, prepareCastMenu, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
@@ -29,6 +30,7 @@ import {
   RelatedPanel,
   SetlistPanel,
   Visualizer,
+  isMusic,
   isTalk,
   useDetails,
 } from "./nowplaying";
@@ -388,7 +390,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   const side = sideOf(kind, useStore(nowPlayingSide)).id;
   const upNext = Math.max(player.playOrder.length - 1 - player.playOrder.indexOf(state.index), 0);
   const lyrics = useLyrics(side === "lyrics" ? item : undefined);
-  const details = useDetails(item, ["notes", "station", "related"].includes(side));
+  const details = useDetails(item, ["notes", "station", "related", "info"].includes(side));
   const page = useRef<HTMLDivElement>(null);
   const room = useFitBelow(page);
   const area = useRef<HTMLDivElement>(null);
@@ -432,6 +434,8 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
             <div
               style={{
                 height: "100%",
+                // on a squarer screen (docked) the row's height would take most of its width
+                maxHeight: "40vw",
                 aspectRatio: "1",
                 flexShrink: 0,
                 borderRadius: 8,
@@ -472,6 +476,8 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   <OnAirPanel item={item} />
                 ) : side === "station" ? (
                   <DetailsPanel details={details} show="facts" empty="Nothing more about this station" />
+                ) : side === "info" ? (
+                  <DetailsPanel details={details} show="facts" empty="Nothing more about this file" />
                 ) : side === "notes" ? (
                   <DetailsPanel details={details} show="notes" empty="No notes for this one" />
                 ) : side === "related" ? (
@@ -483,7 +489,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                 ) : side === "setlist" ? (
                   <SetlistPanel />
                 ) : (lyrics === null || (lyrics && "error" in lyrics)) &&
-                  kind === "music" &&
+                  isMusic(kind) &&
                   !state.castingTo &&
                   height > 0 ? (
                   // no lyrics, or the lyrics sites didn't answer (LRCLIB's 503s): the music, drawn
@@ -707,9 +713,21 @@ async function setCenter(patch: Partial<CenterSettings>) {
   await refreshState();
 }
 
-/** Settings: the equalizer, then the media center's own choices, in Steam's settings style. */
+/** A group of settings here: the heading this page's own groups use, a little space above. */
+const CenterSection: SectionFrame = ({ title, children }) => (
+  <div style={{ marginTop: 28 }}>
+    <SectionTitle>{title}</SectionTitle>
+    {children}
+  </div>
+);
+
+/**
+ * Settings: the equalizer, the media center's own choices, then playback, scrobbling and games (as in
+ * Decky → MusicDeck), in Steam's settings style.
+ */
 const SettingsPage: FC = () => {
-  const center = { ...DEFAULT_CENTER, ...useStore(pluginState)?.center };
+  const state = useStore(pluginState);
+  const center = { ...DEFAULT_CENTER, ...state?.center };
   return (
     <div style={{ maxWidth: 760 }}>
       <Equalizer />
@@ -723,9 +741,10 @@ const SettingsPage: FC = () => {
           onChange={(o) => setCenter({ [c.key]: o.data })}
         />
       ))}
-      <div style={{ fontSize: 13, opacity: 0.55, marginTop: 16, lineHeight: 1.5 }}>
-        Volume levelling, crossfade and the rest of playback are in Decky → MusicDeck. Press the View button to go back
-        to the Quick Access panel.
+      {state && <PlaybackSections state={state} Section={CenterSection} />}
+      <div style={{ fontSize: 13, opacity: 0.55, marginTop: 24, lineHeight: 1.5 }}>
+        Sources are added and chosen in Decky → MusicDeck. Press the View button to go back to the Quick Access
+        panel.
       </div>
     </div>
   );

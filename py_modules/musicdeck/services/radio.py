@@ -280,6 +280,7 @@ class RadioService(MusicService):
         return {"facts": facts, "related": related}
 
     TABS = (("home", "Home"), ("genres", "Genres"), ("countries", "Countries"), ("languages", "Languages"))
+    SHARED_TABS = frozenset({"genres", "countries", "languages"})  # Home has the user's stations
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":

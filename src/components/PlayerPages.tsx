@@ -1,5 +1,5 @@
 import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
-import { FC, ReactNode, useEffect, useRef, useState } from "react";
+import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { openMediaCenter, showTab } from "../nav";
 import { player } from "../player";
 import { Store, useStore } from "../store";
@@ -33,6 +33,39 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
  * the panel itself never scrolls, so neither Steam's focus scrolling nor its scroll restore can leave a
  * page half shown. A long queue scrolls inside its own page.
  */
+/** The cover's size in the panel, and the smallest it gets to keep the player on its page. */
+const COVER = 76;
+const COVER_MIN = 44;
+
+/**
+ * The cover size that keeps the player (`content`) inside its page (`area`): what it runs over by comes
+ * off the cover (while the cover is the tallest thing in its row, the row shrinks with it one for one),
+ * and room coming back gives it back, up to COVER. A casting line or a long title then squeezes the cover,
+ * not the volume slider onto page 2.
+ */
+function useCoverThatFits(
+  area: RefObject<HTMLElement | null>,
+  content: RefObject<HTMLElement | null>,
+  deps: unknown[],
+) {
+  const [cover, setCover] = useState(COVER);
+  useEffect(() => {
+    const outer = area.current;
+    const inner = content.current;
+    if (!outer || !inner) return;
+    const fit = () =>
+      setCover((c) => Math.max(COVER_MIN, Math.min(COVER, c - (inner.offsetHeight - outer.clientHeight))));
+    fit();
+    const unwatchOuter = watchSize(outer, fit);
+    const unwatchInner = watchSize(inner, fit);
+    return () => {
+      unwatchOuter();
+      unwatchInner();
+    };
+  }, deps);
+  return cover;
+}
+
 export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
   const { queue } = useStore(player.state);
   const { side } = useStore(pageTwo);
@@ -40,6 +73,8 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
   const second = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0); // the panel's height: one page
   const [onSecond, setOnSecond] = useState(false);
+  const area = useRef<HTMLDivElement>(null);
+  const player_ = useRef<HTMLDivElement>(null);
   const hasSecond = queue.length > 0;
 
   useEffect(() => {
@@ -64,6 +99,7 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
   }, []);
 
   const page = Math.max(room, 240);
+  const cover = useCoverThatFits(area, player_, [page, hasSecond]);
   const showing = hasSecond && onSecond;
   return (
     // clip, not hidden: Steam's focus scrolling can move an overflow:hidden box
@@ -73,9 +109,16 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
           {head}
           {/* the player in the room under the tabs, with what's left over spread round it */}
           <div
+            ref={area}
             style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-evenly" }}
           >
-            {hasSecond ? <NowPlaying /> : <NothingPlaying />}
+            {hasSecond ? (
+              <div ref={player_}>
+                <NowPlaying cover={cover} />
+              </div>
+            ) : (
+              <NothingPlaying />
+            )}
           </div>
         </div>
         {hasSecond && (
@@ -218,6 +261,7 @@ const PanelLyrics: FC<{ height: number }> = ({ height }) => {
   if (!lyrics || "error" in lyrics)
     return focusable(
       <Visualizer
+        look="wave"
         height={height}
         caption={lyrics === null ? "No lyrics for this track" : "Lyrics aren't available right now"}
       />,

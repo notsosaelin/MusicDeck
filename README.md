@@ -14,15 +14,23 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   pause while you play and pick up again when the game closes.
 - **Several accounts:** add a service more than once (two Spotify accounts, a second Navidrome user) and
   switch between them like any other source.
-- **Native Quick Access tab:** Now playing (with lyrics), Library, Search, Queue and Equalizer, with a mini player while you browse, built from Steam's
-  own components and controller conventions.
+- **Native Quick Access tab:** Now playing, Library, Search and Equalizer, with a mini player while you
+  browse, built from Steam's own components and controller conventions. Now playing is two pages: the
+  player, then below it the song's lyrics (a small visualizer when there are none) or the queue.
+- **Your music library:** local files as a library, not a folder list: albums (compilations kept whole, discs
+  in CD1/CD2 folders together), artists with the songs they appear on elsewhere, genres, years by decade and
+  composers, all from the files' tags. MusicDeck counts plays on the Deck for Recently played, Most played and
+  Not played yet; star ratings in the files make Top rated. Now Playing's Info shows the file's format
+  (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays.
 - **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with tabs
   made for each source: Now Playing, then the source's own (YouTube Music's New, Charts, Moods and Genres;
   radio's Genres, Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists,
-  Genres and Library; Qobuz's Discover; Spotify's Your top; Audiobookshelf's Authors and Series...), Search
-  and Settings (the equalizer; what it opens on, background, cover and lyrics sizes, screen off when idle),
-  all on the controller.
-- **Now Playing for what's playing:** songs show their lyrics and the queue; a station what's on air (and
+  Genres and Library; local files' Genres, Years and Composers; Qobuz's Discover; Spotify's Your top;
+  Audiobookshelf's Authors and Series...), Search and Settings (the equalizer; what it opens on, background,
+  cover and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky), all on the
+  controller.
+- **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
+  station what's on air (and
   what it played earlier), the station and stations like it; a podcast episode its show notes and the
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
   Live Music Archive its setlist and recording notes.
@@ -58,7 +66,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 | Source | Account | What you get |
 | --- | --- | --- |
-| Local files | — | Recursive scan, tags and artwork, `.lrc`/embedded lyrics, ReplayGain, `.m3u` playlists, favourites, radio |
+| Local files | — | Recursive scan; albums, artists, genres, years, composers and folders from the tags; artwork, `.lrc`/embedded lyrics, ReplayGain, `.m3u` playlists, favourites, star ratings, play counts kept on the Deck, format and quality, radio |
 | Steam soundtracks | Your Steam account | Every soundtrack you own, from every Steam library (SD cards too); the running game's soundtrack first; install the rest with Steam's own dialog; one copy when a soundtrack ships MP3 and FLAC; composers, favourites, lyrics, radio |
 | Navidrome / Subsonic | Your server | Favourites, play reports, lyrics, similar-song radio, queue sync across devices, add to server playlists, ReplayGain |
 | Jellyfin | Your server | Sign in with Quick Connect (no typing), favourites, play reports, lyrics, Instant Mix radio, add to playlists, original-quality audio |
@@ -104,13 +112,14 @@ Add your own free app's Client ID in the Spotify source (the dialog links to Spo
 | Quick Access → Soundtracks tab | The player. Takes over the tab by default, or gets its own tab |
 | The expand button on the panel's tab strip (or the lyrics) | The media center, full screen |
 
-Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the Queue) or plays an album or
-playlist without opening it, **Y** opens a
-track's or playlist's options (including the sleep timer for the playing track), **B** goes back, **L1**/**R1**
-switch tabs.
-Re-selecting Library or Search returns to its start. The Queue lists tracks in the order they'll play
-(shuffled or not); **X** on the Queue tab clears it (after asking); **Y** on a queued track moves it (play next, up, down, to the end), and **Move…** picks it
-up so the d-pad carries it until **A** or **B** puts it down.
+Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the queue) or plays an album or
+playlist without opening it, **Y** opens a track's or playlist's options (including the sleep timer for the
+playing track), **B** goes back, **L1**/**R1** switch tabs. Re-selecting Library or Search returns to its start.
+
+On Now playing, down from the player is its second page: the lyrics, or the queue (switched at the page's
+top). The queue lists tracks in the order they'll play (shuffled or not); **Clear** at its top empties it
+(after asking); **Y** on a queued track moves it (play next, up, down, to the end), and **Move** picks it up so
+the d-pad carries it until **A** or **B** puts it down.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
 
@@ -145,7 +154,8 @@ browser first (Spotify's page also offers "Not you?").
 ## Install
 
 Until it's in the Decky store: enable Decky's developer mode, then **Decky → Settings → Developer → Install
-plugin from ZIP** with `MusicDeck.zip`.
+plugin from ZIP** with `MusicDeck-<version>.zip` (its SHA-256 is in the `.sha256` file beside it). What
+changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 Logs are in `~/homebrew/logs/MusicDeck/`. Turn on **Debug log** under Troubleshooting in the plugin settings
 for a detailed playback timeline in `musicdeck-debug.log`.

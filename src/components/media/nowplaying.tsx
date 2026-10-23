@@ -17,6 +17,11 @@ export const PANELS: Record<NowPlayingKind, { id: string; label: string }[]> = {
     { id: "lyrics", label: "Lyrics" },
     { id: "queue", label: "Queue" },
   ],
+  library: [
+    { id: "lyrics", label: "Lyrics" },
+    { id: "queue", label: "Queue" },
+    { id: "info", label: "Info" },
+  ],
   radio: [
     { id: "onair", label: "On air" },
     { id: "station", label: "Station" },
@@ -40,6 +45,8 @@ export const PANELS: Record<NowPlayingKind, { id: string; label: string }[]> = {
 
 /** Talk (podcasts, books) gets skip and speed controls in place of shuffle and repeat. */
 export const isTalk = (kind: NowPlayingKind) => kind === "podcast" || kind === "book";
+/** Songs, with lyrics (or the visualizer in their place): music from a service or from files. */
+export const isMusic = (kind: NowPlayingKind) => kind === "music" || kind === "library";
 
 const detailsCache = new RecentlyUsed<TrackDetails | null>(50);
 
@@ -209,24 +216,30 @@ const BARS = 40;
 const FRAME_MS = 1000 / 30;
 
 /**
- * A quiet visualizer where a song's lyrics would be when it has none: thin bars mirrored about the
- * middle, from the music as it's heard (low notes left, high right). It settles to a line when paused,
- * and draws only while it shows.
+ * A quiet visualizer where a song's lyrics would be when it has none, from the music as it's heard:
+ * "bars" (mirrored about the middle, low notes left, high right) where there's width, as full screen;
+ * "wave" (an oscilloscope's line) in a squarer space, as the Quick Access panel's. It settles when
+ * paused and then stops drawing until the music plays again, and draws only while it shows.
  */
-export const Visualizer: FC<{ height: number; caption: string }> = ({ height, caption }) => {
+export const Visualizer: FC<{ height: number; caption: string; look?: "bars" | "wave" }> = ({
+  height,
+  caption,
+  look = "bars",
+}) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const el = canvas.current;
     const win = el?.ownerDocument.defaultView;
     const ctx = el?.getContext("2d");
     if (!el || !win || !ctx) return;
-    const bins = new Uint8Array(128);
+    const bins = new Uint8Array(look === "wave" ? 256 : 128);
     const shown = new Float32Array(BARS);
+    let swing = 0; // the wave's height, eased like the bars
     let frame = 0;
     let last = 0;
     const draw = (now: number) => {
-      frame = win.requestAnimationFrame(draw);
-      if (now - last < FRAME_MS) return;
+      frame = 0;
+      if (now - last < FRAME_MS) return void (frame = win.requestAnimationFrame(draw));
       last = now;
       const scale = win.devicePixelRatio || 1;
       const w = el.clientWidth;
@@ -235,33 +248,61 @@ export const Visualizer: FC<{ height: number; caption: string }> = ({ height, ca
         el.width = Math.round(w * scale);
         el.height = Math.round(h * scale);
       }
-      const heard = player.state.get().playing && player.levels(bins);
+      const playing = player.state.get().playing;
+      const heard = playing && (look === "wave" ? player.waveform(bins) : player.levels(bins));
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      const gap = Math.max(3, w / BARS / 3);
-      const bar = (w - gap * (BARS - 1)) / BARS;
-      for (let i = 0; i < BARS; i++) {
-        // the lower bins hold most of music; spread the bars over the lower three-quarters, more to the left
-        const at = Math.floor(Math.pow(i / BARS, 1.6) * bins.length * 0.75);
-        const target = heard ? bins[at] / 255 : 0;
-        // up at once, down gently
-        shown[i] = target > shown[i] ? target : shown[i] * 0.88;
-        const length = Math.max(bar, shown[i] * h * 0.8);
-        const x = i * (bar + gap);
-        const y = (h - length) / 2;
-        // at rest a faint line of dots; louder, brighter
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.22 + 0.4 * shown[i]})`;
+      let moving = false;
+      if (look === "wave") {
+        swing = heard ? Math.min(1, swing + 0.2) : swing * 0.85;
+        moving = swing > 0.01;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 + 0.4 * swing})`;
+        ctx.lineWidth = 2;
+        ctx.lineJoin = "round";
         ctx.beginPath();
-        ctx.roundRect(x, y, bar, length, bar / 2);
-        ctx.fill();
+        const points = 64;
+        for (let i = 0; i <= points; i++) {
+          const v = heard ? (bins[Math.floor((i / points) * (bins.length - 1))] - 128) / 128 : 0;
+          const x = (i / points) * w;
+          const y = h / 2 + v * swing * h * 0.45;
+          if (i) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+      } else {
+        const gap = Math.max(3, w / BARS / 3);
+        const bar = (w - gap * (BARS - 1)) / BARS;
+        for (let i = 0; i < BARS; i++) {
+          // the lower bins hold most of music; spread the bars over the lower three-quarters, more to the left
+          const at = Math.floor(Math.pow(i / BARS, 1.6) * bins.length * 0.75);
+          const target = heard ? bins[at] / 255 : 0;
+          // up at once, down gently
+          shown[i] = target > shown[i] ? target : shown[i] * 0.88;
+          if (shown[i] > 0.005) moving = true;
+          const length = Math.max(bar, shown[i] * h * 0.8);
+          // at rest a faint line of dots; louder, brighter
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.22 + 0.4 * shown[i]})`;
+          ctx.beginPath();
+          ctx.roundRect(i * (bar + gap), (h - length) / 2, bar, length, bar / 2);
+          ctx.fill();
+        }
       }
+      // paused and settled: nothing to draw until the music plays again
+      if (playing || moving) frame = win.requestAnimationFrame(draw);
+    };
+    const wake = () => {
+      if (!frame && player.state.get().playing) frame = win.requestAnimationFrame(draw);
     };
     frame = win.requestAnimationFrame(draw);
-    return () => win.cancelAnimationFrame(frame);
-  }, []);
+    const unsubscribe = player.state.subscribe(wake);
+    return () => {
+      unsubscribe();
+      if (frame) win.cancelAnimationFrame(frame);
+    };
+  }, [look]);
   return (
     <div style={{ height, display: "flex", flexDirection: "column", justifyContent: "center", gap: 14 }}>
-      <canvas ref={canvas} style={{ width: "100%", height: Math.min(130, height * 0.4) }} />
+      <canvas ref={canvas} style={{ width: "100%", height: Math.min(look === "wave" ? 90 : 130, height * 0.4) }} />
       <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>{caption}</div>
     </div>
   );

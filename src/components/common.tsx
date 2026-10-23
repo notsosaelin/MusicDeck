@@ -69,7 +69,16 @@ export const Art: FC<{
   if (!url || failed === url) return <div style={box}>{fallback ?? <FaCompactDisc />}</div>;
   return (
     <div style={box}>
-      <img src={url} width={size} height={size} style={{ objectFit: "cover" }} onError={() => setFailed(url)} />
+      {/* lazy: a long list's covers load as they scroll into view, not all at once */}
+      <img
+        src={url}
+        width={size}
+        height={size}
+        loading="lazy"
+        decoding="async"
+        style={{ objectFit: "cover" }}
+        onError={() => setFailed(url)}
+      />
     </div>
   );
 };

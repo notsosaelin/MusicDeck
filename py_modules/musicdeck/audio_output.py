@@ -10,6 +10,8 @@ import os
 import shutil
 from typing import Any, Awaitable, Callable
 
+from .background import spawn
+
 # how long to let a burst of changes (a device appearing sends several) settle before reading them
 SETTLE_SECONDS = 0.5
 # pactl stops when PipeWire restarts; how long to wait before following it again
@@ -46,6 +48,7 @@ class OutputWatcher:
         self.current: dict[str, str] | None = None
         self.task: asyncio.Task | None = None
         self.process: asyncio.subprocess.Process | None = None
+        self.pending: asyncio.TimerHandle | None = None
         self.pactl = shutil.which("pactl")
         self.env = dict(os.environ)
 
@@ -56,6 +59,8 @@ class OutputWatcher:
             self.task = asyncio.create_task(self._follow())
 
     async def stop(self) -> None:
+        if self.pending:
+            self.pending.cancel()
         if self.process and self.process.returncode is None:
             self.process.kill()
         if self.task:
@@ -73,15 +78,14 @@ class OutputWatcher:
                     self.pactl, "subscribe", stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL, env=self.env)
                 await self.refresh()
-                pending: asyncio.TimerHandle | None = None
                 loop = asyncio.get_running_loop()
                 assert self.process.stdout
                 async for line in self.process.stdout:
                     # "Event 'change' on sink #55", "... on server" (the default sink changing), "... on card"
                     if any(word in line for word in (b" sink ", b" server", b" card ")):
-                        if pending:
-                            pending.cancel()
-                        pending = loop.call_later(SETTLE_SECONDS, lambda: asyncio.ensure_future(self.refresh()))
+                        if self.pending:
+                            self.pending.cancel()
+                        self.pending = loop.call_later(SETTLE_SECONDS, lambda: spawn(self.refresh(), "audio output re-read"))
                 await self.process.wait()
             except asyncio.CancelledError:
                 raise

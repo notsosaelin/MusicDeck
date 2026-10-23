@@ -217,6 +217,7 @@ class LiveMusicService(MusicService):
         return {"notes": notes, "facts": facts}
 
     TABS = (("home", "Home"), ("bands", "Bands"), ("years", "Years"))
+    SHARED_TABS = frozenset({"home", "bands", "years"})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "bands":

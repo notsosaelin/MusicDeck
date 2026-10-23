@@ -93,6 +93,7 @@ class OfflineStore:
         self.current: Optional[str] = None
         self.stopped_for = ""  # why downloading stopped early (no space, no connection)
         self.worker: Optional[asyncio.Task] = None
+        self.asked_again = False
         self.session: Optional[aiohttp.ClientSession] = None
 
     def _save(self) -> None:
@@ -138,7 +139,17 @@ class OfflineStore:
         self.stopped_for = ""
         self._prune()
         if self.worker is None or self.worker.done():
-            self.worker = asyncio.ensure_future(self._work(resolve))
+            self.worker = asyncio.ensure_future(self._work_while_asked(resolve))
+        else:
+            # it may be past its last look at what's wanted (saying it's finished): one more pass
+            self.asked_again = True
+
+    async def _work_while_asked(self, resolve: Resolver) -> None:
+        while True:
+            self.asked_again = False
+            await self._work(resolve)
+            if not self.asked_again:
+                return
 
     def retry(self, resolve: Resolver) -> None:
         self.failed.clear()
@@ -209,7 +220,12 @@ class OfflineStore:
         source = await resolve(instance_id, "stream", track["id"])
         if source.path:  # already a file on the Deck
             return
-        self.tracks[key] = await self._fetch(source, key)
+        entry = await self._fetch(source, key)
+        if key not in self.wanted:
+            # its playlist stopped being kept offline while it downloaded
+            os.remove(os.path.join(self.dir, entry["file"]))
+            return
+        self.tracks[key] = entry
         art_key = _key(instance_id, track["art"]) if track.get("art") else None
         if art_key and art_key not in self.art:
             try:

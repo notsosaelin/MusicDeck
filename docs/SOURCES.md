@@ -6,7 +6,7 @@ How each source works, what it stores, and where it can break. Each section matc
 
 | Source | Type id | Account | Sign-in | Audio | Features |
 | --- | --- | --- | --- | --- | --- |
-| Local files | `local` | — | — | Original files | favourites, lyrics, radio |
+| Local files | `local` | — | — | Original files | favourites, lyrics, radio, play counts (on the Deck) |
 | Steam soundtracks | `steam` | Steam's own | — | Original files | favourites, lyrics, radio |
 | Navidrome / Subsonic | `subsonic` | Server | Password → salted token | Original files (`format=raw`) | favourites, play reports, lyrics, radio, queue sync, playlists |
 | Jellyfin | `jellyfin` | Server | Quick Connect or password → access token | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
@@ -40,7 +40,23 @@ source (`MusicService.remove`).
 - **Library**: folders chosen in the dialog are scanned recursively for `AUDIO_EXTENSIONS`; tags,
   durations, ReplayGain (Vorbis comments, ID3 `TXXX`, MP4 freeform) and embedded art are read with
   mutagen. The index is cached in `local-<id>.json` and rebuilt when `INDEX_VERSION` changes or the
-  user rescans; files whose size and mtime are unchanged are not re-read.
+  user rescans; files whose size and mtime are unchanged are not re-read. Each file's `added` time
+  (when it entered the library) survives edits to its tags, for Recently added.
+- **Tags**: genres (several per file: separate values or "Rock; Pop", "Rock/Pop"; one genre whatever its
+  case), the original year over a reissue's (`originaldate`), composer, label (`organization`), the
+  compilation flag, and a 0-5 star rating (ID3 `POPM` 0-255 as players write it, through an `EasyID3`
+  key registered as "rating"; Vorbis `RATING` 0-100 or 1-5; `FMPS_RATING` 0-1). Quality from the stream
+  info: format (an `.m4a` that says ALAC is ALAC), bit depth, sample rate, bitrate, channels.
+- **Albums**: by album artist and album; without an album artist (compilations, often), by album and
+  folder, so a compilation stays one album; `CD1`/`Disc 2` folders count as their parent. An album's
+  artist is its album artist, its one artist, or "Various artists". An artist's page adds the songs
+  they have on other albums ("Appears on").
+- **Tabs**: Home (Recently added, Recently played, Most played (twice or more), Top rated (four stars
+  and up), Not played yet, favourites), Albums, Artists, Genres (tiles), Years (decades), Composers
+  (only when a file names one), Folders. `NOW_PLAYING = "library"`: `details()` gives the file's facts
+  for the Info panel.
+- **Plays**: with "Report plays" on, each listen (`scrobble` with `submission`) counts in
+  `local-<id>-plays.json` ({track id: {count, last}}), on the Deck only.
 - **Art**: embedded pictures (extracted to `art-cache/`) or `cover.jpg`-style files next to the music.
 - **Lyrics**: `.lrc` next to the file, embedded lyric tags, then the lyrics sites (see below).
 - **Playlists**: `.m3u`/`.m3u8` files in the library (relative paths resolved against the playlist).

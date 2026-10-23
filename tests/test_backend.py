@@ -17,6 +17,9 @@ import time
 import types
 import wave
 
+# what the checks print has stars and dots in it; a Windows console would choke on them otherwise
+sys.stdout.reconfigure(encoding="utf-8")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [ROOT, os.path.join(ROOT, "py_modules")]
 
@@ -38,7 +41,7 @@ sys.modules["decky"] = decky
 logging.basicConfig(level=logging.INFO)
 
 import aiohttp  # noqa: E402
-from mutagen.id3 import APIC, TALB, TIT2, TPE1, TPE2, TRCK, TXXX, USLT  # noqa: E402
+from mutagen.id3 import APIC, POPM, TALB, TCMP, TCOM, TCON, TDOR, TDRC, TIT2, TPE1, TPE2, TPUB, TPOS, TRCK, TXXX, USLT  # noqa: E402,E501
 from mutagen.wave import WAVE  # noqa: E402
 
 import main  # noqa: E402
@@ -48,7 +51,7 @@ from musicdeck.services.subsonic import SubsonicService  # noqa: E402
 JPEG = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffd9")
 
 
-def make_wav(path, title, artist, album, track, art=False, gain=None, lyrics=None):
+def make_wav(path, title, artist, album, track, art=False, gain=None, lyrics=None, albumartist=None, frames=()):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
@@ -59,7 +62,8 @@ def make_wav(path, title, artist, album, track, art=False, gain=None, lyrics=Non
     audio.add_tags()
     audio.tags.add(TIT2(encoding=3, text=title))
     audio.tags.add(TPE1(encoding=3, text=artist))
-    audio.tags.add(TPE2(encoding=3, text=artist))
+    if albumartist != "":
+        audio.tags.add(TPE2(encoding=3, text=albumartist or artist))
     audio.tags.add(TALB(encoding=3, text=album))
     audio.tags.add(TRCK(encoding=3, text=str(track)))
     if art:
@@ -69,6 +73,8 @@ def make_wav(path, title, artist, album, track, art=False, gain=None, lyrics=Non
         audio.tags.add(TXXX(encoding=3, desc="REPLAYGAIN_TRACK_PEAK", text="0.95"))
     if lyrics:
         audio.tags.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
+    for frame in frames:
+        audio.tags.add(frame)
     audio.save()
 
 
@@ -135,7 +141,10 @@ async def run():
         check(len(artist_page["collections"]) == 1, "artist page lists albums")
 
         tabs = await media_center_tabs(plugin, sid)
-        check(list(tabs) == ["home", "albums", "artists", "folders"], f"local files' media center tabs: {list(tabs)}")
+        check(list(tabs) == ["home", "albums", "artists", "genres", "years", "folders"],
+              f"local files' media center tabs (no Composers: none tagged): {list(tabs)}")
+        check(tabs["genres"] == [("", "shelf", 0, 0)] and tabs["years"] == [("", "shelf", 0, 0)],
+              f"no genres or years tagged: a note, not an empty page: {tabs['genres']} {tabs['years']}")
         check(tabs["home"] == [("Playlists", "shelf", 1, 0), ("Recently added", "shelf", 2, 0)],
               f"Home: the folder's playlists and what's new, its ways in left to the other tabs: {tabs['home']}")
         check(tabs["albums"] == [("Albums", "grid", 2, 0)] and tabs["artists"] == [("Artists", "grid", 2, 0)],
@@ -150,6 +159,85 @@ async def run():
 
         results = (await plugin.search(sid, "lonely"))["data"]
         check([t["title"] for t in results["tracks"]] == ["Lonely Song"], "search by title")
+
+        print("local library")
+        lib2 = os.path.join(tmp, "Library")
+        comp = os.path.join(lib2, "Hits 1999")
+        hit = lambda i, artist, genre: make_wav(  # noqa: E731
+            os.path.join(comp, f"CD{1 if i < 3 else 2}", f"0{i} song.wav"), f"Hit {i}", artist, "Hits 1999", i,
+            albumartist="", frames=[TCON(encoding=3, text=genre), TDRC(encoding=3, text="2004"),
+                                    TDOR(encoding=3, text="1999"), TPOS(encoding=3, text="1" if i < 3 else "2")])
+        hit(1, "Singer One", "Pop; Dance")
+        hit(2, "Singer Two", "pop")
+        hit(3, "Singer One", "Rock")
+        make_wav(os.path.join(lib2, "Composer", "piece.wav"), "Piece", "Orchestra", "Works", 1,
+                 frames=[TCOM(encoding=3, text="Some Composer"), TCON(encoding=3, text="Classical"),
+                         TDRC(encoding=3, text="1985-05-01"), TPUB(encoding=3, text="A Label"),
+                         POPM(email="x", rating=196), TCMP(encoding=3, text="0")])
+        second = await plugin.save_service({"type": "local", "name": "Library", "config": {"paths": [lib2]}})
+        lid = second["data"]["id"]
+        library = plugin.instances[lid]
+        await library.scan_task
+        albums = (await plugin.open_collection(lid, "list", "albums"))["data"]["collections"]
+        hits = [a for a in albums if a["title"] == "Hits 1999"]
+        check(len(hits) == 1 and hits[0]["subtitle"] == "Various artists · 1999",
+              f"a compilation without an album artist is one album, over its CD folders, by its first year: {hits}")
+        hits_page = (await plugin.open_collection(lid, "album", hits[0]["id"]))["data"]
+        check([t["title"] for t in hits_page["tracks"]] == ["Hit 1", "Hit 2", "Hit 3"]
+              and hits_page["subtitle"] == "Various artists · 1999 · 3 tracks · WAV",
+              f"in disc and track order, with what it is: {hits_page['subtitle']}")
+        genres = (await plugin.open_collection(lid, "list", "genres"))["data"]["collections"]
+        check([(g["title"], g["subtitle"]) for g in genres] == [("Classical", "1 track"), ("Dance", "1 track"),
+                                                                 ("Pop", "2 tracks"), ("Rock", "1 track")],
+              f"several genres to a tag, one genre whatever its case: {[(g['title'], g['subtitle']) for g in genres]}")
+        pop = (await plugin.open_collection(lid, "list", "genre:Pop"))["data"]
+        check([t["title"] for t in pop["tracks"]] == ["Hit 1", "Hit 2"], "a genre's tracks")
+        decades = (await plugin.open_collection(lid, "list", "decades"))["data"]["collections"]
+        check([d["title"] for d in decades] == ["1990s", "1980s"], f"years by decade, latest first: {decades}")
+        tabs2 = await media_center_tabs(plugin, lid)
+        check("composers" in tabs2 and tabs2["genres"][0][1] == "tiles", f"a Composers tab once there's one: {list(tabs2)}")
+        composer = (await plugin.open_collection(lid, "list", "composer:Some Composer"))["data"]
+        check([t["title"] for t in composer["tracks"]] == ["Piece"], "a composer's works")
+        singer = next(t for t in hits_page["tracks"] if t["artist"] == "Singer One")
+        singer_page = (await plugin.open_collection(lid, "artist", singer["artist_id"]))["data"]
+        check(singer_page["collections"] == [] and [t["title"] for t in singer_page["extra"][0]["tracks"]]
+              == ["Hit 1", "Hit 3"], "an artist's songs on a compilation: Appears on")
+        check([t["title"] for t in (await plugin.search(lid, "classical"))["data"]["tracks"]] == ["Piece"]
+              and [t["title"] for t in (await plugin.search(lid, "some composer"))["data"]["tracks"]] == ["Piece"],
+              "search finds genres and composers")
+        piece = (await plugin.search(lid, "piece"))["data"]["tracks"][0]
+        facts = dict((await plugin.track_details(lid, piece))["data"]["facts"])
+        check(facts["Format"] == "WAV · 16-bit · 8 kHz" and facts["Year"] == "1985" and facts["Label"] == "A Label"
+              and facts["Composer"] == "Some Composer" and facts["Rating"] == "★★★★☆"
+              and facts["Plays"] == "Not played yet" and facts["Folder"] == os.path.join("Library", "Composer"),
+              f"the file's own facts for Now Playing: {facts}")
+        state2 = await plugin.get_state()
+        check(next(s for s in state2["services"] if s["id"] == lid)["now_playing"] == "library",
+              "Now Playing shows it as a library (with Info)")
+        home2 = (await plugin.home(lid))["data"]
+        check([s["title"] for s in home2] == ["Recently added", "Top rated", "Library"],
+              f"rated files make a Top rated row; nothing played, no played rows: {[s['title'] for s in home2]}")
+        for _ in range(2):
+            plugin.recent_scrobbles.clear()
+            await plugin.scrobble(lid, piece["id"], True, piece)
+        plugin.recent_scrobbles.clear()
+        await plugin.scrobble(lid, hits_page["tracks"][0]["id"], True, hits_page["tracks"][0])
+        home2 = (await plugin.home(lid))["data"]
+        rows = {s["title"]: s for s in home2}
+        check([s["title"] for s in home2] == ["Recently added", "Recently played", "Most played", "Top rated",
+                                              "Library"],
+              f"played: Recently played, Most played (played twice or more): {[s['title'] for s in home2]}")
+        check([t["title"] for t in rows["Recently played"]["tracks"]] == ["Hit 1", "Piece"]
+              and [t["title"] for t in rows["Most played"]["tracks"]] == ["Piece"], "in the order they were played")
+        facts = dict((await plugin.track_details(lid, piece))["data"]["facts"])
+        check(facts["Plays"].startswith("2 plays, last "), f"plays counted: {facts['Plays']}")
+        restarted = type(library)(lid, library.config, library.runtime_dir)
+        await restarted.start()
+        await restarted.scan_task
+        check(restarted.plays[piece["id"]]["count"] == 2, "play counts are kept on the Deck")
+        await restarted.stop()
+        await plugin.remove_service(lid)
+        check(not os.path.exists(library.plays_path), "and go with the source")
 
         print("stream server")
         base, key = state["server"]["base"], state["server"]["key"]
@@ -1031,6 +1119,99 @@ async def run():
             main.SERVICE_TYPES.pop("fakedl", None)
             main.SERVICE_TYPES.pop("fakesub", None)
             await dl_runner.cleanup()
+
+        print("download races")
+        races = offmod.OfflineStore(os.path.join(tmp, "races"), lambda: asyncio.sleep(0))
+        gate = asyncio.Event()
+
+        async def gated_fetch(source, key):
+            await gate.wait()
+            name = key.replace(" ", "_")
+            open(os.path.join(races.dir, name), "wb").write(b"x")
+            return {"file": name, "bytes": 1}
+
+        async def resolve_any(instance_id, kind, item):
+            return Source(url="http://x/" + item)
+
+        races._fetch = gated_fetch
+        races.sync({("s", "a"): {"id": "a", "title": "A"}}, resolve_any)
+        await asyncio.sleep(0.05)
+        races.sync({}, resolve_any)  # unmarked while "a" downloads
+        gate.set()
+        await races.worker
+        check(races.tracks == {} and os.listdir(races.dir) == [],
+              "a track unmarked while it downloads isn't kept")
+        # marked in the moment the worker is saying it's finished: still downloaded
+        wanted_c = {("s", "c"): {"id": "c", "title": "C"}}
+
+        async def mark_more_as_it_finishes():
+            if races.current is None and not races.has("s", "d"):
+                races.sync({**wanted_c, ("s", "d"): {"id": "d", "title": "D"}}, resolve_any)
+            await asyncio.sleep(0)
+
+        races.on_change = mark_more_as_it_finishes
+        races.sync(wanted_c, resolve_any)
+        await races.worker
+        check(races.has("s", "c") and races.has("s", "d"),
+              "a track marked as the downloader finishes is downloaded too")
+        await races.stop()
+
+        print("shared tabs")
+        from musicdeck.services import base as basemod
+        fetched = []
+
+        class Charts(BaseService):
+            type = "charts"
+            display_name = "Charts"
+            TABS = (("home", "Home"), ("charts", "Charts"), ("mine", "Mine"))
+            SHARED_TABS = frozenset({"charts"})
+            answer = [{"title": "Top", "items": [{"id": "a", "kind": "album", "title": "A"}], "tracks": []}]
+
+            async def tab(self, tab_id):
+                fetched.append(tab_id)
+                return self.answer
+
+        charts = Charts("chartschartsc", {}, tmp)
+        await charts.cached_tab("charts")
+        await charts.cached_tab("charts")
+        await charts.cached_tab("mine")
+        await charts.cached_tab("mine")
+        check(fetched == ["charts", "mine", "mine"], "a tab that's the same for everyone is fetched once; the user's each time")
+        real_ttl = basemod.TAB_CACHE_SECONDS
+        basemod.TAB_CACHE_SECONDS = 0
+        await charts.cached_tab("charts")
+        basemod.TAB_CACHE_SECONDS = real_ttl
+        check(fetched.count("charts") == 2, "and fetched again once it's old")
+        fetched.clear()
+        empty = Charts("chartsempty0", {}, tmp)
+        empty.answer = [{"title": "Top", "items": [], "tracks": []}]
+        await empty.cached_tab("charts")
+        await empty.cached_tab("charts")
+        check(fetched == ["charts", "charts"], "an empty answer isn't kept")
+
+        print("overlapping restarts")
+        started, stopped = [], []
+
+        class Slow(BaseService):
+            type = "slowstart"
+            display_name = "Slow"
+
+            async def start(self):
+                started.append(self)
+                await asyncio.sleep(0.05)
+
+            async def stop(self):
+                stopped.append(self)
+
+        main.SERVICE_TYPES["slowstart"] = Slow
+        try:
+            slow = {"id": "slowslowslow", "type": "slowstart", "name": "Slow", "config": {}}
+            await asyncio.gather(plugin._start_instance(slow), plugin._start_instance(slow))
+            check(len(started) == 2 and stopped == [started[0]] and plugin.instances[slow["id"]] is started[1],
+                  "two restarts at once leave one instance running, the other stopped")
+            plugin.instances.pop(slow["id"])
+        finally:
+            main.SERVICE_TYPES.pop("slowstart", None)
 
         print("internet radio")
         from aiohttp import web as aioweb

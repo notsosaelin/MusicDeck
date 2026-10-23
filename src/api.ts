@@ -129,7 +129,8 @@ export interface Section {
  * What a source plays, as Now Playing shows it: songs (lyrics, the queue), radio (what's on air, the
  * station), podcast episodes and books (notes, episodes or chapters, skip and speed), concerts (setlist)
  */
-export type NowPlayingKind = "music" | "radio" | "podcast" | "book" | "concert";
+/** How Now Playing shows a source's tracks; "library" is music from files with facts about each (Info). */
+export type NowPlayingKind = "music" | "library" | "radio" | "podcast" | "book" | "concert";
 
 /** More about the playing track (MusicService.details) */
 export interface TrackDetails {

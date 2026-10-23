@@ -90,10 +90,12 @@ export function useResult<T>(key: string, load: () => Promise<Result<T>>, revali
     if (key !== shownKey && !cached) setResult(null);
     setShownKey(key);
     let cancelled = false;
+    const started = dataVersion.get().v;
     load()
       .catch((e) => ({ ok: false as const, error: String(e) }))
       .then((r) => {
-        if (r.ok) resultCache.set(key, r);
+        // fetched before an edit invalidated the cache: it's from before the edit, so not kept
+        if (r.ok && dataVersion.get().v === started) resultCache.set(key, r);
         // a failed refresh doesn't replace what's already showing
         if (!cancelled && (r.ok || !cached)) setResult(r);
       });

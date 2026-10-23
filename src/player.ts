@@ -630,6 +630,13 @@ export class Player {
     return true;
   }
 
+  /** Fills `into` with the sound's waveform now (128 = silence), for the oscilloscope; false as levels(). */
+  waveform(into: Uint8Array): boolean {
+    if (!this.analyser || this.casting) return false;
+    this.analyser.getByteTimeDomainData(into as Uint8Array<ArrayBuffer>);
+    return true;
+  }
+
   /** Back or ahead by `seconds` (talk's skip buttons), within the track. */
   skipBy(seconds: number) {
     const { duration } = this.position.get();

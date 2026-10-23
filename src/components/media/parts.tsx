@@ -115,8 +115,15 @@ export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind">
         flexShrink: 0,
       }}
     >
+      {/* lazy: a shelf's covers past the screen's edge load as it scrolls to them */}
       {url && !failed ? (
-        <img src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setFailed(true)} />
+        <img
+          src={url}
+          loading="lazy"
+          decoding="async"
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          onError={() => setFailed(true)}
+        />
       ) : (
         KIND_ICON[c.kind]
       )}

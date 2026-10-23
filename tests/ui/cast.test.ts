@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { backend, calls, fire } from "@decky/api";
+import { watchCastStatus } from "../../src/cast";
 import { player } from "../../src/player";
 import { pluginState } from "../../src/store";
 
@@ -13,6 +14,8 @@ const settle = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
 const localAudio = () => (player as any).decks[0].audio as { src: string; currentTime: number; paused: boolean };
 const sent = (name: string) => calls.filter((c) => c.name === name).map((c) => c.args);
 const device = { id: "cast:x", name: "Den", model: "", kind: "chromecast" as const };
+// as the plugin does when it loads
+watchCastStatus();
 const status = (s: object) => fire("cast_status", s);
 
 beforeEach(async () => {

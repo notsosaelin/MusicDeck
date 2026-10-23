@@ -166,6 +166,7 @@ class BandcampService(MusicService):
     # --- media center ---
 
     TABS = (("home", "Home"), ("top", "Best-selling"), ("new", "New arrivals"))
+    SHARED_TABS = frozenset({"home", "top", "new"})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":

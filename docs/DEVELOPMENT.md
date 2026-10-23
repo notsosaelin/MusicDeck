@@ -33,7 +33,8 @@ pnpm install
 pnpm build                              # src/ -> dist/index.js
 python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/qjs
 bash scripts/build_spotify_helper.sh    # bin/spotify-helper (static musl binary)
-python scripts/package.py               # out/MusicDeck.zip
+pnpm smoke                              # the built bundle loads, wires its player, unloads cleanly
+python scripts/package.py               # out/MusicDeck-<version>.zip and its .sha256
 ```
 
 - `vendor.py` installs exactly the versions pinned in `requirements.txt`, pure-Python wheels only
@@ -45,7 +46,7 @@ python scripts/package.py               # out/MusicDeck.zip
 ## Install on a device
 
 Enable Decky's developer mode, then **Decky → Settings → Developer → Install plugin from ZIP** with
-`out/MusicDeck.zip`. Do this once; afterwards use the deploy script.
+`out/MusicDeck-<version>.zip`. Do this once; afterwards use the deploy script.
 
 ## Fast iteration: deploy and hot-reload
 
@@ -127,6 +128,19 @@ and bounded caches, and media URLs. Logic that draws nothing belongs here; what 
 checked on a device (below).
 
 Also run `npx tsc --noEmit` (or `pnpm typecheck`) for the frontend.
+
+The built bundle has a smoke test of its own, as the UI tests run the sources and not what the bundler
+made of them (it once dropped a getter read that wired casting):
+
+```sh
+pnpm build && pnpm smoke     # tests/smoke/bundle.test.mjs against dist/index.js
+```
+
+It loads `dist/index.js` with stand-ins for Decky's globals, starts the plugin, checks the player and
+its cast element are wired, the route and listeners are registered and the state arrives, then
+unloads it and checks every listener, the route and the debug handle are gone. The process must then
+exit at once: a timer left running keeps it alive, so a hang is a leak. It also fails on JSX text that
+starts with `//` (a comment written among JSX children shows on screen).
 
 Each service was additionally checked against its real API with throwaway scripts (create the
 service, call `home`/`search`/`open`/`stream`, fetch the first bytes of the stream). Do the same
@@ -210,7 +224,13 @@ or a small change); `bump.py minor` the middle one (new features); `bump.py majo
 the bump as "Release <version>" and tag it `v<version>`. `scripts/deploy.py` copies `package.json`
 along and pauses the music before it reloads the plugin.
 
+Every release also brings the docs up to date: the README for anything a user sees or presses
+differently, ARCHITECTURE / SOURCES / ADDING_A_SOURCE / this file where the change touches them, and
+an entry in `CHANGELOG.md` (what changed, for the people using it).
+
 1. `python scripts/bump.py [minor|major]`.
-2. `pnpm build && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && python scripts/package.py`
-3. Install the zip on a device and smoke-test every source you can sign in to.
-4. Tag the commit and attach `out/MusicDeck.zip`.
+2. Update the docs and add the version to `CHANGELOG.md`.
+3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py`.
+4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && python scripts/package.py`
+5. Install the zip on a device and smoke-test every source you can sign in to.
+6. Commit as "Release <version>", tag `v<version>`, and attach `out/MusicDeck-<version>.zip` and its `.sha256`.
