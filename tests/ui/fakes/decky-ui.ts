@@ -7,3 +7,5 @@ export const Navigation = {
   NavigateToExternalWeb: () => {},
 };
 export const findModuleExport = () => undefined;
+/** No window open: nothing to read where the main window is */
+export const Router = { WindowStore: undefined };

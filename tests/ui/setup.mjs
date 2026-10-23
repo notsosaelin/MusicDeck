@@ -37,7 +37,15 @@ class FakeAudio extends EventTarget {
 globalThis.Audio = FakeAudio;
 
 /** Web Audio nodes that connect and hold values, and make no sound. */
-const param = () => ({ value: 1, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} });
+const param = () => ({
+  value: 1,
+  cancelScheduledValues() {},
+  setValueAtTime() {},
+  linearRampToValueAtTime() {},
+  setTargetAtTime(v) {
+    this.value = v;
+  },
+});
 const node = (extra = {}) => ({ gain: param(), frequency: param(), Q: param(), connect: (next) => next, ...extra });
 globalThis.AudioContext = class {
   state = "running";

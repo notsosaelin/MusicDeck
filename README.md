@@ -124,8 +124,11 @@ next to Play (or choose "Play when … starts" from a row's options). From then 
 game starts, and pauses when the game closes unless you've picked something else meanwhile. Each source
 keeps its own choices and only the live source's apply; Decky → MusicDeck → Games lists them all.
 
-**Pause in games** (Decky → MusicDeck → Games, off by default) pauses the music when a game starts
-and resumes it when the last game closes, unless you played, skipped or changed something meanwhile.
+**In games** (Decky → MusicDeck → Games) sets what the music does while you play: keep playing as it is
+(the default), play quieter while a game is in front (a little, by half or a lot; it comes back up in
+Steam's menus, and your volume setting stays as it is), or pause when a game starts and resume when the
+last game closes, unless you played, skipped or changed something meanwhile. Music played on a speaker
+or TV isn't lowered.
 
 Any service can be added more than once, one account each; MusicDeck refuses the same account twice.
 For a second account of a service that signs in on its website, sign out on that website in Steam's

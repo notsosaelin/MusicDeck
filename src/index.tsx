@@ -14,7 +14,7 @@ import { NameModal } from "./components/NameModal";
 import { player } from "./player";
 import { setSleepTimer, sleepTimer } from "./sleep";
 import { syncSteam } from "./steam";
-import { reconcile, runningGame, toggleGameMusic, watchGames } from "./games";
+import { duckFor, reconcile, runningGame, toggleGameMusic, watchGames } from "./games";
 import { installQamPatch } from "./qam";
 import { pluginState, refreshState } from "./store";
 
@@ -72,8 +72,9 @@ export default definePlugin(() => {
     setSleepTimer,
     sleepTimer,
     syncSteam,
-    // pretend which games are running, e.g. games.reconcile([570]) then games.reconcile([])
-    games: { reconcile, runningGame, toggle: toggleGameMusic },
+    // pretend which games are running, e.g. games.reconcile([570]) then games.reconcile([]); which app
+    // is in front: games.duckFor(570), games.duckFor(769)
+    games: { reconcile, runningGame, toggle: toggleGameMusic, duckFor },
     // open dialogs for on-device layout checks: a source's edit dialog, or the add dialog for a type
     sourceDialog: (idOrType: string) => {
       const state = pluginState.get();

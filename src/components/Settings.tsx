@@ -521,11 +521,27 @@ export const Settings: FC = () => {
 
       <PanelSection title="Games">
         <PanelSectionRow>
-          <ToggleField
-            label="Pause in games"
-            description="Resumes when the game closes"
-            checked={!!state.playback.game_pause}
-            onChange={(game_pause) => setPlayback({ game_pause })}
+          <DropdownItem
+            label="In games"
+            description={
+              state.playback.game_pause
+                ? "Resumes when the game closes"
+                : (state.playback.game_duck ?? 1) < 1
+                  ? "While the game is in front"
+                  : undefined
+            }
+            // lowering keeps a share of the volume: -6, -10 and -16 dB, about a little, half and a lot as heard
+            rgOptions={[
+              { data: 1, label: "Keep playing" },
+              { data: 0.5, label: "Lower a little" },
+              { data: 0.3, label: "Lower by half" },
+              { data: 0.15, label: "Lower a lot" },
+              { data: "pause", label: "Pause" },
+            ]}
+            selectedOption={state.playback.game_pause ? "pause" : (state.playback.game_duck ?? 1)}
+            onChange={(o) =>
+              setPlayback(o.data === "pause" ? { game_pause: true } : { game_pause: false, game_duck: o.data })
+            }
           />
         </PanelSectionRow>
         <GameMusicRows state={state} />

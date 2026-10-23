@@ -8,7 +8,8 @@ import { Store, pluginState, refreshState } from "./store";
 /**
  * Games starting and stopping, from Steam's app lifetime notifications: they start the music set to
  * play with a game, pause what's playing while a game runs (if that's turned on), and keep the Steam
- * soundtracks source's "From <game>" row current.
+ * soundtracks source's "From <game>" row current. Which app is in front, from gamescope's focus
+ * changes, lowers the music while it's a game (if that's turned on).
  */
 
 // EAppType values that are something you play (tools and runtimes, like Proton, also start and stop)
@@ -101,7 +102,26 @@ export function reconcile(running: number[]) {
   void refreshRunningGame();
 }
 
-/** Listens for games starting and stopping. Returns the unregister function. */
+/** The app in front, as gamescope reports it: a game's id, or Steam's own (769) over a game or with none */
+let focusedApp = 0;
+
+/**
+ * Music under a game in front plays at the share of its volume set in Settings (playback.game_duck,
+ * 1 = as is), and comes back when Steam is in front again. Exported for the debug handle, to try it
+ * without launching anything: games.duckFor(570), then games.duckFor(769).
+ */
+export function duckFor(appid: number) {
+  focusedApp = appid;
+  applyDuck();
+}
+
+function applyDuck() {
+  const share = pluginState.get()?.playback.game_duck ?? 1;
+  const game = focusedApp > 0 && (known.has(focusedApp) || isPlayable(focusedApp));
+  player.setDuck(game ? share : 1);
+}
+
+/** Listens for games starting and stopping, and coming to the front. Returns the unregister function. */
 export function watchGames(): () => void {
   // games already running when the plugin loads didn't just start: no music for them
   known = new Set(runningGames().filter(isPlayable));
@@ -110,7 +130,16 @@ export function watchGames(): () => void {
     // Steam's running list updates just after the notification, sometimes a few seconds after
     for (const delay of [1000, 5000]) window.setTimeout(() => reconcile(runningGames()), delay);
   });
-  return () => registration?.unregister();
+  // tells the app in front at once, then on every change
+  const focus = window.SteamClient?.System?.UI?.RegisterForFocusChangeEvents?.((e) => duckFor(e?.focusedApp?.appid ?? 0));
+  // the setting changing applies straight away
+  const unfollow = pluginState.subscribe(applyDuck);
+  return () => {
+    registration?.unregister();
+    focus?.unregister();
+    unfollow();
+    player.setDuck(1);
+  };
 }
 
 /** Sets the album or playlist to play with the running game, or unsets it if it's the one already set. */

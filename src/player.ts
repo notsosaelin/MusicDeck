@@ -124,7 +124,7 @@ class Deck {
  * so playback continues while the QAM is closed and while games run.
  *
  * Graph: each deck's <audio> -> levelling (ReplayGain) -> fader -> preamp -> 10 biquad filters ->
- * destination; the EQ is shared. Built lazily on first play because createMediaElementSource can only
+ * ducking (lower under a game) -> destination; the EQ and ducking are shared. Built lazily on first play because createMediaElementSource can only
  * be called once per element. Everything but gapless/crossfade only deals with the playing deck.
  */
 export class Player {
@@ -150,6 +150,9 @@ export class Player {
   private deck = this.decks[0];
   private ctx?: AudioContext;
   private preamp?: GainNode;
+  private ducker?: GainNode;
+  /** How much of its volume the music keeps for now: 1, or less while a game is in front (games.ts) */
+  private duckLevel = 1;
   /** The deck fading out during a crossfade, until it's done */
   private fading?: { deck: Deck; timer: number };
   private preloading = false;
@@ -558,6 +561,16 @@ export class Player {
     this.applyEq();
   }
 
+  /**
+   * Lowers the music to `level` (a fraction of its volume) under a game, or brings it back with 1,
+   * easing over about a second. The volume setting stays as it is. Casting isn't lowered: the
+   * speaker isn't where the game's sound is.
+   */
+  setDuck(level: number) {
+    this.duckLevel = Math.min(1, Math.max(0, level));
+    if (this.ctx && this.ducker) this.ducker.gain.setTargetAtTime(this.duckLevel, this.ctx.currentTime, 0.3);
+  }
+
   private applyLevelling() {
     const leveller = this.deck.leveller;
     if (!leveller) return;
@@ -596,9 +609,11 @@ export class Player {
       f.Q.value = 1.4;
       return f;
     });
+    this.ducker = this.ctx.createGain();
+    this.ducker.gain.value = this.duckLevel;
     let node: AudioNode = this.preamp;
     for (const f of this.filters) node = node.connect(f);
-    node.connect(this.ctx.destination);
+    node.connect(this.ducker).connect(this.ctx.destination);
     this.applyEq();
     this.applyLevelling();
   }

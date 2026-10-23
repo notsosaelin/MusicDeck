@@ -48,6 +48,8 @@ export interface PlaybackSettings {
   autoplay?: boolean;
   /** pause while a game runs, resume when it closes */
   game_pause?: boolean;
+  /** the share of its volume music keeps while a game is in front; 1 = as is (src/games.ts) */
+  game_duck?: number;
   /** seconds the end of a track and the start of the next overlap; 0 = off (tracks still follow gaplessly) */
   crossfade?: number;
 }
