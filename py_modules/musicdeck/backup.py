@@ -28,7 +28,7 @@ FORMAT = 1
 MAX_BYTES = 64 * 1024 * 1024
 ID = re.compile(r"^[0-9a-f]{12}$")
 # preferences that move with a backup (not the debug log, nor anything about this device)
-PREFERENCES = ("qam_mode", "volume", "eq", "playback")
+PREFERENCES = ("qam_mode", "volume", "eq", "eq_per_output", "playback")
 # per-source files in the data folder that hold the user's own data (indexes rebuild themselves)
 SOURCE_FILES = ("local-{}-favourites.json", "steam-{}-favourites.json", "podcasts-{}-progress.json")
 SHARED_FILES = ("recents.json",)

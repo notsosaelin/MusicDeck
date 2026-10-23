@@ -247,6 +247,48 @@ async def run():
             await plugin.set_setting("center", {**center, **bad})
             check((await plugin.get_state())["center"] == center, f"an unknown choice is refused: {bad}")
 
+        print("the EQ for each output")
+        from musicdeck.audio_output import describe
+        jack = {"name": "alsa_output.pci-0000_64_00.6.analog-stereo", "description": "Ryzen HD Audio Controller Analog Stereo",
+                "properties": {"device.api": "alsa", "device.bus": "pci"},
+                "ports": [{"name": "analog-output-speaker", "description": "Speaker"},
+                          {"name": "analog-output-headphones", "description": "Headphones"}]}
+        buds = {"name": "bluez_output.AA_BB_CC_DD_EE_FF.1", "description": "Buds",
+                "properties": {"device.api": "bluez5", "device.description": "Pixel Buds"}, "active_port": "headset-output",
+                "ports": [{"name": "headset-output", "description": "Headset"}]}
+        tv = {"name": "alsa_output.pci-0000_64_00.1.hdmi-stereo", "description": "Rembrandt HDMI",
+              "properties": {"device.api": "alsa"}, "active_port": "hdmi-output-0",
+              "ports": [{"name": "hdmi-output-0", "description": "HDMI / DisplayPort"}]}
+        speakers = describe([{**jack, "active_port": "analog-output-speaker"}, buds], jack["name"])
+        headphones = describe([{**jack, "active_port": "analog-output-headphones"}, buds], jack["name"])
+        check(speakers["name"] == "Speakers" and headphones["name"] == "Headphones" and speakers["id"] != headphones["id"],
+              "the speakers and the headphone jack are told apart, though they're one device")
+        check(describe([jack, buds], buds["name"]) == {"id": "bluez_output.AA_BB_CC_DD_EE_FF.1#headset-output", "name": "Pixel Buds"},
+              "a Bluetooth device goes by its own name, and its id by its address")
+        check(describe([tv], tv["name"])["name"] == "HDMI / DisplayPort" and describe([jack], "gone") is None,
+              "other outputs go by their port; a default sink that isn't listed is no output")
+
+        general = {"enabled": True, "preset": "Rock", "gains": [4.0, 3, 2, 0, -1, -1, 1, 2, 3, 4], "preamp": 0.0}
+        flat = {"enabled": True, "preset": "Flat", "gains": [0.0] * 10, "preamp": -2.0}
+        await plugin.set_eq(general, None)
+        plugin.output = speakers
+        check((await plugin.get_state())["eq"] == general, "with one EQ, every output has it")
+        await plugin.set_setting("eq_per_output", True)
+        check((await plugin.get_state())["eq"] == general, "an output without its own EQ yet starts from the one EQ")
+        await plugin.set_eq(flat, speakers["id"])
+        check((await plugin.get_state())["eq"] == flat, "an EQ set on an output is that output's")
+        plugin.output = headphones
+        check((await plugin.get_state())["eq"] == general, "another output keeps its own (here still the one EQ)")
+        await plugin.set_eq(flat, speakers["id"])
+        check(plugin.settings.get("output_eqs")[speakers["id"]]["name"] == "Speakers",
+              "an EQ saved after the output changed still goes to the output it was set on")
+        await plugin.set_eq({"enabled": True, "gains": "loud"}, headphones["id"])
+        check(headphones["id"] not in plugin.settings.get("output_eqs"), "an invalid EQ isn't saved")
+        await plugin.set_setting("eq_per_output", False)
+        check((await plugin.get_state())["eq"] == general and plugin.settings.get("eq") == general,
+              "turned off, the one EQ applies again, and the outputs' own are kept for next time")
+        plugin.output = None
+
         print("soundcloud streams")
         from musicdeck.services.soundcloud import SoundCloudService
 

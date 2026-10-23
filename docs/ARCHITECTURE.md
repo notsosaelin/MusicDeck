@@ -136,6 +136,7 @@ Details worth knowing:
 | `musicdeck/lyrics.py` | The lyrics shape, LRC parsing, the lyrics sites asked when a source has none: LRCLIB and NetEase at once, LRCLIB's synced lyrics preferred (a failed lookup is an error, not "no lyrics"). |
 | `musicdeck/feeds.py` | A small XML reader and the RSS parser for podcast feeds (Decky's Python has no `xml`). |
 | `musicdeck/listenbrainz.py` | ListenBrainz client with an on-disk queue for listens made offline. |
+| `musicdeck/audio_output.py` | The output sound plays on (speakers, headphones, a Bluetooth device, HDMI), followed through `pactl subscribe` and read from the default sink's active port (Steam sees the speakers and the headphone jack as one device). With `eq_per_output`, `main.py` keeps an EQ per output in `output_eqs` and `get_state` hands out the one for the output in use; `set_eq` saves to the output an EQ was set on. |
 | `musicdeck/debuglog.py` | Optional verbose log (`musicdeck-debug.log`), toggled in settings; the player's events land here too. |
 | `musicdeck/ytdlp_worker.py` | Runs under the system Python; answers yt-dlp and YouTube Music (ytmusicapi) requests as JSON lines. Started on demand, stopped after 5 idle minutes. |
 | `musicdeck/ytdlp_update.py` | Keeps yt-dlp current from PyPI (checksum-verified, rolled back if the new version fails). |

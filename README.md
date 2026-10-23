@@ -36,8 +36,10 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   once however many playlists hold it, and goes when the last one lets it go.
 - **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net) with NetEase Cloud Music as a
   backup, following the song under Now playing or full screen over the album art.
-- **Sound:** 10-band EQ with presets, volume levelling from ReplayGain data, gapless playback, an
-  optional crossfade, and endless radio when the queue runs out.
+- **Sound:** 10-band EQ with presets (one for everything, or one each for the speakers, headphones and
+  each Bluetooth device or TV, switched as you change output), volume levelling from ReplayGain data,
+  gapless playback, an optional crossfade, music played quieter or paused in games, and endless radio
+  when the queue runs out.
 - **Live radio** with the song on air shown as it plays.
 - **ListenBrainz scrobbling** for every source, including plays made offline.
 - **Backup and restore:** your sources, playlists (with their pictures), favourites and settings in one

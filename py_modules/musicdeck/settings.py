@@ -14,6 +14,10 @@ DEFAULTS: dict[str, Any] = {
     "volume": 0.8,
     "debug_log": False,
     "eq": {"enabled": False, "preset": "Flat", "gains": [0.0] * 10, "preamp": 0.0},
+    # each output (speakers, headphones, a Bluetooth device...) its own EQ, in output_eqs:
+    # {output id: {"name", "eq"}}; outputs without one yet use "eq" (main.py, audio_output.py)
+    "eq_per_output": False,
+    "output_eqs": {},
     # levelling: "off" | "track" | "album" (ReplayGain); scrobble/queue_sync talk to the source's server
     # game_pause: pause while a game runs; game_duck: the share of its volume music keeps while a game
     # is in front, 1 = as is (src/games.ts); crossfade: seconds, 0 = off (src/player.ts)

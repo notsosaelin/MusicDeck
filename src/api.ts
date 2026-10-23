@@ -163,7 +163,11 @@ export interface PluginState {
   active_service: string | null;
   qam_mode: QamMode;
   volume: number;
+  /** the EQ that applies now: the output's own when each output has one, else the one EQ */
   eq: EqSettings;
+  eq_per_output: boolean;
+  /** the output sound plays on (speakers, headphones, a Bluetooth device...), when PipeWire says */
+  output: { id: string; name: string } | null;
   playback: PlaybackSettings;
   debug_log: boolean;
   debug_log_path: string;
@@ -198,6 +202,8 @@ export interface ServiceDraft {
 
 export const getState = callable<[], PluginState>("get_state");
 export const setSetting = callable<[key: string, value: any], void>("set_setting");
+/** Saves the EQ for the output it was set on (when each output has its own), or as the one EQ */
+export const saveEq = callable<[eq: EqSettings, outputId: string | null], void>("set_eq");
 export const saveService = callable<[service: ServiceDraft], Result<ServiceInfo>>("save_service");
 export const removeService = callable<[id: string], void>("remove_service");
 export const setActiveService = callable<[id: string], void>("set_active_service");

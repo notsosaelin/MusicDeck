@@ -12,6 +12,7 @@ import aiohttp
 import decky
 
 from musicdeck import backup, debuglog, lyrics
+from musicdeck.audio_output import OutputWatcher
 from musicdeck.cast import CastManager
 from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.net import tls
@@ -27,7 +28,7 @@ SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "se
 # Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
 RESTORED_SIGNED_OUT = "sign_in_again"
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
-FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "playback", "debug_log", "center"}
+FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "eq_per_output", "playback", "debug_log", "center"}
 # the media center's choices (settings.DEFAULTS["center"]); anything else is refused
 CENTER_CHOICES = {"open_on": {"last", "playing", "home", "library"}, "background": {"art", "plain"},
                   "cards": {"small", "medium", "large"}, "lyrics": {"small", "medium", "large"},
@@ -87,6 +88,9 @@ class Plugin:
         # the sign-in in progress, if any (SignIn by id)
         self.sign_ins: dict[str, Any] = {}
         self.recent_scrobbles: dict[tuple[str, str, bool], float] = {}
+        # the output sound plays on ({"id", "name"}), when PipeWire says
+        self.output: Optional[dict[str, str]] = None
+        self.output_watcher: Optional[OutputWatcher] = None
 
     # --- lifecycle ---
 
@@ -123,11 +127,15 @@ class Plugin:
                 await self._start_instance(service)
             decky.logger.info(f"MusicDeck started with {len(self.instances)} service(s)")
             self._sync_offline()  # finishes downloads an earlier session left
+            self.output_watcher = OutputWatcher(self._output_changed, decky.logger)
+            self.output_watcher.start()
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
 
     async def _unload(self):
+        if self.output_watcher:
+            await self.output_watcher.stop()
         await self.cast.disconnect()
         await self.offline.stop()
         for instance in list(self.instances.values()):
@@ -192,7 +200,10 @@ class Plugin:
             "active_service": self.settings.get("active_service"),
             "qam_mode": self.settings.get("qam_mode"),
             "volume": self.settings.get("volume"),
-            "eq": self.settings.get("eq"),
+            # the EQ for the output in use when each output has its own (eq_per_output), else the one EQ
+            "eq": self._current_eq(),
+            "eq_per_output": bool(self.settings.get("eq_per_output")),
+            "output": self.output,
             "playback": self.settings.get("playback"),
             "debug_log": bool(self.settings.get("debug_log")),
             "debug_log_path": debuglog.path,
@@ -208,6 +219,36 @@ class Plugin:
             # only today's choices: one an older version saved (since renamed) would make saving fail
             "center": {k: self.settings.get("center").get(k, d) for k, d in DEFAULTS["center"].items()},
         }
+
+    @_when_ready
+    async def set_eq(self, eq: dict[str, Any], output_id: Optional[str] = None) -> None:
+        """Saves the EQ: for `output_id` (the output it was set on) when each output has its own,
+        else the one EQ."""
+        if not _valid_setting("eq", eq):
+            decky.logger.warning(f"Ignored an invalid EQ: {eq!r}")
+            return
+        if self.settings.get("eq_per_output") and isinstance(output_id, str) and output_id:
+            eqs = dict(self.settings.get("output_eqs"))
+            known = eqs.get(output_id, {}).get("name")
+            name = self.output["name"] if self.output and self.output["id"] == output_id else known or output_id
+            eqs[output_id] = {"name": name, "eq": eq}
+            self.settings.set("output_eqs", eqs)
+        else:
+            self.settings.set("eq", eq)
+        await _announce_change()
+
+    def _current_eq(self) -> dict[str, Any]:
+        """The EQ that applies now: the output's own, or the one EQ (also where an output starts from)."""
+        if self.settings.get("eq_per_output") and self.output:
+            own = self.settings.get("output_eqs").get(self.output["id"])
+            if own:
+                return own["eq"]
+        return self.settings.get("eq")
+
+    async def _output_changed(self, output: Optional[dict[str, str]]) -> None:
+        decky.logger.info(f"Audio output: {output['name'] if output else 'none'}")
+        self.output = output
+        await _announce_change()
 
     @_when_ready
     async def set_setting(self, key: str, value: Any) -> None:

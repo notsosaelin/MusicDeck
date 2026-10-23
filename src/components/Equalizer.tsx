@@ -1,6 +1,6 @@
 import { DropdownItem, PanelSection, PanelSectionRow, SliderField, ToggleField } from "@decky/ui";
 import { FC, useState } from "react";
-import { EqSettings, setSetting } from "../api";
+import { EqSettings, saveEq, setSetting } from "../api";
 import { EQ_BANDS, EQ_PRESETS, EQ_RANGE, formatBand } from "../eq";
 import { player } from "../player";
 import { pluginState, useStore } from "../store";
@@ -8,13 +8,17 @@ import { ACCENT } from "./common";
 
 let saveTimer: number | undefined;
 
-/** Applies immediately to the audio graph; persists to the backend once the user stops moving. */
+/**
+ * Applies immediately to the audio graph; persists to the backend once the user stops moving, for the
+ * output it was set on (if the output changes meanwhile, it's still that one's).
+ */
 function updateEq(eq: EqSettings) {
   const state = pluginState.get();
   if (state) pluginState.set({ ...state, eq });
   player.setEq(eq);
+  const output = state?.eq_per_output ? (state.output?.id ?? null) : null;
   window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => setSetting("eq", eq), 800);
+  saveTimer = window.setTimeout(() => saveEq(eq, output), 800);
 }
 
 /** Compact bar view of the current curve, so presets can be compared without expanding every band. */
@@ -75,6 +79,21 @@ export const Equalizer: FC = () => {
 
   return (
     <PanelSection title="Equalizer">
+      {state.output && (
+        <PanelSectionRow>
+          <ToggleField
+            label="For each output"
+            description={
+              state.eq_per_output ? `Now: ${state.output.name}` : "Speakers, headphones and Bluetooth keep their own"
+            }
+            checked={state.eq_per_output}
+            onChange={async (on) => {
+              pluginState.set({ ...state, eq_per_output: on });
+              await setSetting("eq_per_output", on);
+            }}
+          />
+        </PanelSectionRow>
+      )}
       <PanelSectionRow>
         <ToggleField label="Enabled" checked={eq.enabled} onChange={(enabled) => updateEq({ ...eq, enabled })} />
       </PanelSectionRow>

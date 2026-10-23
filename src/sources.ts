@@ -32,6 +32,8 @@ export async function deleteSource(instanceId: string) {
 export function followState(): () => void {
   // undefined until the first state arrives: loading isn't a change (the saved session is restored)
   let live: string | null | undefined = pluginState.get()?.active_service;
+  // which EQ applies: it changes with the output, or with each output getting its own
+  let eqFor: string | undefined;
   const unsubscribe = pluginState.subscribe(() => {
     const state = pluginState.get();
     if (!state) return;
@@ -41,6 +43,9 @@ export function followState(): () => void {
     if (switched || player.state.get().queue.some((q) => !sources.has(q.instanceId))) player.clear();
     if (switched) invalidateBrowserCache();
     player.setPlayback(state.playback);
+    const now = `${state.eq_per_output}:${state.output?.id ?? ""}`;
+    if (eqFor !== undefined && now !== eqFor) player.setEq(state.eq);
+    eqFor = now;
   });
   const onChange = () => {
     refreshState().catch(() => {});
