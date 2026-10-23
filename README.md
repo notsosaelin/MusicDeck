@@ -185,6 +185,8 @@ Not possible:
   [Cider](https://github.com/ciderapp/cider) and [Sidra](https://github.com/wimpysworld/sidra) are separate
   apps built on CastLabs Electron, a Chromium that ships Widevine; nothing comparable exists inside Steam.
   MusicDeck doesn't decrypt streams.
+- **Nintendo Music.** Its web player (music.nintendo.com) streams Widevine-protected DASH too, and
+  Nintendo's terms rule out other apps using it.
 - **Downloads from Qobuz, TIDAL and Spotify.** Offline listening is part of what those subscriptions license
   to their own apps, under DRM (Spotify) or terms that rule out other apps keeping the files; MusicDeck
   streams them only.
