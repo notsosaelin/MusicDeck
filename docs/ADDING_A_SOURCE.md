@@ -146,7 +146,9 @@ class ExampleService(MusicService):
 | `art(art_id)` | if you return art ids | A `StreamSource` for the image. |
 | `star`, `scrobble`, `lyrics`, `radio`, `user_playlists`, `add_to_playlist`, `save_queue`, `load_queue` | per `features` | See `base.py` for signatures and meaning. |
 | `collection_action(kind, id, call)` | if a Page has an `action` with `call` | Do it (e.g. subscribe) and return the sentence to show; the page reloads. |
-| `browse()` | with feature `browse` | Genres, moods or charts: Sections of `list` collections that your `open()` opens (ids like `genre:<id>`; check them there, they come back from the UI). The media center shows them as rows of tiles on Home. |
+| `browse()` | with feature `browse` | Genres, moods or charts: Sections of `list` collections that your `open()` opens (ids like `genre:<id>`; check them there, they come back from the UI). Without your own tabs, the media center shows them in a Browse tab. |
+| `TABS`, `tab(tab_id)` | | The media center's tabs for your source (after Now Playing, before Search) and what each holds: Sections, each with how to show it (`models.section(..., display=...)`: `shelf`, `rows` of music per genre, `tiles`, a `grid` of every card, track `covers`; `mine=True` on the user's playlists adds MusicDeck's). Without them: Home (your `home()`) and Browse. Give your source's corners a tab each: what its own app has (charts, genres, your library, albums, artists...). |
+| `NOW_PLAYING`, `details(track)` | | How Now Playing shows your tracks (`music`, `radio`, `podcast`, `book`, `concert`), and more about one: `{"notes", "facts", "related"}` (show notes, a station's details, similar stations, the show's other episodes). |
 | `save_progress(track, position, duration)`, `resume_position(track_id)`, `set_played(track, played)` | with feature `progress` | Long tracks that resume where they were left: kept on the Deck (podcasts.py) or on the server (audiobookshelf.py). All three are async. The player reports positions every few seconds; `stream_info` passes `resume_position` on as `start_at`. |
 
 ### StreamSource

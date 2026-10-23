@@ -16,13 +16,16 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   switch between them like any other source.
 - **Native Quick Access tab:** Now playing (with lyrics), Library, Search, Queue and Equalizer, with a mini player while you browse, built from Steam's
   own components and controller conventions.
-- **Media center:** the player full screen in Steam's main window, laid out like Steam's library: Now Playing
-  with the lyrics or the queue beside the cover; Home's rows as shelves of covers, then the source's genres,
-  moods and charts; a Library of your playlists, favourites and the source's categories; album and playlist
-  pages; Search; and Settings (the equalizer; what it opens on, background, cover and lyrics sizes, screen
-  off when idle), all on the controller.
-- **Genres, moods and charts** from SoundCloud, YouTube Music, Qobuz, Navidrome/Subsonic, Bandcamp, radio and
-  podcasts, each a row of its albums, playlists or stations on the media center's Home.
+- **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with tabs
+  made for each source: Now Playing, then the source's own (YouTube Music's New, Charts, Moods and Genres;
+  radio's Genres, Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists,
+  Genres and Library; Qobuz's Discover; Spotify's Your top; Audiobookshelf's Authors and Series...), Search
+  and Settings (the equalizer; what it opens on, background, cover and lyrics sizes, screen off when idle),
+  all on the controller.
+- **Now Playing for what's playing:** songs show their lyrics and the queue; a station what's on air (and
+  what it played earlier), the station and stations like it; a podcast episode its show notes and the
+  show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
+  Live Music Archive its setlist and recording notes.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
 - **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, plus UPnP/DLNA
   devices (Sonos, AV receivers, smart TVs). The speaker fetches the music itself; the queue, play reports and
@@ -111,10 +114,10 @@ up so the d-pad carries it until **A** or **B** puts it down.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
 
-**Media center:** **L1**/**R1** switch tabs (Now Playing, Home, Library, Search, Settings); **A** opens an
+**Media center:** **L1**/**R1** switch tabs (Now Playing, the source's own, Search, Settings); **A** opens an
 album or playlist, **X** plays it straight away, **B** goes back a page, then up to the tabs, then back to the
 Quick Access panel; **View** goes back to the panel at once; **Start** plays or pauses from anywhere. On Now
-Playing, **R2** switches between the lyrics and the queue, and **Y** turns the screen off (Settings can do it
+Playing, **R2** goes through what's beside the cover (lyrics, queue, on air, notes...), and **Y** turns the screen off (Settings can do it
 after a few idle minutes). Handhelds only switch the backlight fully off for root, so "off" is Steam's
 lowest brightness under a black screen: nearly dark, on any device.
 
