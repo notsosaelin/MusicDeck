@@ -27,12 +27,13 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   pick after seeing exactly what would change, and give an album artwork: a picture of your own, its cover
   from the Cover Art Archive, or every missing cover at once (Decky → MusicDeck → the source's menu →
   Find missing artwork). Artwork is kept in MusicDeck; your music folders only change when you edit tags.
-- **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with tabs
-  made for each source: Now Playing, then the source's own (YouTube Music's New, Charts, Moods and Genres;
-  radio's Genres, Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists,
-  Genres and Library; local files' Genres, Years and Composers; Qobuz's Discover; Spotify's Your top;
-  Audiobookshelf's Authors and Series...), Search and Settings (the equalizer; what it opens on, background,
-  cover and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky), all on the
+- **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with the
+  same five tabs for every source: Now Playing, Home, Browse, Search and Settings. Browse holds what each
+  source has besides its Home, as tiles (YouTube Music's New, Charts, Moods and Genres; radio's Genres,
+  Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists, Genres and Library;
+  local files' Albums, Artists, Genres, Years, Composers and Folders; Qobuz's Discover; Spotify's Your top;
+  Audiobookshelf's Authors and Series...). Settings has the equalizer; what it opens on, background, cover
+  and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky. All on the
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
   station what's on air (and
@@ -129,7 +130,7 @@ the d-pad carries it until **A** or **B** puts it down.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
 
-**Media center:** **L1**/**R1** switch tabs (Now Playing, the source's own, Search, Settings); **A** opens an
+**Media center:** **L1**/**R1** switch tabs (Now Playing, Home, Browse, Search, Settings); **A** opens a Browse tile, an
 album or playlist, **X** plays it straight away, **B** goes back a page, then up to the tabs, then back to the
 Quick Access panel; **View** goes back to the panel at once; **Start** plays or pauses from anywhere. On Now
 Playing, **R2** goes through what's beside the cover (lyrics, queue, on air, notes...), and **Y** turns the screen off (Settings can do it

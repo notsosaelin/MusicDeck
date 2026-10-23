@@ -42,7 +42,11 @@ export function showTab(tab: PanelTab) {
 }
 
 export type View =
-  { type: "home" } | { type: "search"; query: string } | { type: "collection"; collection: Collection };
+  | { type: "home" }
+  | { type: "search"; query: string }
+  | { type: "collection"; collection: Collection }
+  /** one of a source's own sections (its albums, genres, charts...), opened from the media center's Browse */
+  | { type: "section"; tab: string; title: string };
 
 export type StackName = "library" | "search";
 

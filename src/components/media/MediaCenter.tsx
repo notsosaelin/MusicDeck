@@ -39,8 +39,10 @@ import {
   CollectionPage,
   QueueList,
   SearchPage,
+  BrowseIndex,
   TabPage,
   cardKey,
+  sectionKey,
   centerNav,
   centerStack,
   focusKeyFor,
@@ -570,12 +572,19 @@ const NowPlayingBar: FC = () => {
  * One browsing tab (one of the source's own, or Search): its history's latest view, with the controller
  * put back where it belongs.
  */
-const Browse: FC<{ instanceId: string; tab: string }> = ({ instanceId, tab }) => {
+const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }> = ({ instanceId, tab, sections }) => {
   const stack = centerStack(instanceId, tab);
   const views = viewsOf(useStore(centerNav), stack);
   const view = views[views.length - 1];
   const box = useRef<HTMLDivElement>(null);
-  const viewKey = view.type === "collection" ? cardKey(view.collection) : view.type === "search" ? view.query : "home";
+  const viewKey =
+    view.type === "collection"
+      ? cardKey(view.collection)
+      : view.type === "search"
+        ? view.query
+        : view.type === "section"
+          ? sectionKey(view.tab)
+          : "home";
   useEffect(() => focusInto(box.current, focusKeyFor(stack, views.length - 1)), [viewKey, views.length]);
   useEffect(() => snapRows(box.current), []);
   return (
@@ -588,7 +597,14 @@ const Browse: FC<{ instanceId: string; tab: string }> = ({ instanceId, tab }) =>
       }}
     >
       {view.type === "home" ? (
-        <TabPage instanceId={instanceId} tab={tab} stack={stack} />
+        tab === BROWSE.id && sections.length !== 1 ? (
+          <BrowseIndex sections={sections} stack={stack} />
+        ) : (
+          // Browse with one section is that section
+          <TabPage instanceId={instanceId} tab={tab === BROWSE.id ? sections[0].id : tab} stack={stack} />
+        )
+      ) : view.type === "section" ? (
+        <TabPage key={view.tab} instanceId={instanceId} tab={view.tab} stack={stack} />
       ) : view.type === "search" ? (
         <SearchPage key={view.query} instanceId={instanceId} stack={stack} query={view.query} />
       ) : (
@@ -603,15 +619,24 @@ const Browse: FC<{ instanceId: string; tab: string }> = ({ instanceId, tab }) =>
   );
 };
 
-/** The media center's own tabs, around the source's */
+/** The media center's own tabs, around the source's Home */
 const PLAYING: CenterTabInfo = { id: "playing", title: "Now Playing" };
+const BROWSE: CenterTabInfo = { id: "browse", title: "Browse" };
 const SEARCH: CenterTabInfo = { id: "search", title: "Search" };
 const SETTINGS: CenterTabInfo = { id: "settings", title: "Settings" };
 
-/** Now Playing, the live source's own tabs (its Home, albums, genres... see MusicService.center_tabs), Search, Settings. */
+/** A source's own sections past its Home (albums, genres, charts... see MusicService.center_tabs): in Browse. */
+const browseSections = (source: ServiceInfo | undefined): CenterTabInfo[] =>
+  (source?.tabs ?? []).filter((t) => ![PLAYING.id, "home", SEARCH.id, SETTINGS.id].includes(t.id));
+
+/**
+ * Always the same five, whatever the source: Now Playing, its Home, Browse (its other sections), Search,
+ * Settings. A row of every source's sections up top was too many to take in, and moved with the source.
+ */
 function centerTabs(source: ServiceInfo | undefined): CenterTabInfo[] {
-  const own = (source?.tabs ?? []).filter((t) => ![PLAYING.id, SEARCH.id, SETTINGS.id].includes(t.id));
-  return [PLAYING, ...own, ...(source ? [SEARCH] : []), SETTINGS];
+  if (!source) return [PLAYING, SETTINGS];
+  const home = source.tabs.find((t) => t.id === "home");
+  return [PLAYING, ...(home ? [home] : []), ...(browseSections(source).length ? [BROWSE] : []), SEARCH, SETTINGS];
 }
 
 const DEFAULT_CENTER: CenterSettings = {
@@ -743,8 +768,7 @@ const SettingsPage: FC = () => {
       ))}
       {state && <PlaybackSections state={state} Section={CenterSection} />}
       <div style={{ fontSize: 13, opacity: 0.55, marginTop: 24, lineHeight: 1.5 }}>
-        Sources are added and chosen in Decky → MusicDeck. Press the View button to go back to the Quick Access
-        panel.
+        Sources are added and chosen in Decky → MusicDeck. Press the View button to go back to the Quick Access panel.
       </div>
     </div>
   );
@@ -784,7 +808,12 @@ export const MediaCenter: FC = () => {
       <SettingsPage />
     ) : live ? (
       // keyed by source: a tab of the same name on another source is another page
-      <Browse key={`${live}/${id}`} instanceId={live} tab={id} />
+      <Browse
+        key={`${live}/${id}`}
+        instanceId={live}
+        tab={id}
+        sections={id === BROWSE.id ? browseSections(source) : []}
+      />
     ) : (
       <Notice>Add a music source in Decky → MusicDeck to browse it here.</Notice>
     );

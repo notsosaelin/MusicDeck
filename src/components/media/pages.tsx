@@ -1,17 +1,38 @@
 import { Focusable, TextField } from "@decky/ui";
-import { FC, useEffect, useRef, useState } from "react";
+import { FC, ReactNode, useEffect, useRef, useState } from "react";
 import {
+  FaCalendarAlt,
+  FaChartLine,
   FaCheck,
+  FaCompactDisc,
+  FaCompass,
   FaDownload,
   FaExternalLinkAlt,
+  FaFeatherAlt,
+  FaFolder,
   FaGamepad,
+  FaGlobe,
+  FaGuitar,
+  FaHeart,
   FaHistory,
+  FaLanguage,
+  FaLayerGroup,
+  FaList,
+  FaMusic,
   FaPlay,
   FaPlus,
+  FaPodcast,
   FaRandom,
   FaSearch,
+  FaSmile,
+  FaStar,
+  FaTags,
+  FaTrophy,
+  FaUser,
+  FaUsers,
 } from "react-icons/fa";
 import {
+  CenterTabInfo,
   Collection,
   Page,
   Section,
@@ -76,9 +97,14 @@ export const viewsOf = (stacks: Record<CenterStack, View[]>, stack: CenterStack)
 const openedFrom: Record<CenterStack, string[]> = {};
 export const cardKey = (c: Collection) => c.kind + ":" + c.id;
 
+/** The tile a source's section is opened from on Browse, to come back to it. */
+export const sectionKey = (tab: string) => "section:" + tab;
+
 export function pushCenter(stack: CenterStack, view: View) {
   const views = viewsOf(centerNav.get(), stack);
-  if (view.type === "collection") (openedFrom[stack] ??= [])[views.length - 1] = cardKey(view.collection);
+  const from =
+    view.type === "collection" ? cardKey(view.collection) : view.type === "section" ? sectionKey(view.tab) : null;
+  if (from) (openedFrom[stack] ??= [])[views.length - 1] = from;
   centerNav.update({ [stack]: [...views, view] });
 }
 
@@ -147,6 +173,68 @@ const collectionCard = (instanceId: string, stack: CenterStack, c: Collection) =
  * One of the source's own tabs (MusicService.tab): its sections, each shown as it asks: shelves of
  * cards, a row of music per genre or mood, tiles to pick from, or every card in a grid.
  */
+const SECTION_ICONS: Record<string, ReactNode> = {
+  albums: <FaCompactDisc />,
+  artists: <FaUser />,
+  genres: <FaTags />,
+  years: <FaCalendarAlt />,
+  composers: <FaFeatherAlt />,
+  folders: <FaFolder />,
+  charts: <FaChartLine />,
+  moods: <FaSmile />,
+  new: <FaStar />,
+  library: <FaHeart />,
+  discover: <FaCompass />,
+  browse: <FaCompass />,
+  top: <FaTrophy />,
+  bands: <FaGuitar />,
+  countries: <FaGlobe />,
+  languages: <FaLanguage />,
+  authors: <FaUsers />,
+  series: <FaLayerGroup />,
+  categories: <FaList />,
+  yours: <FaPodcast />,
+};
+
+/**
+ * The media center's Browse: a tile for each of the source's own sections (albums, artists, genres;
+ * charts, moods; countries...), each opening as a page in Browse's history, so the tab bar keeps to
+ * Now Playing, Home, Browse, Search and Settings.
+ */
+export const BrowseIndex: FC<{ sections: CenterTabInfo[]; stack: CenterStack }> = ({ sections, stack }) => (
+  <>
+    <SectionTitle>Browse</SectionTitle>
+    <TileGrid>
+      {sections.map((t) => {
+        const open = () => pushCenter(stack, { type: "section", tab: t.id, title: t.title });
+        return (
+          <Focusable
+            key={t.id}
+            className="mc-tile"
+            data-mc={sectionKey(t.id)}
+            noFocusRing
+            onActivate={open}
+            onClick={open}
+            onOKActionDescription="Open"
+            style={{
+              minHeight: 110,
+              padding: "16px 18px",
+              boxSizing: "border-box",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              background: "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
+            }}
+          >
+            <div style={{ fontSize: 24, opacity: 0.75 }}>{SECTION_ICONS[t.id] ?? <FaMusic />}</div>
+            <div style={{ fontSize: 17, fontWeight: 600, color: "#ffffff" }}>{t.title}</div>
+          </Focusable>
+        );
+      })}
+    </TileGrid>
+  </>
+);
+
 export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }> = ({ instanceId, tab, stack }) => {
   useStore(runningGame); // cards get a menu (play with the game) while one runs
   const result = useResult<Section[]>(`${instanceId}:tab:${tab}`, () => getCenterTab(instanceId, tab), true);

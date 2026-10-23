@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.5.2
+
+- The media center has the same five tabs for every source: **Now Playing, Home, Browse, Search,
+  Settings**. A source's other sections (Albums, Artists, Genres, Years, Folders; Charts, Moods;
+  Countries, Languages...) are tiles in **Browse**, each opening as a page; B comes back to its tile. A
+  source with one such section shows it in Browse directly.
+
 ## 0.5.1
 
 - Covers found online were saved cut short (the top part of the picture only): the whole picture is
