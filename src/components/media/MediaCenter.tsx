@@ -21,7 +21,7 @@ import { CenterSettings, CenterTabInfo, NowPlayingKind, ServiceInfo, setSetting 
 import { CenterTab, browsePreview, centerTab, leaveMediaCenter } from "../../nav";
 import { hasFeature, player } from "../../player";
 import { showPlaylistPicker, toggleStar } from "../TrackMenu";
-import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
+import { Store, mediaUrl, pluginState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
 import { Equalizer } from "../Equalizer";
 import { PlaybackSections, SectionFrame } from "../Settings";
@@ -39,6 +39,7 @@ import {
   isTalk,
   useDetails,
 } from "./nowplaying";
+import { DEFAULT_CENTER, setCenter } from "./center";
 import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
 import { useOnAir } from "../NowPlaying";
 import {
@@ -767,16 +768,6 @@ function centerTabs(source: ServiceInfo | undefined): CenterTabInfo[] {
   return [PLAYING, ...(home ? [home] : []), ...(browseSections(source).length ? [BROWSE] : []), SEARCH, SETTINGS];
 }
 
-const DEFAULT_CENTER: CenterSettings = {
-  open_on: "last",
-  background: "art",
-  cards: "medium",
-  lyrics: "medium",
-  show_library: true,
-  show_browse: true,
-  idle_off: 0,
-};
-
 // GamepadButton.SELECT from @decky/ui (an ambient enum, which isolated builds can't import)
 const VIEW_BUTTON = 13;
 
@@ -835,6 +826,16 @@ const CHOICES: { key: keyof CenterSettings; label: string; options: { data: any;
     ],
   },
   {
+    key: "grid_cols",
+    label: "Grid columns",
+    options: [{ data: 0, label: "As many as fit" }, ...[1, 2, 3, 4, 5].map((n) => ({ data: n, label: String(n) }))],
+  },
+  {
+    key: "grid_rows",
+    label: "Grid rows",
+    options: [{ data: 0, label: "As many as fit" }, ...[1, 2, 3, 4, 5].map((n) => ({ data: n, label: String(n) }))],
+  },
+  {
     key: "lyrics",
     label: "Lyrics size",
     options: [
@@ -855,16 +856,6 @@ const CHOICES: { key: keyof CenterSettings; label: string; options: { data: any;
     ],
   },
 ];
-
-async function setCenter(patch: Partial<CenterSettings>) {
-  const current: Partial<CenterSettings> = { ...pluginState.get()?.center, ...patch };
-  // only the choices there are: the backend refuses the whole setting over one it doesn't know
-  const center = Object.fromEntries(
-    (Object.keys(DEFAULT_CENTER) as (keyof CenterSettings)[]).map((k) => [k, current[k] ?? DEFAULT_CENTER[k]]),
-  ) as unknown as CenterSettings;
-  await setSetting("center", center);
-  await refreshState();
-}
 
 /**
  * The media center's own choices (what it opens on, its look, screen off), in its Settings and in the

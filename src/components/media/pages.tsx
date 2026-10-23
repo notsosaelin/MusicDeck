@@ -616,11 +616,7 @@ export const AllPage: FC<{
     )}
     {tracks.length > 0 &&
       (allStations(tracks) ? (
-        <FittedGrid
-          title={<SectionTitle>{items.length ? "Stations" : title}</SectionTitle>}
-          columns="repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))"
-          gap={18}
-        >
+        <FittedGrid title={<SectionTitle>{items.length ? "Stations" : title}</SectionTitle>} gap={18}>
           {tracks.map((t, i) => (
             <StationCard
               key={t.id + i}
@@ -756,11 +752,7 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
     return (
       <>
         {shelves}
-        <FittedGrid
-          title={mixed && <SectionTitle>Stations</SectionTitle>}
-          columns="repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))"
-          gap={18}
-        >
+        <FittedGrid title={mixed && <SectionTitle>Stations</SectionTitle>} gap={18}>
           {page.tracks.map((t, i) => (
             <StationCard
               key={t.id + i}

@@ -37,7 +37,7 @@ FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "eq_per_output", "playback", "d
 # the media center's choices (settings.DEFAULTS["center"]); anything else is refused
 CENTER_CHOICES = {"open_on": {"last", "playing", "home", "library"}, "background": {"art", "plain"},
                   "cards": {"small", "medium", "large"}, "lyrics": {"small", "medium", "large"},
-                  "idle_off": {0, 1, 2, 5, 10}}
+                  "idle_off": {0, 1, 2, 5, 10}, "grid_cols": set(range(6)), "grid_rows": set(range(6))}
 # What can be set to play with a game: things with a track list of their own
 GAME_MUSIC_KINDS = {"album", "playlist"}
 # The same play report for the same track within this many seconds is a duplicate (see scrobble)

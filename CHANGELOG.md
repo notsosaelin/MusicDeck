@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.14.0
+
+- **Choose a grid's layout:** columns 1 to 5 and rows 1 to 5 in any combination (1×1, 2×3, 5×5...), or as
+  many as fit. The covers are sized to fill exactly that many on screen, so nothing is cut off. Set it from
+  any grid's **Layout** button at its title (it shows the layout, e.g. "4 × 2"), or in Settings → Media
+  center. It applies to every grid: Show all, genres, countries, stations, albums.
+
 ## 0.13.6
 
 - **Show all grids fit the screen:** the grid worked out the room under its title wrongly and showed one

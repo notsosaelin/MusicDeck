@@ -48,8 +48,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   top) and the ways in (YouTube Music's New and Charts; Qobuz's Playlists by Qobuz, Press awards, Best
   sellers and more; Audiobookshelf's Authors and Series...) as rows of their first items ending in a square
   Show all; genres, moods, countries and languages as a row each (Pop/Rock's albums, then Jazz's...); and
-  local Folders with how much space the library takes. Grids show whole rows that fit the screen, and every
-  page scrolls a whole row at a time. Settings has the equalizer; what it opens on, background, cover
+  local Folders with how much space the library takes. Grids show whole rows that fit the screen, in the layout you choose
+  (1 to 5 columns by 1 to 5 rows, or as many as fit), and every page scrolls a whole row at a time. Settings has the equalizer; what it opens on, background, cover
   and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky. All on the
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a

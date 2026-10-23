@@ -719,8 +719,12 @@ async def run():
         plugin.settings.set("center", {**center, "show_sound": True})  # a choice an older version had
         check("show_sound" not in (await plugin.get_state())["center"], "choices that no longer exist aren't handed out")
         plugin.settings.set("center", center)
+        await plugin.set_setting("center", {**center, "grid_cols": 2, "grid_rows": 3})
+        check((await plugin.get_state())["center"]["grid_cols"] == 2
+              and (await plugin.get_state())["center"]["grid_rows"] == 3, "a grid's layout, 2 by 3, is kept")
+        plugin.settings.set("center", center)
         for bad in ({"cards": "huge"}, {"idle_off": 3}, {"idle_off": True}, {"open_on": ["home"]}, {"theme": "x"},
-                    {"show_library": "yes"}):
+                    {"show_library": "yes"}, {"grid_cols": 6}, {"grid_rows": -1}, {"grid_rows": True}):
             await plugin.set_setting("center", {**center, **bad})
             check((await plugin.get_state())["center"] == center, f"an unknown choice is refused: {bad}")
 

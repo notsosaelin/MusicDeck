@@ -200,6 +200,9 @@ export interface CenterSettings {
   show_browse: boolean;
   /** minutes idle on Now Playing before the screen goes off; 0 = never */
   idle_off: 0 | 1 | 2 | 5 | 10;
+  /** a grid's columns and rows on screen (1 to 5 each); 0 = as many as fit the cover size */
+  grid_cols: number;
+  grid_rows: number;
 }
 
 export interface PluginState {
