@@ -45,6 +45,8 @@ OAUTH_TIMEOUT = 10 * 60
 
 QUALITIES = {5: "MP3 320", 6: "FLAC 16-bit/44.1 kHz", 7: "FLAC 24-bit/96 kHz", 27: "FLAC 24-bit/192 kHz"}
 # more of Qobuz's album lists, for the media center's Discover tab
+#: Albums asked for at a time for a genre's page (most streamed three of these deep, then what's new)
+GENRE_PAGE = 100
 DISCOVER_FEATURED = [("press-awards", "Press awards"), ("best-sellers", "Best sellers"),
                      ("ideal-discography", "Ideal discography"), ("most-featured", "Most featured")]
 FEATURED = [("new-releases-full", "New releases"), ("qobuzissims", "Qobuzissimes"),
@@ -369,11 +371,16 @@ class QobuzService(MusicService):
             genre, _, name = id[6:].partition("#")
             if not genre.isdigit():
                 raise ServiceError("Unknown genre")
-            new, popular = await asyncio.gather(
-                self._get("album/getFeatured", type="new-releases-full", genre_ids=genre, limit=40),
-                self._get("album/getFeatured", type="most-streamed", genre_ids=genre, limit=40))
+            # well past what a row shows: the most streamed three pages deep, then what's new
+            found = await asyncio.gather(
+                *[self._get("album/getFeatured", type="most-streamed", genre_ids=genre, limit=GENRE_PAGE, offset=n)
+                  for n in range(0, 3 * GENRE_PAGE, GENRE_PAGE)],
+                self._get("album/getFeatured", type="new-releases-full", genre_ids=genre, limit=GENRE_PAGE),
+                return_exceptions=True)
+            if all(isinstance(r, Exception) for r in found):
+                raise next(r for r in found if isinstance(r, Exception))
             seen: set[str] = set()
-            albums = [self._album(a) for result in (popular, new)
+            albums = [self._album(a) for result in found if isinstance(result, dict)
                       for a in (result.get("albums") or {}).get("items", []) if not (a["id"] in seen or seen.add(a["id"]))]
             return models.page(name or "Genre", "Most streamed and new on Qobuz", collections=albums)
         if kind == "list" and id == "favourite-tracks":

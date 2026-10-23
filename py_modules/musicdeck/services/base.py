@@ -22,6 +22,8 @@ TAB_CACHE_SECONDS = 600
 BROWSE_INFO_SECONDS = 12
 
 
+#: Cards in a Browse row before its "Show all"
+PREVIEW = 15
 #: How long a tab fetched for its Browse tile is kept for opening it.
 PREFETCH_SECONDS = 120
 #: What a section's collections are called, for a tile's count
@@ -35,7 +37,8 @@ def tab_info(sections: list[dict[str, Any]]) -> dict[str, Any]:
     shown = [s for s in sections if s.get("items") or s.get("tracks")]
     if not shown:
         # only a note ("Press Y on a station and choose Favourite..."): nothing in it yet
-        return {"subtitle": "None yet" if any(s.get("notice") for s in sections) else "", "art": []}
+        return {"subtitle": "None yet" if any(s.get("notice") for s in sections) else "", "art": [],
+                "count": 0, "items": [], "tracks": []}
     art: list[str] = []
     for s in shown:
         for x in list(s.get("items") or []) + list(s.get("tracks") or []):
@@ -61,7 +64,11 @@ def tab_info(sections: list[dict[str, Any]]) -> dict[str, Any]:
         subtitle = f"{sum(len(s['items']) for s in shown):,} {shown[0]['title'].strip().lower()}"
     elif shown:
         subtitle = " · ".join(s["title"] for s in shown[:3])  # one line on the tile, cut with "…"
-    return {"subtitle": subtitle, "art": art[:4]}
+    # the start of it, for Browse's row of it (its first part's)
+    lead = shown[0] if shown else {}
+    return {"subtitle": subtitle, "art": art[:4], "count": len(lead.get("items") or lead.get("tracks") or []),
+            "items": list(lead.get("items") or [])[:PREVIEW],
+            "tracks": [] if lead.get("items") else list(lead.get("tracks") or [])[:PREVIEW]}
 
 
 def rows_or_tiles(s: dict[str, Any]) -> dict[str, Any]:
@@ -298,6 +305,10 @@ class MusicService:
 
         await asyncio.gather(*[one(t) for t in tab_ids])
         return {t: info[t][1] for t in tab_ids if t in info}
+
+    def forget_browse_info(self) -> None:
+        """What changed (a play, a favourite, the library) shows on Browse at once, not in ten minutes."""
+        self.__dict__.pop("_browse_info", None)
 
     def current(self, collection: dict[str, Any]) -> Optional[dict[str, Any]]:
         """A collection remembered from before (Jump back in) as it is now (renamed, a new picture), or

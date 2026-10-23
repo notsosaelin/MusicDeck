@@ -26,8 +26,6 @@ export const CENTER_CSS =
 .mc-center [class*="TabContentsScroll"] { scroll-padding-top: 104px; scroll-padding-bottom: 12px; }
 .mc-card, .mc-tile { scroll-margin-top: 46px; scroll-margin-bottom: 10px; scroll-margin-left: 2.8vw; scroll-margin-right: 2.8vw; }
 .mc-row { scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
-/* cut off at the bottom of the view: hidden until the page moves to it (snapRows) */
-.mc-below { opacity: 0 !important; transition: opacity 0.15s; }
 /* pills (Lyrics | Queue, a speed) light up as Steam's own do, without a frame; the chosen one stays white */
 .mc-pill { outline: none; transition: background 0.12s; }
 .mc-pill.gpfocus:not(.mc-on), .mc-pill:hover:not(.mc-on) { background: rgba(255, 255, 255, 0.24) !important; }
@@ -81,7 +79,7 @@ const CARD_SIZES = {
   medium: "min(clamp(96px, 14vw, 190px), 25vh)",
   large: "min(clamp(120px, 20vw, 260px), 28vh)",
 };
-const useCardSize = () => CARD_SIZES[useStore(pluginState)?.center?.cards ?? "medium"] ?? CARD_SIZES.medium;
+export const useCardSize = () => CARD_SIZES[useStore(pluginState)?.center?.cards ?? "medium"] ?? CARD_SIZES.medium;
 
 const KIND_ICON: Record<Collection["kind"], ReactNode> = {
   album: <FaCompactDisc />,
@@ -170,10 +168,48 @@ export const Card: FC<{
   );
 };
 
+/** The end of a row: a square, as big as the row's covers, that opens all of it. */
+export const ShowAllCard: FC<{ onOpen: () => void; count?: string }> = ({ onOpen, count }) => {
+  const size = useCardSize();
+  return (
+    <Focusable
+      className="mc-card"
+      noFocusRing
+      onActivate={onOpen}
+      onClick={onOpen}
+      onOKActionDescription="Show all"
+      style={{ width: size, flexShrink: 0, padding: 2 }}
+    >
+      <div
+        className="mc-art"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 6,
+          background: "linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05))",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          textAlign: "center",
+          padding: 10,
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#ffffff" }}>Show all</div>
+        {count && <div style={{ fontSize: 12, opacity: 0.6 }}>{count}</div>}
+      </div>
+    </Focusable>
+  );
+};
+
 /** A titled row that scrolls sideways, as on Steam's home page. */
-export const Shelf: FC<{ title?: string; children: ReactNode }> = ({ title, children }) => (
-  // mc-row-block: what snapRows brings into view whole when the controller enters the row
-  <div className="mc-row-block" style={{ marginBottom: 28 }}>
+export const Shelf: FC<{ title?: string; above?: ReactNode; children: ReactNode }> = ({ title, above, children }) => (
+  // mc-row-block: what snapRows brings into view whole when the controller enters the row (with what's
+  // above its title: its group's name)
+  <div className="mc-row-block mc-slot" style={{ marginBottom: 28 }}>
+    {above}
     {title && <SectionTitle>{title}</SectionTitle>}
     <Focusable
       flow-children="row"
@@ -225,17 +261,21 @@ export const CardGrid: FC<{ title: string; count: number; children: (shown: numb
   children,
 }) => {
   const [shown, setShown] = useState(GRID_STEP);
+  const size = useCardSize();
   return (
-    <div style={{ marginBottom: 28 }}>
-      <SectionTitle right={<span style={{ fontSize: 14, opacity: 0.5 }}>{count.toLocaleString()}</span>}>
-        {title}
-      </SectionTitle>
-      {/* the padding is room for a focused card to grow */}
-      <Focusable className="mc-grid" style={{ display: "flex", flexWrap: "wrap", gap: 22, padding: "10px 0 0" }}>
-        {children(Math.min(shown, count))}
-      </Focusable>
-      {shown < count && <WhenNear key={shown} then={() => setShown(shown + GRID_STEP)} />}
-    </div>
+    <FittedGrid
+      title={
+        <SectionTitle right={<span style={{ fontSize: 14, opacity: 0.5 }}>{count.toLocaleString()}</span>}>
+          {title}
+        </SectionTitle>
+      }
+      columns={`repeat(auto-fill, ${size})`}
+      justify="space-between"
+      gap={22}
+      onNearEnd={() => shown < count && setShown(Math.min(count, shown + GRID_STEP))}
+    >
+      {children(Math.min(shown, count))}
+    </FittedGrid>
   );
 };
 
@@ -564,7 +604,7 @@ export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?
 };
 
 /** A big labelled tile for a part of the library ("All albums", "Artists"), Media Center style. */
-export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) => (
+export const Tile: FC<{ c: Collection; onOpen: () => void; width?: number | string }> = ({ c, onOpen, width }) => (
   <Focusable
     className="mc-tile"
     data-mc={c.kind + ":" + c.id}
@@ -572,8 +612,10 @@ export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) =
     onActivate={onOpen}
     onClick={onOpen}
     onOKActionDescription="Open"
-    // sized by the grid it's in (TileGrid): every tile in a row as wide and as tall as the others
+    // sized by the grid it's in (TileGrid): every tile in a row as wide and as tall as the others; on a
+    // shelf, as wide as it's told
     style={{
+      ...(width !== undefined ? { width, flexShrink: 0 } : {}),
       minHeight: 76,
       padding: "12px 14px",
       boxSizing: "border-box",
@@ -611,19 +653,16 @@ export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) =
  * Tiles across the page's whole width, as many to a row as fit at a readable size, all as wide; a row's
  * tiles as tall as its tallest (a two-line name).
  */
-export const TileGrid: FC<{ children: ReactNode }> = ({ children }) => (
-  <Focusable
-    className="mc-grid"
-    style={{
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(clamp(150px, 18vw, 240px), 1fr))",
-      // every row as tall as the tallest, so one two-line name doesn't make its row stand out
-      gridAutoRows: "1fr",
-      gap: 16,
-    }}
+export const TileGrid: FC<{ title?: ReactNode; children: ReactNode }> = ({ title, children }) => (
+  <FittedGrid
+    title={title}
+    columns="repeat(auto-fill, minmax(clamp(150px, 18vw, 240px), 1fr))"
+    // every row as tall as the tallest, so one two-line name doesn't make its row stand out
+    autoRows="1fr"
+    gap={16}
   >
     {children}
-  </Focusable>
+  </FittedGrid>
 );
 
 /** Live stations, not tracks: a page or shelf of them is shown as stations, played one at a time. */
@@ -759,16 +798,14 @@ const TAB_BAR = 58;
 /** How long the page takes to glide to a row */
 const GLIDE_MS = 200;
 
-/** What a page is made of, to the scrolling: rows of cards, a grid's cards, a list's lines */
-const UNITS = ".mc-row-block, .mc-grid > *, .mc-list > *";
-
 /**
  * Every page of the media center scrolls the same way, as on Steam's home page, by whole rows:
- * - Entering a row of cards glides it, title and all, to just under the tab bar, and it stays there.
- * - In a grid of cards or a list of tracks, the page moves as little as shows the focused line
+ * - Entering a row of cards (or a FittedGrid, a screen of whole rows) glides it, title and all, to just
+ *   under the tab bar, and it stays there.
+ * - In a list of tracks (or a grid not fitted), the page moves as little as shows the focused line
  *   whole, always by whole lines: the top of the view on a line's top, never half a line under the tabs.
- * - What's only partly in view at the bottom fades out, so the page ends on whole rows; it shows as the
- *   page moves to it.
+ * - Held down, the stick moves focus several times a second: each glide aims from where the one before
+ *   was going, not from where it had got to, so the page keeps moving one way instead of stuttering.
  * The media center does this scrolling itself rather than share it with Steam's, as two scrolls at
  * once stutter and leave rows half under the bar:
  * - Steam scrolls a focused card into view (to the nearest edge, which when moving up lands the row
@@ -781,7 +818,7 @@ const UNITS = ".mc-row-block, .mc-grid > *, .mc-list > *";
  * `under` is how much of the area's top is covered (Steam's tab bar); `own` when the container is the
  * scrolling area itself. Returns the cleanup.
  */
-export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own = false } = {}): () => void {
+export function snapRows(container: HTMLElement | null, { under = TAB_BAR } = {}): () => void {
   if (!container) return () => {};
   const win = (container.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
   const focused = () => container.ownerDocument.activeElement as HTMLElement | null;
@@ -789,12 +826,11 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
     const el = focused();
     return container.contains(el) ? (el?.closest(".mc-row-block") as HTMLElement | null) : null;
   };
-  const area = own ? container : scrollParent(container);
   let glide: {
     scroller: HTMLElement;
     block: HTMLElement;
     nearest: boolean;
-    /** a grid item's end point, fixed when the glide starts (it depends on where the page was) */
+    /** where it ends: a line's is fixed when the glide starts (it depends on where the page was going) */
     to: number;
     from: number;
     start?: number;
@@ -802,9 +838,9 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
   } | null = null;
 
   /**
-   * Where the page scrolls to for a block: a row's top under the tabs; a grid's or list's line
-   * (`nearest`) as little as shows it whole (up under the tabs, or down to the bottom edge), and not at
-   * all when it shows.
+   * Where the page scrolls to for a block: a row's top under the tabs; a list's line (`nearest`) as
+   * little as shows it whole (up under the tabs, or down to the bottom edge), and not at all when it
+   * shows. Judged from where the page is going (`at`), so quick presses add up.
    */
   const target = (scroller: HTMLElement, block: HTMLElement, nearest = false) => {
     const view = scroller.getBoundingClientRect();
@@ -812,6 +848,7 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
     const top = scroller.scrollTop + box.top - view.top;
     const max = scroller.scrollHeight - scroller.clientHeight;
     if (!nearest) return Math.max(0, Math.min(top - under - 8, max));
+    const at = glide && glide.scroller === scroller ? glide.to : scroller.scrollTop;
     const room = scroller.clientHeight - under - 8 - 24;
     const line = block.parentElement?.closest(".mc-grid, .mc-list");
     const rows = line
@@ -828,59 +865,12 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
       rows[0] === Math.round(top) && heading?.matches(".mc-title")
         ? scroller.scrollTop + heading.getBoundingClientRect().top - view.top
         : null;
-    const showing = scroller.scrollTop + under + 8;
-    if (top < showing) return rowTop(first ?? top); // above: its line right under the tabs
-    if (top + box.height <= scroller.scrollTop + scroller.clientHeight - 24) return scroller.scrollTop; // in view
-    // below: the first line from which it fits
-    // (the first line with its heading when they fit together)
+    if (top < at + under + 8) return rowTop(first ?? top); // above: its line right under the tabs
+    if (top + box.height <= at + scroller.clientHeight - 24) return at; // in view
+    // below: the first line from which it fits (the first line with its heading when they fit together)
     const from =
       [...(first !== null ? [first] : []), ...rows].find((r) => r <= top && top + box.height - r <= room) ?? top;
     return rowTop(from);
-  };
-
-  // what's only partly in view at the bottom, with everything after it, hidden; and what's partly under the tabs
-  let hidden: HTMLElement[] = [];
-  const conceal = (scroller: HTMLElement | null, at?: number) => {
-    if (!scroller || !container.isConnected) return;
-    const offset = scroller.scrollTop - scroller.getBoundingClientRect().top; // a box's top, in the page
-    const top = (at ?? scroller.scrollTop) + under;
-    const bottom = (at ?? scroller.scrollTop) + scroller.clientHeight;
-    const units = [...container.querySelectorAll<HTMLElement>(`${UNITS}, .mc-title`)];
-    const tops = units.map((u) => u.getBoundingClientRect().top + offset);
-    const now = focused();
-    let cut = Infinity;
-    // and what's half under the tab bar at the top (the end of a page, scrolled as far as it goes)
-    const underBar = new Set<HTMLElement>();
-    units.forEach((u, i) => {
-      const foot = u.getBoundingClientRect().bottom + offset;
-      if (tops[i] < top - 0.5 && foot > top + 0.5 && !u.contains(now)) underBar.add(u);
-      if (u.matches(".mc-title")) {
-        // a heading at the bottom without its grid's or list's first line whole under it goes too
-        const next = u.nextElementSibling;
-        const first = next?.matches(".mc-grid, .mc-list") ? next.firstElementChild : null;
-        const end = (first ?? u).getBoundingClientRect().bottom + offset;
-        if (tops[i] >= top && tops[i] < bottom && end > bottom && end - tops[i] <= bottom - top)
-          cut = Math.min(cut, tops[i]);
-        return;
-      }
-      const box = u.getBoundingClientRect();
-      const end = box.bottom + offset;
-      // only something that starts in view and could show whole: one taller than the view never is
-      if (!box.height || tops[i] < top || tops[i] >= bottom || end <= bottom || box.height > bottom - top) return;
-      if (u.contains(now)) return;
-      // a grid's or list's first line goes with its heading
-      const line = u.parentElement;
-      const heading = line?.matches(".mc-grid, .mc-list") ? line.previousElementSibling : null;
-      const first = Math.abs((line?.firstElementChild?.getBoundingClientRect().top ?? NaN) - box.top) < 1;
-      cut = Math.min(
-        cut,
-        first && heading?.matches(".mc-title") ? heading.getBoundingClientRect().top + offset : tops[i],
-      );
-    });
-    const hide = units.filter((u, i) => (tops[i] >= cut - 0.5 || underBar.has(u)) && !u.contains(now));
-    for (const u of hidden) if (!hide.includes(u)) u.classList.remove("mc-below");
-    for (const u of hide) u.classList.add("mc-below");
-    hidden = hide;
   };
 
   const step = (now: number) => {
@@ -892,22 +882,16 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
     const to = glide.nearest ? glide.to : target(glide.scroller, glide.block);
     glide.scroller.scrollTop = glide.from + (to - glide.from) * eased;
     if (t < 1) glide.frame = win.requestAnimationFrame(step);
-    else {
-      conceal(glide.scroller);
-      glide = null;
-    }
+    else glide = null;
   };
   const glideTo = (block: HTMLElement, nearest = false) => {
     const scroller = scrollParent(block);
     if (!scroller) return;
     ownScrolling(scroller);
+    // worked out before the glide before it stops: it aims from where that one was going
+    const to = target(scroller, block, nearest);
     if (glide) win.cancelAnimationFrame(glide.frame);
     glide = null;
-    // where it ends is worked out once, from where things are now: a line's target doesn't move as the
-    // page does, so the glide eases straight there
-    const to = target(scroller, block, nearest);
-    // what will be cut off where it stops goes now; what comes into view shows as it slides in
-    conceal(scroller, to);
     if (Math.abs(to - scroller.scrollTop) < 1) return;
     glide = { scroller, block, nearest, to, from: scroller.scrollTop, frame: win.requestAnimationFrame(step) };
   };
@@ -925,8 +909,8 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
     const el = e.target as HTMLElement & { mcAlong?: boolean };
     const block = el?.closest?.(".mc-row-block") as HTMLElement | null;
     if (!block) {
-      // a card in a grid, a line of a list: this page scrolls to it, smoothly, not Steam (whose own
-      // scrolling judders)
+      // a line of a list (or a card of a grid not fitted): this page scrolls to it, smoothly, not Steam
+      // (whose own scrolling judders)
       const line = el?.closest?.(".mc-grid, .mc-list");
       if (!line || !container.contains(line)) return;
       let unit: HTMLElement = el;
@@ -943,22 +927,59 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
       el.mcAlong = true;
       el.scrollIntoView = () => alongShelf(el);
     }
+    // already gliding to this row (moving along it, or a grid's rows sliding inside it): nothing new
+    if (glide?.block === block) return;
     glideTo(block);
   };
-  // scrolled some other way (Steam bringing a button into view, a touch): what's cut off, anew
-  let pending = 0;
-  const onScroll = () => {
-    if (glide || pending) return;
-    pending = win.requestAnimationFrame(() => {
-      pending = 0;
-      if (!glide) conceal(area);
+  /**
+   * A page's rows on one height (a "slot", the room under the tabs shared by as many rows as fit), each
+   * row as many slots as it needs: the view, a row at its top, always holds whole rows, never half of
+   * the next one, with nothing hidden. And room after the last row for it to come up under the tabs
+   * too (otherwise the end of a page shows the row before half under the bar).
+   */
+  const layout = () => {
+    const scroller = scrollParent(container);
+    if (!scroller || !container.isConnected) return;
+    const room = scroller.clientHeight - under - 16;
+    const rows = [...container.querySelectorAll<HTMLElement>(".mc-slot")];
+    container.style.paddingBottom = "";
+    if (room <= 0 || !rows.length) return;
+    rows.forEach((r) => (r.style.minHeight = ""));
+    const sizes = rows.map((r) => {
+      const margin = parseFloat(getComputedStyle(r).marginBottom) || 0;
+      return { margin, outer: r.offsetHeight + margin };
     });
+    const typical = [...sizes].sort((a, b) => a.outer - b.outer)[Math.floor(sizes.length / 2)].outer;
+    const slot = Math.floor(room / Math.max(1, Math.floor(room / typical)));
+    rows.forEach((r, i) => {
+      const { margin, outer } = sizes[i];
+      r.style.minHeight = `${Math.max(1, Math.ceil((outer - 1) / slot)) * slot - margin}px`;
+    });
+    // the page ending in a row: room after it for it to reach the top
+    const last = rows[rows.length - 1];
+    const end = container.getBoundingClientRect().bottom;
+    const lastBox = last.getBoundingClientRect();
+    if (end - lastBox.bottom < 48) {
+      const below = end - lastBox.top;
+      const needed = scroller.clientHeight - under - 8 - below;
+      if (needed > 0) container.style.paddingBottom = `${Math.ceil(needed)}px`;
+    }
+  };
+  let laying = false;
+  const relayout = () => {
+    if (laying) return;
+    laying = true;
+    try {
+      layout();
+    } finally {
+      laying = false;
+    }
   };
   const Observer: typeof ResizeObserver = (win as any).ResizeObserver ?? ResizeObserver;
   const resized = new Observer(() => {
+    relayout();
     const block = focusedBlock();
     if (block && !glide) glideTo(block);
-    else if (!glide) conceal(area);
   });
   // the page's own parts, as they come and go (a tab's page, the queue in place of the lyrics)
   const parts = () => [container, ...container.children].forEach((c) => resized.observe(c));
@@ -966,31 +987,179 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
   parts();
   changed.observe(container, { childList: true });
   container.addEventListener("focusin", onFocus);
-  area?.addEventListener("scroll", onScroll, { passive: true });
+  relayout();
   return () => {
     container.removeEventListener("focusin", onFocus);
-    area?.removeEventListener("scroll", onScroll);
+    container.style.paddingBottom = "";
     resized.disconnect();
     changed.disconnect();
     if (glide) win.cancelAnimationFrame(glide.frame);
-    if (pending) win.cancelAnimationFrame(pending);
     glide = null;
-    for (const u of hidden) u.classList.remove("mc-below");
   };
 }
 
-/** Scrolls a card's row sideways to show it, leaving the row's margin beside it. */
+/**
+ * A grid of cards as a screen of whole rows, never a row cut off: as many rows as fit under the tabs
+ * (the rows centred in the room), the rest slid into view a row at a time as the controller moves down,
+ * the way Steam's own grids page. The slide is a transform, so held down the stick runs through the rows
+ * smoothly (each slide picks up from where the last one was). The block is a row to snapRows: entering
+ * it brings it up under the tabs, as a shelf. `onNearEnd`: more cards wanted (a long list made a step at
+ * a time).
+ */
+export const FittedGrid: FC<{
+  title?: ReactNode;
+  columns: string;
+  gap: number;
+  autoRows?: string;
+  justify?: string;
+  onNearEnd?: () => void;
+  children: ReactNode;
+}> = ({ title, columns, gap, autoRows, justify, onNearEnd, children }) => {
+  const block = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{ rows: number; pitch: number; total: number; spare: number } | null>(null);
+  const [offset, setOffset] = useState(0);
+  const fitNow = useRef(fit);
+  fitNow.current = fit;
+  const offsetNow = useRef(0);
+  const nearEnd = useRef(onNearEnd);
+  nearEnd.current = onNearEnd;
+  // each row's top in the grid (a transform doesn't move these)
+  const rowTops = () =>
+    [
+      ...new Set(
+        [...(grid.current?.children ?? [])]
+          .map((c) => c as HTMLElement)
+          .filter((c) => c.offsetHeight > 0)
+          .map((c) => c.offsetTop),
+      ),
+    ].sort((a, b) => a - b);
+
+  useEffect(() => {
+    const b = block.current;
+    const g = grid.current;
+    const scroller = b && scrollParent(b);
+    if (!b || !g || !scroller) return;
+    const measure = () => {
+      const rows = rowTops();
+      const first = g.children[0] as HTMLElement | undefined;
+      if (!rows.length || !first) return setFit(null);
+      const pitch = rows.length > 1 ? rows[1] - rows[0] : first.offsetHeight + gap;
+      const head = (g.parentElement?.offsetTop ?? 0) - b.offsetTop;
+      const room = scroller.clientHeight - TAB_BAR - 8 - head - 24;
+      const fits = Math.max(1, Math.floor(room / pitch));
+      setFit({ rows: fits, pitch, total: rows.length, spare: Math.max(0, room - fits * pitch) });
+    };
+    measure();
+    const Observer: typeof ResizeObserver = (b.ownerDocument.defaultView as any)?.ResizeObserver ?? ResizeObserver;
+    const watch = new Observer(measure);
+    watch.observe(scroller);
+    watch.observe(g);
+    return () => watch.disconnect();
+  }, []);
+
+  const showRow = (row: number) => {
+    const f = fitNow.current;
+    if (!f || row < 0) return;
+    let to = offsetNow.current;
+    if (row < to) to = row;
+    else if (row >= to + f.rows) to = row - f.rows + 1;
+    to = Math.max(0, Math.min(to, Math.max(0, f.total - f.rows)));
+    if (to !== offsetNow.current) {
+      offsetNow.current = to;
+      setOffset(to);
+    }
+    if (to + f.rows >= f.total - 1) nearEnd.current?.();
+  };
+  const onFocus = (e: any) => {
+    const el = e.target as HTMLElement & { mcAlong?: boolean };
+    let unit: HTMLElement = el;
+    while (unit.parentElement && unit.parentElement !== grid.current) unit = unit.parentElement;
+    if (unit.parentElement !== grid.current) return;
+    if (!el.mcAlong) {
+      // Steam's own scrolling to it: the slide does it
+      el.mcAlong = true;
+      el.scrollIntoView = () => {};
+    }
+    showRow(rowTops().indexOf(unit.offsetTop));
+  };
+  const paged = !!fit && fit.total > fit.rows;
+  return (
+    <div ref={block} className="mc-row-block mc-slot" style={{ position: "relative", marginBottom: 28 }}>
+      {title}
+      <div
+        style={{
+          position: "relative",
+          // the rows centred in the room they have; the next row a whole gap below, out of sight
+          marginTop: paged ? Math.floor(fit.spare / 2) : 0,
+          height: paged ? fit.rows * fit.pitch : undefined,
+          overflowY: paged ? "clip" : "visible",
+          overflowX: "visible",
+        }}
+      >
+        <Focusable
+          ref={grid}
+          className="mc-grid mc-fit"
+          onFocus={onFocus}
+          style={{
+            position: "relative",
+            display: "grid",
+            gridTemplateColumns: columns,
+            gridAutoRows: autoRows,
+            justifyContent: justify,
+            gap,
+            // room for a focused card to grow, inside the clip
+            paddingTop: gap / 2,
+            transform: `translateY(${-offset * (fit?.pitch ?? 0)}px)`,
+            transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1)",
+          }}
+        >
+          {children}
+        </Focusable>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Scrolls a card's row sideways to show it, leaving the row's margin beside it: an eased glide of its
+ * own, aimed from where the glide before was going. (The browser's smooth scroll starts again from a
+ * standstill on every call, so the stick held along a row stuttered, then caught up.)
+ */
 function alongShelf(el: HTMLElement) {
-  const shelf = el.closest(".mc-shelf") as HTMLElement | null;
+  const shelf = el.closest(".mc-shelf") as
+    (HTMLElement & { mcGlide?: { to: number; from: number; start?: number; frame: number } }) | null;
   if (!shelf) return;
+  const win = (shelf.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
   const margin = parseFloat(getComputedStyle(shelf).paddingLeft) || 0;
   const card = el.getBoundingClientRect();
   const row = shelf.getBoundingClientRect();
-  const dx =
-    card.left < row.left + margin
-      ? card.left - row.left - margin
-      : card.right > row.right - margin
-        ? card.right - row.right + margin
-        : 0;
-  if (Math.abs(dx) >= 1) shelf.scrollBy({ left: dx, behavior: "smooth" });
+  // in the row's own terms, and judged from where it's going
+  const left = shelf.scrollLeft + card.left - row.left;
+  const at = shelf.mcGlide?.to ?? shelf.scrollLeft;
+  const max = shelf.scrollWidth - shelf.clientWidth;
+  const to = Math.max(
+    0,
+    Math.min(
+      max,
+      left < at + margin
+        ? left - margin
+        : left + card.width > at + row.width - margin
+          ? left + card.width - row.width + margin
+          : at,
+    ),
+  );
+  if (shelf.mcGlide) win.cancelAnimationFrame(shelf.mcGlide.frame);
+  shelf.mcGlide = undefined;
+  if (Math.abs(to - shelf.scrollLeft) < 1) return;
+  const glide = { to, from: shelf.scrollLeft, frame: 0 } as { to: number; from: number; start?: number; frame: number };
+  const step = (now: number) => {
+    glide.start ??= now;
+    const t = Math.min(1, (now - glide.start) / GLIDE_MS);
+    shelf.scrollLeft = glide.from + (glide.to - glide.from) * (1 - Math.pow(1 - t, 3));
+    if (t < 1) glide.frame = win.requestAnimationFrame(step);
+    else shelf.mcGlide = undefined;
+  };
+  glide.frame = win.requestAnimationFrame(step);
+  shelf.mcGlide = glide;
 }

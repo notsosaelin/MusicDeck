@@ -3,6 +3,30 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.13.1
+
+- **Genres as rows:** Browse shows a row per genre (Pop/Rock's albums, then Jazz's, then Classical's...),
+  each loading as you reach it and ending in a square **Show all** that opens all of that genre. Moods,
+  countries and languages work the same way. Every row ends in the same Show all square.
+- Qobuz genres go well past their row: Show all lists the genre's most streamed albums three pages deep,
+  then what's new.
+- **Go to album / Go to artist** from a track's menu opens the page in the media center (it opened in the
+  Quick Access panel, out of sight).
+- **Search keyboard:** opening it no longer pushes the mini player and Steam's bottom bar over the search
+  field; the mini player steps aside while the keyboard is up.
+- **Holding the stick along a row** glides smoothly instead of stuttering, then catching up.
+- **Rows always whole:** a browsing page's rows share one height, so the screen holds whole rows (one at a
+  time where only one fits) and never half of the next; the last row comes up under the tabs like the
+  rest. Nothing is faded or hidden any more.
+
+## 0.13.0
+
+- **Grids show whole rows:** a grid fills the screen with as many whole rows as fit, centred, and slides
+  the next one in as you move down. No half rows, and no fading.
+- Browse's sections past your library are rows of their first items ending in Show all, which opens the
+  whole grid.
+- Holding the stick up or down glides steadily instead of stuttering.
+
 ## 0.12.5
 
 - Large Browse tiles without covers keep their icon in the top corner, clear of the name.

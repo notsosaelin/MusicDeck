@@ -236,9 +236,9 @@ async def run():
         for t in next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["tabs"]:
             groups.setdefault(t["group"], []).append(t["id"])
         check(groups.get("listening") == ["recentplayed", "mostplayed", "toprated"]
-              and groups.get("genres") == ["genre:Pop"]
+              and "genres" not in groups
               and groups["explore"] == ["home", "genres", "years"],
-              f"Browse: what's been listened to, and the biggest genres a press away: {groups}")
+              f"Browse: what's been listened to, and its genres as a row of them (not tiles of the biggest): {groups}")
         pop = (await plugin.center_tab(lid, "genre:Pop"))["data"]
         check([(x["title"], len(x["items"]), len(x["tracks"])) for x in pop] == [("Songs", 0, 2)],
               f"a genre's tile opens its songs: {pop}")
@@ -980,13 +980,17 @@ async def run():
                   and tabs["playlists"] == [("Playlists", "grid", 1, 0)], f"its artists, genres and playlists: {tabs}")
             info = (await plugin.browse_info(eid))["data"]
             check(info["artists"]["subtitle"] == "1 artist" and info["playlists"]["subtitle"] == "1 playlist"
-                  and "home" not in info, f"Browse's tiles say what's in them: {info}")
+                  and "home" not in info and [c["title"] for c in info["genres"]["items"]] == ["Rock"],
+                  f"Browse's tiles say what's in them, its rows the first of it: {info}")
             from musicdeck.services.base import tab_info
-            check(tab_info([{"title": "Genres", "items": [{"kind": "list", "id": "a"}] * 3, "tracks": []}])
+            line = lambda sections: {k: tab_info(sections)[k] for k in ("subtitle", "art")}  # noqa: E731
+            check(line([{"title": "Genres", "items": [{"kind": "list", "id": "a"}] * 3, "tracks": []}])
                   == {"subtitle": "3 genres", "art": []}
-                  and tab_info([{"title": "New", "items": [{"kind": "album", "art": "x"}], "tracks": []},
-                                {"title": "Charts", "items": [], "tracks": [{"art": "y"}]}])
+                  and line([{"title": "New", "items": [{"kind": "album", "art": "x"}], "tracks": []},
+                            {"title": "Charts", "items": [], "tracks": [{"art": "y"}]}])
                   == {"subtitle": "New · Charts", "art": ["x", "y"]}
+                  and tab_info([{"title": "New", "items": [{"kind": "album"}] * 20, "tracks": [{"id": 1}]}])["items"]
+                  == [{"kind": "album"}] * 15
                   and tab_info([{"title": "On air", "items": [], "tracks": [{"live": True}] * 2}])["subtitle"]
                   == "2 stations"
                   and tab_info([{"title": "Genres", "items": [{"kind": "list"}] * 2, "tracks": []},
@@ -3008,6 +3012,19 @@ async def run():
               and got["picks"][0]["items"][0]["title"] == "Picks" and got["discover:best-sellers"][0]["items"]
               and got["songs"][0]["tracks"] and got["playlists"][0]["mine"],
               f"Qobuz's Browse: its library in parts, each of its featured lists a tile: {got}")
+        asked = []
+
+        async def qob_genre(path, **kw):
+            asked.append((kw.get("type"), kw.get("offset")))
+            n = kw.get("offset") or 0
+            return {"albums": {"items": [{"id": f"{kw['type']}{n + i}", "title": "A", "image": {}, "artist": {}}
+                                         for i in range(2)]}}
+        qob._get = qob_genre
+        genre = await QobuzService.open(qob, "list", "genre:112#Pop/Rock")  # its own, not the stand-in above
+        check(sorted(asked, key=str) == sorted([("most-streamed", 0), ("most-streamed", 100), ("most-streamed", 200),
+                                                ("new-releases-full", None)], key=str)
+              and len(genre["collections"]) == 8 and genre["title"] == "Pop/Rock",
+              f"a genre's Show all goes well past its row: {asked}")
 
         print("source types")
         from musicdeck.services import CATALOGUE, SERVICE_TYPES as TYPES

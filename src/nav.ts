@@ -81,8 +81,16 @@ export const popView = (name: StackName): boolean => {
 
 /** Open an album/artist/playlist in the Library tab, from anywhere. */
 export const openInLibrary = (collection: Collection) => {
+  // in the media center: there, in its Browse (the panel's Library is out of sight behind it)
+  if (openInCenter && mainWindowPath() === PLAYER_ROUTE) return openInCenter(collection);
   pushView("library", { type: "collection", collection });
   showTab("library");
+};
+
+/** How the media center opens a page in itself (set by its pages, which nav can't import) */
+let openInCenter: ((collection: Collection) => void) | null = null;
+export const setOpenInCenter = (open: (collection: Collection) => void) => {
+  openInCenter = open;
 };
 
 /**

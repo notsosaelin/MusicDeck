@@ -73,7 +73,6 @@ LOSSLESS = {"FLAC", "ALAC", "WAV"}
 VARIOUS = "Various artists"
 SHELF = 20  # tracks or albums in a Home row
 LIST_MAX = 100  # tracks in a played or rated list
-GENRE_TILES = 6  # the biggest genres, on Browse
 ART_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_ART_BYTES = 15 * 1024 * 1024
 ARTIST = "artist-"  # an artist's picture's key among the albums' (album keys are hex: no clash)
@@ -720,6 +719,7 @@ class LocalService(MusicService):
 
     def _save_review(self) -> None:
         self._browse_cache = None
+        self.forget_browse_info()
         tmp = self.review_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.review, f)
@@ -818,6 +818,7 @@ class LocalService(MusicService):
         """The tracks changed: albums and Browse's tiles are made again when next needed."""
         self._albums_cache = None
         self._browse_cache = None
+        self.forget_browse_info()
 
     def _stamp(self, key: str) -> str:
         """".<time>" of an own picture: a new one is a new art id, so the browser doesn't show the old one
@@ -983,18 +984,6 @@ class LocalService(MusicService):
             add("genres", "Genres", "explore", models.count(len(genres), "genre"))
         if decades:
             add("years", "Years", "explore", models.count(len(decades), "decade"))
-        # the biggest genres (of more than a song), straight in, each with a cover the others haven't used
-        if len(genres) > 1:
-            used: set[str] = set()
-            for name, items in sorted(genres.values(), key=lambda e: -len(e[1]))[:GENRE_TILES]:
-                if len(items) < 2:
-                    break
-                art = covers(items, len(items))
-                pick = next((a for a in art if a not in used), art[:1][0] if art else None)
-                if pick:
-                    used.add(pick)
-                add(f"genre:{name}", name, "genres", models.count(len(items), "song"), [pick] if pick else None)
-
         size = sum(t.get("size", 0) for t in self.tracks.values())
         folders = models.count(len(self._open_folder("")["collections"]), "folder")
         add("folders", "Folders", "files", f"{folders} · {_size(size)}" if size else folders)
@@ -1495,10 +1484,12 @@ class LocalService(MusicService):
         os.replace(tmp, os.path.join(self.art_dir, name))
         self.album_art[album_id] = name
         self._browse_cache = None
+        self.forget_browse_info()
 
     def _remove_art(self, album_id: str) -> None:
         name = self.album_art.pop(album_id, None)
         self._browse_cache = None
+        self.forget_browse_info()
         if name:
             try:
                 os.remove(os.path.join(self.art_dir, name))
@@ -1746,6 +1737,7 @@ class LocalService(MusicService):
         else:
             self.favourites.discard(track_id)
         self._browse_cache = None
+        self.forget_browse_info()
         tmp = self.favourites_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(sorted(self.favourites), f)
@@ -1759,6 +1751,7 @@ class LocalService(MusicService):
         played = self.plays.get(track_id) or {}
         self.plays[track_id] = {"count": played.get("count", 0) + 1, "last": time.time()}
         self._browse_cache = None
+        self.forget_browse_info()
         tmp = self.plays_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.plays, f)

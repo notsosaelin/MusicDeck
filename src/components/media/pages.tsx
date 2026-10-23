@@ -43,6 +43,7 @@ import {
   Collection,
   Page,
   Section,
+  TabInfo,
   Track,
   getBrowseInfo,
   getCenterTab,
@@ -52,7 +53,7 @@ import {
   searchHistory,
 } from "../../api";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
-import { View, playFrom, resultCache } from "../../nav";
+import { View, centerTab, playFrom, resultCache, setOpenInCenter } from "../../nav";
 import { notify } from "../../notify";
 import { hasFeature, player } from "../../player";
 import { Store, mediaUrl, pluginState, useStore } from "../../store";
@@ -73,12 +74,14 @@ import {
   Card,
   CardBlanks,
   CardGrid,
+  FittedGrid,
   Cover,
   GroupTitle,
   Loading,
   Notice,
   PageButton,
   SectionTitle,
+  ShowAllCard,
   StationCard,
   allStations,
   Shelf,
@@ -117,6 +120,18 @@ export function pushCenter(stack: CenterStack, view: View) {
   if (from) (openedFrom[stack] ??= [])[views.length - 1] = from;
   centerNav.update({ [stack]: [...views, view] });
 }
+
+// "Go to album", "Go to artist" from a track's menu: the page opens in Browse (Home for a source with
+// nothing past its Home), over what Browse showed, so B goes back there
+setOpenInCenter((collection) => {
+  const state = pluginState.get();
+  const live = state?.active_service;
+  if (!live) return;
+  const tabs = state?.services.find((s) => s.id === live)?.tabs ?? [];
+  const tab = tabs.some((t) => !["home", "playing", "search", "settings"].includes(t.id)) ? "browse" : "home";
+  pushCenter(centerStack(live, tab), { type: "collection", collection });
+  centerTab.set({ tab });
+});
 
 /** Which card the controller should be on when this tab shows its view at `depth` (if any). */
 export const focusKeyFor = (stack: CenterStack, depth: number): string | undefined => openedFrom[stack]?.[depth];
@@ -306,91 +321,6 @@ const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }
   </Focusable>
 );
 
-/** A compact tile's picture: one of its covers, or its icon in a circle. */
-const WayInArt: FC<{ instanceId: string; t: CenterTabInfo }> = ({ instanceId, t }) => {
-  const [failed, setFailed] = useState(false);
-  const icon = iconFor(t.id);
-  if (t.art?.[0] && !failed)
-    return (
-      <img
-        src={mediaUrl("art", instanceId, t.art[0])}
-        loading="lazy"
-        decoding="async"
-        onError={() => setFailed(true)}
-        style={{ flexShrink: 0, width: 48, height: 48, borderRadius: 4, objectFit: "cover", display: "block" }}
-      />
-    );
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        width: 44,
-        height: 44,
-        borderRadius: "50%",
-        background: "rgba(255, 255, 255, 0.1)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 18,
-        opacity: 0.85,
-      }}
-    >
-      {icon}
-    </div>
-  );
-};
-
-/** One of Explore, a genre, a folder: compact, a cover or its icon beside its name and what's in it. */
-const WayInTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> = ({ instanceId, t, open }) => (
-  <Focusable
-    className="mc-tile"
-    data-mc={sectionKey(t.id)}
-    noFocusRing
-    onActivate={open}
-    onClick={open}
-    onOKActionDescription="Open"
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 14,
-      padding: "14px 16px",
-      minHeight: 72,
-      boxSizing: "border-box",
-      background: TILE_BACK,
-    }}
-  >
-    <WayInArt instanceId={instanceId} t={t} />
-    <div style={{ minWidth: 0 }}>
-      <div
-        style={{
-          fontSize: 16,
-          fontWeight: 600,
-          color: "#ffffff",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {t.title}
-      </div>
-      {t.subtitle && (
-        <div
-          style={{
-            fontSize: 12,
-            opacity: 0.6,
-            marginTop: 2,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {t.subtitle}
-        </div>
-      )}
-    </div>
-  </Focusable>
-);
-
 /**
  * The media center's Browse: the source's own sections past its Home, so the tab bar keeps to Now
  * Playing, Home, Browse, Search and Settings. Grouped as the source says (MusicService.center_tabs):
@@ -402,7 +332,8 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
   sections,
   stack,
 }) => {
-  // what's in each tile, as it arrives (the tiles show at once, their lines and covers a moment later)
+  // what's in each tile and row, as it arrives (the tiles show at once, their lines, covers and cards a
+  // moment later)
   const info = useResult(`${instanceId}:browseinfo`, () => getBrowseInfo(instanceId), true);
   const filled = sections.map((t): CenterTabInfo => {
     const more = info?.ok ? info.data[t.id] : undefined;
@@ -412,43 +343,110 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
     ...g,
     tabs: filled.filter((t) => (t.group ?? "explore") === g.id),
   })).filter((g) => g.tabs.length);
-  // each tile's covers, as far as it has them, not ones a tile before it shows (two charts led by the same album)
+  // each library tile's covers, as far as it has them, not ones a tile before it shows
   const used = new Set<string>();
-  for (const t of groups.flatMap((g) => g.tabs)) {
+  for (const t of groups.find((g) => g.id === "yours")?.tabs ?? []) {
     if (!t.art?.length) continue;
     const fresh = t.art.filter((a) => !used.has(a));
     if (fresh.length) t.art = [...fresh, ...t.art.filter((a) => used.has(a))];
-    t.art.slice(0, t.group === "yours" ? 2 : 1).forEach((a) => used.add(a));
+    t.art.slice(0, 2).forEach((a) => used.add(a));
   }
   const open = (t: CenterTabInfo) => () => pushCenter(stack, { type: "section", tab: t.id, title: t.title });
   return (
     <>
-      {groups.map((g) => (
-        <div key={g.id} style={{ marginBottom: 32 }}>
-          {/* one group needs no name of its own: the tab says Browse */}
-          <SectionTitle>{groups.length > 1 ? g.title : "Browse"}</SectionTitle>
-          <Focusable
-            className="mc-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                g.id === "yours"
-                  ? "repeat(auto-fill, minmax(clamp(150px, 18vw, 300px), 1fr))"
-                  : "repeat(auto-fill, minmax(clamp(200px, 20vw, 280px), 1fr))",
-              gap: 16,
-            }}
+      {groups.map((g) =>
+        g.id === "yours" ? (
+          // the library: large tiles, a press into each
+          <FittedGrid
+            key={g.id}
+            title={<SectionTitle>{g.title}</SectionTitle>}
+            columns="repeat(auto-fill, minmax(clamp(150px, 18vw, 300px), 1fr))"
+            gap={16}
           >
-            {g.tabs.map((t) =>
-              g.id === "yours" ? (
-                <LibraryTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
-              ) : (
-                <WayInTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
-              ),
-            )}
-          </Focusable>
-        </div>
-      ))}
+            {g.tabs.map((t) => (
+              <LibraryTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
+            ))}
+          </FittedGrid>
+        ) : (
+          // the rest: a row of each, its first cards then Show all (its whole grid), each row's title
+          // saying what it is
+          g.tabs.map((t) => (
+            <BrowseRow
+              key={t.id}
+              instanceId={instanceId}
+              stack={stack}
+              t={t}
+              info={info ? (info.ok ? (info.data[t.id] ?? null) : null) : undefined}
+              open={open(t)}
+            />
+          ))
+        ),
+      )}
     </>
+  );
+};
+
+/**
+ * One of a source's sections on Browse as a row: its first albums, playlists, songs or stations (or its
+ * genres, countries... as tiles), ending in Show all, which opens all of it. `info` undefined while it
+ * loads, null when it couldn't (the row is then just its Show all).
+ */
+const BrowseRow: FC<{
+  instanceId: string;
+  stack: CenterStack;
+  t: CenterTabInfo;
+  info: TabInfo | null | undefined;
+  above?: ReactNode;
+  open: () => void;
+}> = ({ instanceId, stack, t, info, above, open }) => {
+  if (info === undefined)
+    return (
+      <Shelf title={t.title} above={above}>
+        <CardBlanks />
+      </Shelf>
+    );
+  const items = info?.items ?? [];
+  const tracks = info?.tracks ?? [];
+  // genres, moods, countries...: a row of each one's music (Pop/Rock's albums, then Jazz's...), each
+  // ending in its Show all; past the first of them, a last row's Show all opens the list of every one
+  const categories = items.length > 0 && items.every((c) => !c.art && c.kind === "list");
+  if (categories)
+    return (
+      <>
+        {items.map((c) => (
+          <CategoryRow key={c.kind + c.id} instanceId={instanceId} stack={stack} category={c} />
+        ))}
+        {(info?.count ?? 0) > items.length && (
+          <Shelf title={`All ${t.title.toLowerCase()}`}>
+            <ShowAllCard onOpen={open} count={t.subtitle} />
+          </Shelf>
+        )}
+      </>
+    );
+  return (
+    <Shelf title={t.title} above={above}>
+      {items.map((c) => collectionCard(instanceId, stack, c))}
+      {tracks.map((t, i) =>
+        t.live ? (
+          <StationCard
+            key={t.id + i}
+            instanceId={instanceId}
+            track={t}
+            onPlay={() => player.playList(instanceId, [t], 0)}
+            onOptions={(e) => showTrackMenu(instanceId, t, e?.currentTarget)}
+          />
+        ) : (
+          <TrackCard
+            key={t.id + i}
+            instanceId={instanceId}
+            track={t}
+            onPlay={() => player.playList(instanceId, tracks, i)}
+            onSecondary={() => addToQueue(instanceId, t)}
+          />
+        ),
+      )}
+      <ShowAllCard onOpen={open} count={t.subtitle} />
+    </Shelf>
   );
 };
 
@@ -502,14 +500,11 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     );
   if (s.display === "tiles")
     return (
-      <div style={{ marginBottom: 28 }}>
-        <SectionTitle>{s.title}</SectionTitle>
-        <TileGrid>
-          {s.items.map((c) => (
-            <Tile key={c.kind + c.id} c={c} onOpen={() => pushCenter(stack, { type: "collection", collection: c })} />
-          ))}
-        </TileGrid>
-      </div>
+      <TileGrid title={<SectionTitle>{s.title}</SectionTitle>}>
+        {s.items.map((c) => (
+          <Tile key={c.kind + c.id} c={c} onOpen={() => pushCenter(stack, { type: "collection", collection: c })} />
+        ))}
+      </TileGrid>
     );
   if (s.display === "covers")
     return (
@@ -558,6 +553,9 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
 
 /** Cards a category row shows before its "All" card */
 const ROW_SIZE = 16;
+
+/** "12 albums", "1 song" */
+const countOf = (n: number, noun: string) => `${n.toLocaleString()} ${noun}${n === 1 ? "" : "s"}`;
 
 /**
  * One genre, mood or chart on Home: a row of its albums and playlists (or songs and stations), ending
@@ -625,10 +623,9 @@ const CategoryShelf: FC<{ instanceId: string; stack: CenterStack; category: Coll
                 onSecondary={() => addToQueue(instanceId, t)}
               />
             ))}
-      <Card
-        instanceId={instanceId}
-        c={{ ...category, title: "All", subtitle: category.title, art: null }}
+      <ShowAllCard
         onOpen={open}
+        count={collections.length ? countOf(collections.length, collections[0].kind) : countOf(tracks.length, "song")}
       />
     </Shelf>
   );
@@ -655,15 +652,10 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
     return (
       <>
         {shelves}
-        {mixed && <SectionTitle>Stations</SectionTitle>}
-        <Focusable
-          className="mc-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))",
-            gap: 18,
-            marginBottom: 28,
-          }}
+        <FittedGrid
+          title={mixed && <SectionTitle>Stations</SectionTitle>}
+          columns="repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))"
+          gap={18}
         >
           {page.tracks.map((t, i) => (
             <StationCard
@@ -677,7 +669,7 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
               onOptions={(e) => showTrackMenu(instanceId, t, e?.currentTarget, { playlistId })}
             />
           ))}
-        </Focusable>
+        </FittedGrid>
       </>
     );
   }

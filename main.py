@@ -428,9 +428,10 @@ class Plugin:
         fetched as Browse opens: {tab id: {"subtitle", "art"}}."""
         async def work():
             instance = self._instance(instance_id)
+            # the library's tiles that come without a line; every row (what isn't the library's) for its cards
             wanted = [t["id"] for t in self._tabs(instance_id, instance)
                       if t["id"] not in ("home", OUR_PLAYLISTS) and t["id"] not in instance.BROWSE_INFO_SKIP
-                      and not (t.get("subtitle") or t.get("art"))]
+                      and (t.get("group") != "yours" or not (t.get("subtitle") or t.get("art")))]
             return await instance.browse_info(wanted)
         return await _result(work())
 

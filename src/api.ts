@@ -264,9 +264,16 @@ export const getTrackDetails = callable<[id: string, track: Track], Result<Track
 /** One of a source's media center tabs: its sections, each saying how to show it */
 export const getCenterTab = callable<[id: string, tab: string], Result<Section[]>>("center_tab");
 /** Lines and covers for Browse's tiles that don't come with their own, by tab id */
-export const getBrowseInfo = callable<[id: string], Result<Record<string, { subtitle: string; art: string[] }>>>(
-  "browse_info",
-);
+export const getBrowseInfo = callable<[id: string], Result<Record<string, TabInfo>>>("browse_info");
+/** A Browse tile's line and covers, and the first of what it holds for its row */
+export interface TabInfo {
+  subtitle: string;
+  art: string[];
+  items: Collection[];
+  tracks: Track[];
+  /** how many its first part holds (items or tracks above are the first of them) */
+  count: number;
+}
 export const openCollection = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Page>>(
   "open_collection",
 );

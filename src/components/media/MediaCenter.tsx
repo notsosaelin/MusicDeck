@@ -475,7 +475,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   const area = useRef<HTMLDivElement>(null);
   const height = useHeight(area);
   // the queue, a station's neighbours: scrolled by whole lines, as the browsing tabs are
-  useEffect(() => snapRows(area.current, { under: 0, own: true }), [!!item]);
+  useEffect(() => snapRows(area.current, { under: 0 }), [!!item]);
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const subtitle = item ? [item.track.artist, item.track.album].filter(Boolean).join(" · ") : "";
   // a book's chapters come as its "lyrics"
@@ -622,6 +622,23 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
     </div>
   );
 };
+
+/**
+ * The window's whole height (the tallest it's been since the media center opened) and whether it's now much shorter than
+ * that, which is the on-screen keyboard taking the bottom of it.
+ */
+function useWindowHeight(ref: RefObject<HTMLElement | null>): { full: number; short: boolean } {
+  const [size, setSize] = useState({ full: 0, now: 0 });
+  useEffect(() => {
+    const win = ref.current?.ownerDocument.defaultView;
+    if (!win) return;
+    const measure = () => setSize((was) => ({ full: Math.max(was.full, win.innerHeight), now: win.innerHeight }));
+    measure();
+    win.addEventListener("resize", measure);
+    return () => win.removeEventListener("resize", measure);
+  }, []);
+  return { full: size.full, short: size.full > 0 && size.now < size.full * 0.8 };
+}
 
 /** Along the bottom of the browsing tabs: what's playing and its progress. Tapping it opens Now Playing. */
 const NowPlayingBar: FC = () => {
@@ -895,6 +912,8 @@ export const MediaCenter: FC = () => {
   const center = { ...DEFAULT_CENTER, ...state?.center };
   const { queue, index, playing } = useStore(player.state);
   const [screenOff, sleep, wake] = useScreenOff();
+  const root = useRef<HTMLDivElement>(null);
+  const { full, short } = useWindowHeight(root);
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const preview = useStore(browsePreview).id;
@@ -928,6 +947,7 @@ export const MediaCenter: FC = () => {
 
   return (
     <Focusable
+      ref={root}
       className="mc-center"
       // Start plays or pauses anywhere (unhinted: the player's own button shows which it'll do)
       onMenuButton={() => player.toggle()}
@@ -965,9 +985,10 @@ export const MediaCenter: FC = () => {
       <div
         style={{
           position: "absolute",
-          // between Steam's header and its hint bar
-          top: "8.6vh",
-          bottom: "8.8vh",
+          // between Steam's header and its hint bar, measured from the whole screen's height: the
+          // on-screen keyboard makes the window shorter, and Steam's bars stay as tall as they were
+          top: full ? full * 0.086 : "8.6vh",
+          bottom: full ? full * 0.088 : "8.8vh",
           left: 0,
           right: 0,
           display: "flex",
@@ -993,7 +1014,8 @@ export const MediaCenter: FC = () => {
             }))}
           />
         </div>
-        {shown !== "playing" && <NowPlayingBar />}
+        {/* not while the keyboard's up: the room is the search field's */}
+        {shown !== "playing" && !short && <NowPlayingBar />}
       </div>
       {screenOff && <Blackout onWake={wake} />}
     </Focusable>
