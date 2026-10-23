@@ -1,5 +1,5 @@
 import { Focusable } from "@decky/ui";
-import { FC, useEffect, useState } from "react";
+import { FC, useEffect, useRef, useState } from "react";
 import { NowPlayingKind, TrackDetails, getTrackDetails } from "../../api";
 import { QueueItem, player } from "../../player";
 import { RecentlyUsed, Store, useStore } from "../../store";
@@ -201,5 +201,68 @@ export const SetlistPanel: FC = () => {
       onPlay={(i) => player.jumpTo(i)}
       onOptions={(i, e) => showTrackMenu(queue[i].instanceId, queue[i].track, e?.currentTarget)}
     />
+  );
+};
+
+/** Bars across the visualizer, and how often it draws (30 a second: smooth, and easy on the battery) */
+const BARS = 40;
+const FRAME_MS = 1000 / 30;
+
+/**
+ * A quiet visualizer where a song's lyrics would be when it has none: thin bars mirrored about the
+ * middle, from the music as it's heard (low notes left, high right). It settles to a line when paused,
+ * and draws only while it shows.
+ */
+export const Visualizer: FC<{ height: number }> = ({ height }) => {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const el = canvas.current;
+    const win = el?.ownerDocument.defaultView;
+    const ctx = el?.getContext("2d");
+    if (!el || !win || !ctx) return;
+    const bins = new Uint8Array(128);
+    const shown = new Float32Array(BARS);
+    let frame = 0;
+    let last = 0;
+    const draw = (now: number) => {
+      frame = win.requestAnimationFrame(draw);
+      if (now - last < FRAME_MS) return;
+      last = now;
+      const scale = win.devicePixelRatio || 1;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (el.width !== Math.round(w * scale) || el.height !== Math.round(h * scale)) {
+        el.width = Math.round(w * scale);
+        el.height = Math.round(h * scale);
+      }
+      const heard = player.state.get().playing && player.levels(bins);
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const gap = Math.max(3, w / BARS / 3);
+      const bar = (w - gap * (BARS - 1)) / BARS;
+      for (let i = 0; i < BARS; i++) {
+        // the lower bins hold most of music; spread the bars over the lower three-quarters, more to the left
+        const at = Math.floor(Math.pow(i / BARS, 1.6) * bins.length * 0.75);
+        const target = heard ? bins[at] / 255 : 0;
+        // up at once, down gently
+        shown[i] = target > shown[i] ? target : shown[i] * 0.88;
+        const length = Math.max(bar, shown[i] * h * 0.8);
+        const x = i * (bar + gap);
+        const y = (h - length) / 2;
+        // at rest a faint line of dots; louder, brighter
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.22 + 0.4 * shown[i]})`;
+        ctx.beginPath();
+        ctx.roundRect(x, y, bar, length, bar / 2);
+        ctx.fill();
+      }
+    };
+    frame = win.requestAnimationFrame(draw);
+    return () => win.cancelAnimationFrame(frame);
+  }, []);
+  return (
+    <div style={{ height, display: "flex", flexDirection: "column", justifyContent: "center", gap: 14 }}>
+      <canvas ref={canvas} style={{ width: "100%", height: Math.min(130, height * 0.4) }} />
+      <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>No lyrics for this track</div>
+    </div>
   );
 };

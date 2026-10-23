@@ -7,7 +7,7 @@ import { MediaCenter } from "./components/media/MediaCenter";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
-import { PLAYER_ROUTE, centerTab, navigation, openMediaCenter, panelTab } from "./nav";
+import { PLAYER_ROUTE, centerTab, navigation, openMediaCenter, panelTab, reopenMediaCenterIfShowing } from "./nav";
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
@@ -47,6 +47,7 @@ export default definePlugin(() => {
 
   const stopFollowing = followState();
   routerHook.addRoute(PLAYER_ROUTE, MediaCenter, { exact: true });
+  reopenMediaCenterIfShowing();
   const unwatchGames = watchGames();
   const unpatchQam = installQamPatch(
     <MusicPanel />,

@@ -53,6 +53,7 @@ globalThis.AudioContext = class {
   destination = node();
   createGain = () => node();
   createBiquadFilter = () => node();
+  createAnalyser = () => node({ fftSize: 256, getByteFrequencyData() {} });
   createMediaElementSource = () => node();
   resume() {}
   close() {}

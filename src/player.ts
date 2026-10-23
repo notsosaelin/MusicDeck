@@ -159,6 +159,8 @@ export class Player {
   private ctx?: AudioContext;
   private preamp?: GainNode;
   private ducker?: GainNode;
+  /** What's heard, by frequency, for Now Playing's visualizer: after the EQ, before ducking */
+  private analyser?: AnalyserNode;
   /** How much of its volume the music keeps for now: 1, or less while a game is in front (games.ts) */
   private duckLevel = 1;
   /** The deck fading out during a crossfade, until it's done */
@@ -185,6 +187,8 @@ export class Player {
   /** Play order when shuffling: a permutation of queue indices. */
   private order: number[] = [];
   private consecutiveErrors = 0;
+  /** Unloaded (see destroy): nothing plays any more */
+  private destroyed = false;
   /** Bumped whenever the queue is replaced or cleared, so slow work for the old one is dropped. */
   private queueGeneration = 0;
   private lastProgressSave = 0;
@@ -225,7 +229,8 @@ export class Player {
   private listen(deck: Deck) {
     const audio = deck.audio;
     const on = (name: string, handler: () => void) =>
-      audio.addEventListener(name, () => deck === this.deck && handler());
+      // an unloaded player's elements say nothing: it would save its queue over the new copy's
+      audio.addEventListener(name, () => deck === this.deck && !this.destroyed && handler());
     on("playing", () => {
       dlog("audio playing", { at: audio.currentTime });
       this.applySpeed();
@@ -284,14 +289,24 @@ export class Player {
     });
   }
 
+  /**
+   * The plugin is unloading (or reloading): stop for good. A player from an unloaded copy of the plugin
+   * must stay silent: parts of its UI can outlive it (a media center page left open, the Quick Access
+   * panel), and their buttons still reach it. Before this, pressing play there brought it back to life,
+   * with an audio graph of its own, playing where the new copy's controls couldn't stop it.
+   */
   destroy() {
+    // its last word: where it was, for the new copy to pick up
+    this.persistSession();
+    this.destroyed = true;
+    this.loadToken++; // streams still being resolved are dropped
     window.clearInterval(this.sessionTimer);
     window.clearInterval(this.stallWatch);
-    this.persistSession();
     if (this.casting) void this.stopCasting();
     this.cancelFade();
     this.decks.forEach((d) => d.empty());
     this.ctx?.close();
+    this.state.update({ playing: false, loading: false });
   }
 
   /** Changes whenever the queue is replaced or cleared (see queueGeneration). */
@@ -500,6 +515,16 @@ export class Player {
     this.audio.currentTime = seconds;
   }
 
+  /**
+   * Fills `into` with how loud each frequency band is now (0-255, low to high) for the visualizer.
+   * False when there's nothing to show: nothing played yet, or playing on a speaker or TV.
+   */
+  levels(into: Uint8Array): boolean {
+    if (!this.analyser || this.casting) return false;
+    this.analyser.getByteFrequencyData(into as Uint8Array<ArrayBuffer>);
+    return true;
+  }
+
   /** Back or ahead by `seconds` (talk's skip buttons), within the track. */
   skipBy(seconds: number) {
     const { duration } = this.position.get();
@@ -639,7 +664,7 @@ export class Player {
   }
 
   private ensureGraph() {
-    if (this.ctx) return;
+    if (this.ctx || this.destroyed) return;
     this.ctx = new AudioContext();
     this.preamp = this.ctx.createGain();
     for (const deck of this.decks) {
@@ -656,9 +681,12 @@ export class Player {
     });
     this.ducker = this.ctx.createGain();
     this.ducker.gain.value = this.duckLevel;
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.78;
     let node: AudioNode = this.preamp;
     for (const f of this.filters) node = node.connect(f);
-    node.connect(this.ducker).connect(this.ctx.destination);
+    node.connect(this.analyser).connect(this.ducker).connect(this.ctx.destination);
     this.applyEq();
     this.applyLevelling();
   }
@@ -744,6 +772,7 @@ export class Player {
    * current load) or drops a preloaded one.
    */
   private attach(deck: Deck, url: string, hls: boolean, startAt: number, token: number) {
+    if (this.destroyed) return;
     deck.switching = true;
     deck.detachHls();
     deck.audio.removeAttribute("src");
@@ -975,7 +1004,7 @@ export class Player {
 
   private persistSession() {
     const { queue, index } = this.state.get();
-    if (!queue.length) return;
+    if (!queue.length || this.destroyed) return;
     saveSession({ queue, index, position: this.audio.currentTime || 0 }).catch(() => {});
   }
 
@@ -1014,6 +1043,7 @@ export class Player {
   }
 
   private play() {
+    if (this.destroyed) return;
     if (!this.casting) this.ensureGraph();
     if (this.ctx?.state === "suspended") this.ctx.resume();
     this.audio.play().catch((e) => {

@@ -115,6 +115,16 @@ export function openMediaCenter(tab?: CenterTab) {
 }
 
 /**
+ * After the plugin reloads (an update), a media center that was showing still shows the unloaded copy's
+ * page, whose buttons reach that copy's stopped player. Opening it again shows this copy's.
+ */
+export function reopenMediaCenterIfShowing() {
+  if (mainWindowPath() !== PLAYER_ROUTE) return;
+  Navigation.NavigateBack();
+  window.setTimeout(() => Navigation.Navigate(PLAYER_ROUTE), 150);
+}
+
+/**
  * Leaves the media center for the Quick Access panel: back to the page it was opened over (past any
  * copies of itself an older version stacked), or Steam's home when there's nothing to go back to.
  */

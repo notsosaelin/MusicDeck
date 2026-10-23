@@ -22,7 +22,16 @@ import { Equalizer } from "../Equalizer";
 import { canCast, prepareCastMenu, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
-import { DetailsPanel, OnAirPanel, PANELS, RelatedPanel, SetlistPanel, isTalk, useDetails } from "./nowplaying";
+import {
+  DetailsPanel,
+  OnAirPanel,
+  PANELS,
+  RelatedPanel,
+  SetlistPanel,
+  Visualizer,
+  isTalk,
+  useDetails,
+} from "./nowplaying";
 import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto, snapRows } from "./parts";
 import {
   CollectionPage,
@@ -473,6 +482,9 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   />
                 ) : side === "setlist" ? (
                   <SetlistPanel />
+                ) : lyrics === null && kind === "music" && !state.castingTo && height > 0 ? (
+                  // no lyrics: the music, drawn
+                  <Visualizer height={height} />
                 ) : message ? (
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>
                 ) : lyrics && !("error" in lyrics) && height > 0 ? (

@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { backend, calls } from "@decky/api";
-import { player } from "../../src/player";
+import { Player, player } from "../../src/player";
 import { pluginState } from "../../src/store";
 
 const track = (id: string, extra = {}) => ({
@@ -217,6 +217,22 @@ describe("transport", () => {
     player.seek(Infinity);
     assert.equal(audio().currentTime, 12);
   });
+});
+
+test("a player whose plugin copy unloaded stays silent, whatever its old buttons do", async () => {
+  const old = new Player();
+  old.playList("src", tracks("a", "b"), 0);
+  await settle();
+  old.destroy();
+  calls.length = 0;
+  old.toggle();
+  old.next();
+  old.playList("src", tracks("c"), 0);
+  await settle();
+  const decks = (old as any).decks as { audio: { paused: boolean } }[];
+  assert.ok(decks.every((d) => d.audio.paused), "nothing plays");
+  assert.equal(old.state.get().playing, false);
+  assert.ok(!calls.some((c) => c.name === "save_session"), "it doesn't save its queue over the new copy's");
 });
 
 describe("talk", () => {
