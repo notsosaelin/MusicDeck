@@ -194,6 +194,8 @@ class Plugin:
             "features": sorted(instance.features) if instance else [],
             "downloadable": bool(instance and instance.downloadable),
             "castable": bool(instance and instance.castable),
+            # the media center's tabs for it (MusicService.center_tabs)
+            "tabs": instance.center_tabs() if instance else [{"id": "home", "title": "Home"}],
             "status": instance.status() if instance else {},
         }
 
@@ -339,15 +341,31 @@ class Plugin:
     @_when_ready
     async def home(self, instance_id: str) -> dict[str, Any]:
         async def work():
-            sections = await self._instance(instance_id).home()
+            return self._with_ours(instance_id, await self._instance(instance_id).home())
+        return await _result(work())
+
+    def _with_ours(self, instance_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Home with what was played lately and the playlists made in MusicDeck before what the source
+        suggests."""
+        ours = self.playlists.for_instance(instance_id)
+        # MusicDeck playlists show as they are now (renamed, new artwork), not as they were played
+        current = {c["id"]: c for c in ours}
+        recent = [current.get(c["id"], c) for c in self.recents.for_instance(instance_id)
+                  if not PlaylistStore.is_ours(c["id"]) or c["id"] in current]
+        return (([{"title": "Jump back in", "items": recent}] if recent else [])
+                + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections)
+
+    @_when_ready
+    async def center_tab(self, instance_id: str, tab_id: str) -> dict[str, Any]:
+        """One of a source's media center tabs (MusicService.tab): sections, each saying how to show it.
+        Home gets what was played lately and MusicDeck's playlists, as home() does; a section of the
+        user's playlists ("mine") gets MusicDeck's playlists too."""
+        async def work():
+            sections = await self._instance(instance_id).tab(tab_id)
+            if tab_id == "home":
+                return self._with_ours(instance_id, sections)
             ours = self.playlists.for_instance(instance_id)
-            # MusicDeck playlists show as they are now (renamed, new artwork), not as they were played
-            current = {c["id"]: c for c in ours}
-            recent = [current.get(c["id"], c) for c in self.recents.for_instance(instance_id)
-                      if not PlaylistStore.is_ours(c["id"]) or c["id"] in current]
-            # what was played lately and what the user made come before what the source suggests
-            return (([{"title": "Jump back in", "items": recent}] if recent else [])
-                    + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections)
+            return [{**s, "items": ours + s["items"]} if s.get("mine") and ours else s for s in sections]
         return await _result(work())
 
     @_when_ready

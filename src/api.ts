@@ -115,6 +115,20 @@ export interface Section {
   title: string;
   items: Collection[];
   tracks?: Track[];
+  /**
+   * How the media center shows it (models.py): a row of cards ("shelf", the default); a row of music
+   * per item ("rows": genres, moods, charts); a grid of names ("tiles"); every card, wrapping ("grid");
+   * tracks as covers too ("covers": stations)
+   */
+  display?: "shelf" | "rows" | "tiles" | "grid" | "covers";
+  /** in place of a section: a note for a tab with nothing in it yet */
+  notice?: string;
+}
+
+/** One of a source's own tabs in the media center */
+export interface CenterTabInfo {
+  id: string;
+  title: string;
 }
 
 export interface EqSettings {
@@ -138,6 +152,8 @@ export interface ServiceInfo {
   downloadable: boolean;
   /** can play on speakers and TVs (not Spotify) */
   castable: boolean;
+  /** its tabs in the media center, between Now Playing and Search */
+  tabs: CenterTabInfo[];
 }
 
 export interface ServiceType {
@@ -214,6 +230,8 @@ export const rescan = callable<[id: string], void>("rescan");
 export const getHome = callable<[id: string], Result<Section[]>>("home");
 /** Genres, moods and charts, for sources with feature "browse" */
 export const getBrowse = callable<[id: string], Result<Section[]>>("browse");
+/** One of a source's media center tabs: its sections, each saying how to show it */
+export const getCenterTab = callable<[id: string, tab: string], Result<Section[]>>("center_tab");
 export const openCollection = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Page>>(
   "open_collection",
 );

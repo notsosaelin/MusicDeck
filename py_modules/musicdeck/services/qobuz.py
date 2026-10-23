@@ -27,7 +27,7 @@ from aiohttp import web
 
 from .. import debuglog, models
 from ..net import tls
-from .base import MusicService, ServiceError, SignIn, StreamSource
+from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
 
 API = "https://www.qobuz.com/api.json/0.2"
 PLAYER = "https://play.qobuz.com"
@@ -44,6 +44,9 @@ OAUTH_PRIVATE_KEY = "6lz8C03UDIC7"
 OAUTH_TIMEOUT = 10 * 60
 
 QUALITIES = {5: "MP3 320", 6: "FLAC 16-bit/44.1 kHz", 7: "FLAC 24-bit/96 kHz", 27: "FLAC 24-bit/192 kHz"}
+# more of Qobuz's album lists, for the media center's Discover tab
+DISCOVER_FEATURED = [("press-awards", "Press awards"), ("best-sellers", "Best sellers"),
+                     ("ideal-discography", "Ideal discography"), ("most-featured", "Most featured")]
 FEATURED = [("new-releases-full", "New releases"), ("qobuzissims", "Qobuzissimes"),
             ("editor-picks", "Editor's picks"), ("most-streamed", "Most streamed")]
 
@@ -288,6 +291,57 @@ class QobuzService(MusicService):
         return [models.section("Genres", [models.collection(f"genre:{g['id']}#{g.get('name', '')}", "list",
                                                             g.get("name") or "Genre")
                                           for g in genres if str(g.get("id", "")).isdigit()])]
+
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("discover", "Discover"), ("genres", "Genres"), ("library", "Library"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            # what's yours is the Library tab's
+            return [s for s in await self.home()
+                    if s["title"] not in ("Favourite albums", "Library") and not models.is_categories(s)]
+        if tab_id == "discover":
+            kinds = DISCOVER_FEATURED
+            albums, playlists = await asyncio.gather(
+                asyncio.gather(*[self._get("album/getFeatured", type=k, limit=30) for k, _ in kinds],
+                               return_exceptions=True),
+                self._get("playlist/getFeatured", type="editor-picks", limit=30), return_exceptions=True)
+            sections = []
+            if isinstance(playlists, dict):
+                items = [self._playlist(p) for p in (playlists.get("playlists") or {}).get("items", [])]
+                sections.append(models.section("Playlists by Qobuz", items))
+            for (_, title), result in zip(kinds, albums if isinstance(albums, list) else []):
+                if isinstance(result, dict):
+                    sections.append(models.section(title, [self._album(a) for a in
+                                                           (result.get("albums") or {}).get("items", [])]))
+            if not any(s["items"] for s in sections):
+                raise ServiceError("Qobuz didn't answer; try again")
+            return sections
+        if tab_id == "genres":
+            return [rows_or_tiles(s) for s in await self.browse()]
+        if tab_id == "library":
+            user_id = self.config.get("user_id")
+            playlists, albums, artists, tracks = await asyncio.gather(
+                self._get("playlist/getUserPlaylists", user_id=user_id, limit=500),
+                self._get("favorite/getUserFavorites", user_id=user_id, type="albums", limit=500),
+                self._get("favorite/getUserFavorites", user_id=user_id, type="artists", limit=500),
+                self.open("list", "favourite-tracks"), return_exceptions=True)
+            sections = [models.section("Playlists", [self._playlist(p) for p in
+                                                     ((playlists.get("playlists") or {}).get("items", [])
+                                                      if isinstance(playlists, dict) else [])],
+                                       display="grid", mine=True)]
+            if isinstance(albums, dict):
+                sections.append(models.section("Albums", [self._album(a) for a in
+                                                          (albums.get("albums") or {}).get("items", [])],
+                                               display="grid"))
+            if isinstance(artists, dict):
+                sections.append(models.section("Artists", [self._artist(a) for a in
+                                                           (artists.get("artists") or {}).get("items", [])]))
+            if isinstance(tracks, dict):
+                sections.append(models.section("Favourite tracks", [], tracks["tracks"], display="grid"))
+            return sections
+        return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("genre:"):

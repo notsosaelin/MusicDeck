@@ -1,6 +1,16 @@
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
+
+from .. import models
+
+# a list of ways in up to this long shows as a row of music each; longer, as tiles to pick from
+ROWS_MAX = 40
+
+
+def rows_or_tiles(s: dict[str, Any]) -> dict[str, Any]:
+    """A section of genres, moods or charts as the media center shows it best."""
+    return {**s, "display": "rows" if len(s["items"]) <= ROWS_MAX else "tiles"}
 
 
 class ServiceError(Exception):
@@ -147,6 +157,28 @@ class MusicService:
         """For sources with feature "browse": ways into the catalogue, as sections of "list"
         collections (genres, moods, charts) that open() opens. Shown in the media center's Browse tab."""
         raise NotImplementedError
+
+    # --- the media center ---
+
+    #: The media center's tabs for this source, between Now Playing and Search: (id, title), each a
+    #: page of sections from tab(id). None: Home, and Browse for sources with feature "browse".
+    TABS: Optional[tuple[tuple[str, str], ...]] = None
+
+    def center_tabs(self) -> list[dict[str, str]]:
+        tabs = self.TABS or (("home", "Home"),) + ((("browse", "Browse"),) if "browse" in self.features else ())
+        return [{"id": id, "title": title} for id, title in tabs]
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        """One of center_tabs(): sections, each with how to show it (models.section's `display`).
+        By default "home" is home() with its ways in as tiles at the end, and "browse" is browse()
+        with each genre or mood as a row of its own (a long list of them as tiles)."""
+        if tab_id == "home":
+            sections = await self.home()
+            return ([s for s in sections if not models.is_categories(s)]
+                    + [{**s, "display": "tiles"} for s in sections if models.is_categories(s)])
+        if tab_id == "browse" and "browse" in self.features:
+            return [rows_or_tiles(s) for s in await self.browse()]
+        raise ServiceError("This source has no such tab")
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         """A Page for an album, artist, playlist or folder."""

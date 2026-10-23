@@ -1,4 +1,4 @@
-import { DropdownItem, Focusable, SliderField, Tabs, ToggleField } from "@decky/ui";
+import { DropdownItem, Focusable, SliderField, Tabs } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
   FaMoon,
@@ -13,7 +13,7 @@ import {
   FaVolumeUp,
 } from "react-icons/fa";
 import { MdRepeatOne } from "react-icons/md";
-import { CenterSettings, setSetting } from "../../api";
+import { CenterSettings, CenterTabInfo, ServiceInfo, setSetting } from "../../api";
 import { CenterTab, centerTab, leaveMediaCenter } from "../../nav";
 import { player } from "../../player";
 import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
@@ -24,16 +24,16 @@ import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../commo
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
 import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto, snapRows } from "./parts";
 import {
-  CenterStack,
   CollectionPage,
-  HomePage,
-  LibraryPage,
   QueueList,
   SearchPage,
+  TabPage,
   cardKey,
   centerNav,
+  centerStack,
   focusKeyFor,
   popCenter,
+  viewsOf,
 } from "./pages";
 
 /**
@@ -456,14 +456,13 @@ const NowPlayingBar: FC = () => {
   );
 };
 
-/** One browsing tab: its history's latest view, with the controller put back where it belongs. */
-const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: boolean; withBrowse: boolean }> = ({
-  stack,
-  instanceId,
-  withoutCategories,
-  withBrowse,
-}) => {
-  const views = useStore(centerNav)[stack];
+/**
+ * One browsing tab (one of the source's own, or Search): its history's latest view, with the controller
+ * put back where it belongs.
+ */
+const Browse: FC<{ instanceId: string; tab: string }> = ({ instanceId, tab }) => {
+  const stack = centerStack(instanceId, tab);
+  const views = viewsOf(useStore(centerNav), stack);
   const view = views[views.length - 1];
   const box = useRef<HTMLDivElement>(null);
   const viewKey = view.type === "collection" ? cardKey(view.collection) : view.type === "search" ? view.query : "home";
@@ -479,13 +478,9 @@ const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: bo
       }}
     >
       {view.type === "home" ? (
-        stack === "library" ? (
-          <LibraryPage instanceId={instanceId} />
-        ) : (
-          <HomePage instanceId={instanceId} withoutCategories={withoutCategories} withBrowse={withBrowse} />
-        )
+        <TabPage instanceId={instanceId} tab={tab} stack={stack} />
       ) : view.type === "search" ? (
-        <SearchPage key={view.query} instanceId={instanceId} query={view.query} />
+        <SearchPage key={view.query} instanceId={instanceId} stack={stack} query={view.query} />
       ) : (
         <CollectionPage
           key={view.collection.kind + view.collection.id}
@@ -498,17 +493,15 @@ const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: bo
   );
 };
 
-const TAB_TITLES: Record<CenterTab, string> = {
-  playing: "Now Playing",
-  home: "Home",
-  library: "Library",
-  search: "Search",
-  settings: "Settings",
-};
+/** The media center's own tabs, around the source's */
+const PLAYING: CenterTabInfo = { id: "playing", title: "Now Playing" };
+const SEARCH: CenterTabInfo = { id: "search", title: "Search" };
+const SETTINGS: CenterTabInfo = { id: "settings", title: "Settings" };
 
-/** The tabs showing, in order (Library as Settings says). */
-function visibleTabs(center: CenterSettings): CenterTab[] {
-  return (Object.keys(TAB_TITLES) as CenterTab[]).filter((t) => t !== "library" || center.show_library);
+/** Now Playing, the live source's own tabs (its Home, albums, genres... see MusicService.center_tabs), Search, Settings. */
+function centerTabs(source: ServiceInfo | undefined): CenterTabInfo[] {
+  const own = (source?.tabs ?? []).filter((t) => ![PLAYING.id, SEARCH.id, SETTINGS.id].includes(t.id));
+  return [PLAYING, ...own, ...(source ? [SEARCH] : []), SETTINGS];
 }
 
 const DEFAULT_CENTER: CenterSettings = {
@@ -559,7 +552,6 @@ const CHOICES: { key: keyof CenterSettings; label: string; options: { data: any;
       { data: "last", label: "Where I left it" },
       { data: "playing", label: "Now Playing" },
       { data: "home", label: "Home" },
-      { data: "library", label: "Library" },
     ],
   },
   {
@@ -627,18 +619,6 @@ const SettingsPage: FC = () => {
           onChange={(o) => setCenter({ [c.key]: o.data })}
         />
       ))}
-      <ToggleField
-        label="Genres and moods on Home"
-        description="Rows of the source's genres, moods and charts, below its own"
-        checked={center.show_browse}
-        onChange={(on) => setCenter({ show_browse: on })}
-      />
-      <ToggleField
-        label="Library tab"
-        description="Your playlists and favourites, and the source's albums, artists and folders"
-        checked={center.show_library}
-        onChange={(on) => setCenter({ show_library: on })}
-      />
       <div style={{ fontSize: 13, opacity: 0.55, marginTop: 16, lineHeight: 1.5 }}>
         Volume levelling, crossfade and the rest of playback are in Decky → MusicDeck. Press the View button to go back
         to the Quick Access panel.
@@ -664,24 +644,27 @@ export const MediaCenter: FC = () => {
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const live = state?.active_service ?? null;
-  const tabs = visibleTabs(center);
-  // a tab just hidden in Settings: back to the first
-  const shown = tabs.includes(tab) ? tab : tabs[0];
+  const source = state?.services.find((s) => s.id === live);
+  const tabs = centerTabs(source);
+  // a tab the source (switched since) doesn't have: its first ("library" was a tab of every source once)
+  const shown = tabs.some((t) => t.id === tab)
+    ? tab
+    : [PLAYING.id, SETTINGS.id].includes(tab)
+      ? tab
+      : (tabs.find((t) => t.id === "home") ?? tabs[1] ?? PLAYING).id;
   useIdleScreenOff(center.idle_off, shown === "playing" && playing && !screenOff, sleep);
 
-  const browse = (stack: CenterStack) =>
-    live ? (
-      <Browse stack={stack} instanceId={live} withoutCategories={center.show_library} withBrowse={center.show_browse} />
+  const content = (id: CenterTab): ReactNode =>
+    id === PLAYING.id ? (
+      <NowPlayingTab onSleep={sleep} lyricsSize={center.lyrics} />
+    ) : id === SETTINGS.id ? (
+      <SettingsPage />
+    ) : live ? (
+      // keyed by source: a tab of the same name on another source is another page
+      <Browse key={`${live}/${id}`} instanceId={live} tab={id} />
     ) : (
       <Notice>Add a music source in Decky → MusicDeck to browse it here.</Notice>
     );
-  const content: Record<CenterTab, ReactNode> = {
-    playing: <NowPlayingTab onSleep={sleep} lyricsSize={center.lyrics} />,
-    home: browse("home"),
-    library: browse("library"),
-    search: browse("search"),
-    settings: <SettingsPage />,
-  };
 
   return (
     <Focusable
@@ -736,16 +719,16 @@ export const MediaCenter: FC = () => {
             activeTab={shown}
             onShowTab={(t: string) => centerTab.set({ tab: t as CenterTab })}
             autoFocusContents
-            tabs={tabs.map((id) => ({
+            tabs={tabs.map(({ id, title }) => ({
               id,
-              title: TAB_TITLES[id],
+              title,
               // Now Playing fits the screen itself; the others scroll, down only (clip, not hidden: a
               // card growing at the edge mustn't make the whole tab scroll sideways)
               content:
-                id === "playing" ? (
-                  content[id]
+                id === PLAYING.id ? (
+                  content(id)
                 ) : (
-                  <div style={{ padding: "2vh 2.8vw 3vh", overflowX: "clip" }}>{content[id]}</div>
+                  <div style={{ padding: "2vh 2.8vw 3vh", overflowX: "clip" }}>{content(id)}</div>
                 ),
             }))}
           />

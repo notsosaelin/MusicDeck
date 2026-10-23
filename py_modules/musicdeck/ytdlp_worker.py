@@ -70,7 +70,7 @@ def channel(req: dict) -> dict:
 
 # the YouTube Music calls the plugin makes; nothing else of ytmusicapi can be asked for
 MUSIC_METHODS = {"search", "get_home", "get_album", "get_artist", "get_playlist", "get_watch_playlist", "get_lyrics",
-                 "get_mood_categories", "get_mood_playlists", "get_charts"}
+                 "get_mood_categories", "get_mood_playlists", "get_charts", "get_explore"}
 music_client = None
 music_lock = threading.Lock()
 

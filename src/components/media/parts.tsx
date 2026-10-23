@@ -1,5 +1,5 @@
 import { Focusable, Spinner, gamepadDialogClasses } from "@decky/ui";
-import { FC, ReactNode, RefObject, useEffect, useState } from "react";
+import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
@@ -172,6 +172,59 @@ export const SectionTitle: FC<{ children: ReactNode; right?: ReactNode }> = ({ c
     {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
   </div>
 );
+
+/** The name of a group of rows (a tab's "Genres", then its "Decades"), above its rows' own titles. */
+export const GroupTitle: FC<{ children: ReactNode }> = ({ children }) => (
+  <div
+    style={{
+      fontSize: 13,
+      fontWeight: 700,
+      letterSpacing: "0.08em",
+      textTransform: "uppercase",
+      color: "rgba(255, 255, 255, 0.5)",
+      margin: "4px 0 14px",
+    }}
+  >
+    {children}
+  </div>
+);
+
+/** Cards a grid shows at first, and adds each time the controller nears its end */
+const GRID_STEP = 40;
+
+/**
+ * Every card of a long list (all albums, all artists), wrapping down the page. Made a step at a time as
+ * the controller nears the end, so a library of thousands opens at once.
+ */
+export const CardGrid: FC<{ title: string; count: number; children: (shown: number) => ReactNode }> = ({
+  title,
+  count,
+  children,
+}) => {
+  const [shown, setShown] = useState(GRID_STEP);
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <SectionTitle right={<span style={{ fontSize: 14, opacity: 0.5 }}>{count.toLocaleString()}</span>}>
+        {title}
+      </SectionTitle>
+      {/* the padding is room for a focused card to grow */}
+      <Focusable style={{ display: "flex", flexWrap: "wrap", gap: 22, padding: "10px 0 0" }}>
+        {children(Math.min(shown, count))}
+      </Focusable>
+      {shown < count && <WhenNear key={shown} then={() => setShown(shown + GRID_STEP)} />}
+    </div>
+  );
+};
+
+/** Calls `then` once this (invisible) point comes near the screen. */
+const WhenNear: FC<{ then: () => void }> = ({ then }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const near = useNear(ref);
+  useEffect(() => {
+    if (near) then();
+  }, [near]);
+  return <div ref={ref} style={{ height: 1 }} />;
+};
 
 /**
  * Tracks as a table: number (or cover), title and artist, album, length. A plays from that track,
@@ -381,20 +434,56 @@ export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) =
     onActivate={onOpen}
     onClick={onOpen}
     onOKActionDescription="Open"
+    // sized by the grid it's in (TileGrid): every tile in a row as wide and as tall as the others
     style={{
-      width: "clamp(120px, 17vw, 230px)",
-      flexShrink: 0, // the same size in a row that scrolls as in a grid
-      height: "clamp(64px, 9vw, 120px)",
+      minHeight: 76,
       padding: "12px 14px",
       boxSizing: "border-box",
       display: "flex",
       flexDirection: "column",
-      justifyContent: "space-between",
+      justifyContent: "flex-end",
+      gap: 3,
       background: "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
     }}
   >
-    <div style={{ fontSize: 20, opacity: 0.7 }}>{KIND_ICON[c.kind]}</div>
-    <div style={{ fontSize: 15, fontWeight: 600, color: "#ffffff", lineHeight: 1.2 }}>{c.title}</div>
+    {/* a long name ("The United Kingdom of Great Britain and Northern Ireland") keeps to two lines */}
+    <div
+      style={{
+        fontSize: 15,
+        fontWeight: 600,
+        color: "#ffffff",
+        lineHeight: 1.2,
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+      }}
+    >
+      {c.title}
+    </div>
+    {c.subtitle && (
+      <div style={{ fontSize: 12, opacity: 0.55, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {c.subtitle}
+      </div>
+    )}
+  </Focusable>
+);
+
+/**
+ * Tiles across the page's whole width, as many to a row as fit at a readable size, all as wide; a row's
+ * tiles as tall as its tallest (a two-line name).
+ */
+export const TileGrid: FC<{ children: ReactNode }> = ({ children }) => (
+  <Focusable
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(clamp(150px, 18vw, 240px), 1fr))",
+      // every row as tall as the tallest, so one two-line name doesn't make its row stand out
+      gridAutoRows: "1fr",
+      gap: 16,
+    }}
+  >
+    {children}
   </Focusable>
 );
 

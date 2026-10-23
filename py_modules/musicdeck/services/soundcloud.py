@@ -18,7 +18,7 @@ import aiohttp
 from .. import models
 from ..cache import Cache
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
 
 API = "https://api-v2.soundcloud.com"
 # Genres for the Browse tab: (tag its search filters by, name shown). SoundCloud's per-genre charts are
@@ -61,6 +61,12 @@ def _signed_expiry(url: str) -> Optional[float]:
 def _art(url: Optional[str]) -> Optional[str]:
     # artwork URLs come in "-large" (100px); "-t300x300" is the size the UI wants
     return url.replace("-large.", "-t300x300.") if url else None
+
+
+
+def _is_chart(section: dict[str, Any]) -> bool:
+    """A home row of SoundCloud's charts ("Trending by genre")."""
+    return any(word in section["title"].lower() for word in ("trending", "chart"))
 
 
 class SoundCloudService(MusicService):
@@ -213,6 +219,27 @@ class SoundCloudService(MusicService):
     async def browse(self) -> list[dict[str, Any]]:
         return [models.section("Charts", [models.collection("chart:trending", "list", "Trending")]),
                 models.section("Genres", [models.collection(f"genre:{tag}", "list", name) for tag, name in GENRES])]
+
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("charts", "Charts"), ("genres", "Genres"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            return [s for s in await self.home() if not _is_chart(s)]
+        if tab_id == "charts":
+            # SoundCloud's own charts: what's trending now, and its playlists of what's trending by genre
+            trending, home = await asyncio.gather(self.open("list", "chart:trending"), self.home(),
+                                                  return_exceptions=True)
+            sections = [s for s in home if _is_chart(s)] if isinstance(home, list) else []
+            if isinstance(trending, dict) and trending["tracks"]:
+                sections.append(models.section("Trending now", [], trending["tracks"], display="grid"))
+            if not sections:
+                raise trending if isinstance(trending, Exception) else ServiceError("No charts right now")
+            return sections
+        if tab_id == "genres":
+            return [rows_or_tiles(s) for s in await self.browse() if s["title"] == "Genres"]
+        return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id == "chart:trending":

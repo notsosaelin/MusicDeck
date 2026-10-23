@@ -139,9 +139,10 @@ class BandcampService(MusicService):
 
     # --- browsing ---
 
-    async def _discover(self, tag: str, size: int = 20) -> list[dict[str, Any]]:
+    async def _discover(self, tag: str, size: int = 20, slice: str = "top") -> list[dict[str, Any]]:
+        """A genre's albums on Bandcamp's discover page: best-selling ("top") or just out ("new")."""
         data = await self._post(DISCOVER, {"category_id": 0, "tag_norm_names": [tag], "geoname_id": 0,
-                                           "slice": "top", "cursor": "*", "size": size,
+                                           "slice": slice, "cursor": "*", "size": size,
                                            "include_result_types": ["a"]})
         return [self._album(x["item_url"], x.get("title", ""), x.get("band_name", ""),
                             _art((x.get("primary_image") or {}).get("image_id")), (x.get("release_date") or "")[:4])
@@ -162,11 +163,28 @@ class BandcampService(MusicService):
     async def browse(self) -> list[dict[str, Any]]:
         return [models.section("Genres", [models.collection(f"genre:{tag}", "list", name) for tag, name in GENRES])]
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("top", "Best-selling"), ("new", "New arrivals"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            return [s for s in await self.home() if not models.is_categories(s)]
+        if tab_id in ("top", "new"):
+            prefix = "genre" if tab_id == "top" else "new"
+            return [models.section("Genres", [models.collection(f"{prefix}:{tag}", "list", name)
+                                              for tag, name in GENRES], display="rows")]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("genre:"):
             tag = id[6:]
             name = dict(GENRES).get(tag, tag.title())
             return models.page(name, "Best-selling on Bandcamp", collections=await self._discover(tag, 60))
+        if kind == "list" and id.startswith("new:"):
+            tag = id[4:]
+            name = dict(GENRES).get(tag, tag.title())
+            return models.page(name, "New on Bandcamp", collections=await self._discover(tag, 60, "new"))
         if kind == "album":
             data = await self._tralbum(id)
             current = data.get("current") or {}

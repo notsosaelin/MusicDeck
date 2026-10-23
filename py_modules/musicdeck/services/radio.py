@@ -19,7 +19,7 @@ import aiohttp
 from .. import debuglog, models
 from ..cache import Cache
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource
+from .base import ROWS_MAX, MusicService, ServiceError, StreamSource
 
 DIRECTORY = "https://all.api.radio-browser.info"
 USER_AGENT = "MusicDeck/0.1.0"  # Radio Browser asks clients to identify themselves
@@ -37,6 +37,29 @@ TITLE_TAG = re.compile(r'(\w+)="([^"]*)"')
 SONG_SPOT = re.compile(r'song_spot="?(\w)')
 IMAGE_URL = re.compile(r"^https?://\S+\.(?:jpe?g|png|webp)(?:\?\S*)?$", re.I)
 COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")  # ISO 3166-1 alpha-2; the settings dialog offers a list
+# the names people use for countries the directory gives by their full official name
+SHORT_NAMES = {"united states of america": "United States", "russian federation": "Russia",
+               "united kingdom of great britain and northern ireland": "United Kingdom",
+               "netherlands": "Netherlands", "republic of korea": "South Korea",
+               "democratic people's republic of korea": "North Korea", "iran (islamic republic of)": "Iran",
+               "islamic republic of iran": "Iran", "syrian arab republic": "Syria",
+               "venezuela (bolivarian republic of)": "Venezuela", "bolivia (plurinational state of)": "Bolivia",
+               "republic of moldova": "Moldova", "united republic of tanzania": "Tanzania",
+               "lao people's democratic republic": "Laos", "viet nam": "Vietnam", "czechia": "Czechia",
+               "philippines": "Philippines", "united arab emirates": "United Arab Emirates"}
+SMALL_WORDS = {"of", "and", "the"}
+
+
+def country_name(name: str) -> str:
+    """"The United States Of America" as "United States"; "Bosnia And Herzegovina" as "Bosnia and Herzegovina"."""
+    plain = name.strip()
+    if plain.lower().startswith("the "):
+        plain = plain[4:]
+    short = SHORT_NAMES.get(plain.lower())
+    if short:
+        return short
+    words = plain.split()
+    return " ".join(w.lower() if i and w.lower() in SMALL_WORDS else w for i, w in enumerate(words))
 
 
 def parse_on_air(title: str, stream_url: str = "") -> Optional[dict[str, Any]]:
@@ -207,12 +230,37 @@ class RadioService(MusicService):
             sections.append(models.section("Genres", [self._tag(t) for t in tags if t.get("name")]))
         if isinstance(countries, list):
             sections.append(models.section("Countries", [
-                models.collection(f"country:{c['iso_3166_1']}#{c.get('name') or ''}", "list", c.get("name") or c["iso_3166_1"],
+                models.collection(f"country:{c['iso_3166_1']}#{c.get('name') or ''}", "list",
+                                  country_name(c.get("name") or c["iso_3166_1"]),
                                   models.count(c.get("stationcount") or 0, "station"))
                 for c in countries if COUNTRY_CODE.match(c.get("iso_3166_1") or "")]))
         if not sections:
             raise tags if isinstance(tags, Exception) else countries  # type: ignore[misc]
         return sections
+
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("genres", "Genres"), ("countries", "Countries"), ("languages", "Languages"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "home":
+            # stations by their logos, as the genres show them
+            return [{**s, "display": "covers"} for s in await self.home() if not models.is_categories(s)]
+        if tab_id == "genres":
+            tags = await self._get("/json/tags", order="stationcount", reverse=True, limit=100)
+            tags = [self._tag(t) for t in tags if t.get("name")]
+            # the biggest as rows of their stations, the rest to pick from
+            return [models.section("Genres", tags[:ROWS_MAX], display="rows"),
+                    models.section("More genres", tags[ROWS_MAX:], display="tiles")]
+        if tab_id == "countries":
+            return [{**s, "display": "tiles"} for s in await self.browse() if s["title"] == "Countries"]
+        if tab_id == "languages":
+            languages = await self._get("/json/languages", order="stationcount", reverse=True, limit=80)
+            return [models.section("Languages", [
+                models.collection(f"language:{l['name']}", "list", l["name"].title(),
+                                  models.count(l.get("stationcount") or 0, "station"))
+                for l in languages if l.get("name") and (l.get("stationcount") or 0) >= 10], display="tiles")]
+        return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("country:"):
@@ -221,7 +269,12 @@ class RadioService(MusicService):
                 raise ServiceError("Unknown country")
             stations = await self._stations(f"/json/stations/bycountrycodeexact/{code}", order="clickcount",
                                             reverse=True, limit=100)
-            return models.page(name or code, models.count(len(stations), "station"), tracks=stations)
+            return models.page(country_name(name) if name else code, models.count(len(stations), "station"), tracks=stations)
+        if kind == "list" and id.startswith("language:"):
+            language = quote(id[9:], safe="")
+            stations = await self._stations(f"/json/stations/bylanguageexact/{language}", order="clickcount",
+                                            reverse=True, limit=100)
+            return models.page(id[9:].title(), models.count(len(stations), "station"), tracks=stations)
         if kind == "list" and id.startswith("tag:"):
             tag = quote(id[4:], safe="")
             stations = await self._stations(f"/json/stations/bytagexact/{tag}", order="clickcount", reverse=True,

@@ -27,7 +27,7 @@ from ..cache import Cache
 from ..feeds import parse_feed
 from ..net import tls
 from ..settings import load_json, save_json
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
 
 SEARCH = "https://itunes.apple.com/search"
 LOOKUP = "https://itunes.apple.com/lookup"
@@ -259,6 +259,24 @@ class PodcastService(MusicService):
                                                (e.get("im:artist") or {}).get("label") or "",
                                                art.replace("170x170bb", "600x600bb") if art else None))
         return shows
+
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("yours", "Your podcasts"), ("categories", "Categories"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "yours":
+            home = await self.home()
+            keep = {"Your podcasts": "grid", "New episodes": "grid", "Continue listening": "shelf"}
+            # subscriptions first, then their new episodes; nothing until something's subscribed to
+            order = list(keep)
+            sections = sorted(({**s, "display": keep[s["title"]]} for s in home if s["title"] in keep),
+                              key=lambda s: (order.index(s["title"]) + 1) % len(order))
+            return sections or [models.notice("Open a podcast and choose Subscribe to keep it here, "
+                                              "with its new episodes as they come out.")]
+        if tab_id == "categories":
+            return [rows_or_tiles(s) for s in await self.browse()]
+        return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("genre:"):

@@ -89,7 +89,11 @@ export const invalidateBrowserCache = () => {
 
 /** The media center (components/media), full screen in Steam's main window, and its open tab. */
 export const PLAYER_ROUTE = "/musicdeck/player";
-export type CenterTab = "playing" | "home" | "library" | "search" | "settings";
+/**
+ * "playing", "search", "settings", or one of the live source's own tabs by its id ("home", "albums",
+ * "genres"... see MusicService.center_tabs)
+ */
+export type CenterTab = string;
 export const centerTab = new Store<{ tab: CenterTab }>({ tab: "playing" });
 
 /** The page Steam's main window shows ("/library/home", PLAYER_ROUTE...), or "" if it can't tell. */

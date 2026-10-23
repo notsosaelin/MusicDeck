@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import debuglog, models, ytdlp_update
 from ..cache import Cache
-from .base import MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
 
 PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 # Shipped in the plugin's bin/; a copy in the data folder also works (e.g. updated or side-loaded)
@@ -366,6 +366,43 @@ class YouTubeService(MusicService):
             if isinstance(failure, Exception):
                 raise failure
         return sections
+
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("new", "New"), ("charts", "Charts"), ("moods", "Moods"), ("genres", "Genres"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "new":
+            explore = await self._music("get_explore")
+            new = [c for c in (self._collection(r, "album") for r in explore.get("new_releases") or []) if c]
+            trending = self._tracks((explore.get("trending") or {}).get("items") or [])
+            videos = self._tracks(explore.get("new_videos") or [])
+            return [models.section("New albums and singles", new),
+                    models.section("Trending", [], trending, display="grid"),
+                    models.section("New music videos", [], videos, display="grid")]
+        if tab_id == "charts":
+            # the world's charts, and the US's (only theirs come by genre)
+            world, us = await asyncio.gather(self._music("get_charts", country="ZZ"),
+                                             self._music("get_charts", country="US"), return_exceptions=True)
+            if isinstance(world, Exception) and isinstance(us, Exception):
+                raise world
+
+            def lists(charts: Any, key: str) -> list[dict[str, Any]]:
+                found = charts.get(key) if isinstance(charts, dict) else None
+                return [c for c in (self._collection(x) for x in found or [] if isinstance(x, dict)
+                                    and x.get("playlistId")) if c]
+            artists = [c for c in (self._collection(a, "artist") for a in
+                                   (world.get("artists") if isinstance(world, dict) else None) or []
+                                   if isinstance(a, dict)) if c]
+            return [models.section("Top music videos", lists(world, "videos") + lists(us, "videos")
+                                   + lists(world, "trending")),
+                    models.section("Top artists", artists),
+                    models.section("By genre", lists(us, "genres"))]
+        if tab_id in ("moods", "genres"):
+            sections = [s for s in await self.browse() if s["title"] != "Charts"]
+            pick = [s for s in sections if (s["title"].lower() == "genres") == (tab_id == "genres")]
+            return [rows_or_tiles(s) for s in pick]
+        return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("mood:"):

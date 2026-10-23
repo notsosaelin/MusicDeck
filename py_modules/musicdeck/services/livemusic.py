@@ -198,6 +198,21 @@ class LiveMusicService(MusicService):
             raise next(v for v in got.values() if isinstance(v, Exception))
         return sections
 
+    # --- media center ---
+
+    TABS = (("home", "Home"), ("bands", "Bands"), ("years", "Years"))
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "bands":
+            bands = await self._search(BANDS, "downloads desc", 300)
+            return [models.section("Bands", [self._band(d) for d in bands], display="grid")]
+        if tab_id == "years":
+            # the archive's shows run from the sixties to last week
+            years = range(date.today().year, 1964, -1)
+            return [models.section("Years", [models.collection(f"year:{y}", "list", str(y)) for y in years],
+                                   display="tiles")]
+        return await super().tab(tab_id)
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if id.startswith("s:"):
             item = _item_id(id[2:])
@@ -209,6 +224,11 @@ class LiveMusicService(MusicService):
             return models.page(self._text(meta.get("title")) or item, subtitle,
                                self._band_of(meta.get("collection")) or item, tracks=tracks,
                                notice=None if tracks else "This recording has no files that can be streamed")
+        if kind == "list" and id.startswith("year:") and id[5:].isdigit() and len(id) == 9:
+            year = id[5:]
+            shows = await self._search(f"{SHOWS} AND year:{year}", "downloads desc", 100)
+            return models.page(year, "The most played shows from that year",
+                               collections=[self._show(d) for d in shows])
         if id.startswith("a:"):
             band = _item_id(id[2:])
             query = f"collection:{band} AND mediatype:etree"

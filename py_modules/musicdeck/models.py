@@ -59,8 +59,35 @@ def page(title: str, subtitle: str = "", art: Optional[str] = None,
             "action": action, "notice": notice}
 
 
-def section(title: str, items: list[dict[str, Any]], tracks: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
-    return {"title": title, "items": items, "tracks": tracks or []}
+# How the media center shows a section (its tabs, see MusicService.tab):
+#   "shelf": a row of cards, songs as a short list (the default, and how Home shows everything);
+#   "rows": each item (a genre, mood, chart) becomes a row of its own music, loaded as it nears;
+#   "tiles": a grid of names, for long lists of ways in (countries, years);
+#   "grid": all its cards wrapping down the page, songs as a full list (all albums, all artists);
+#   "covers": its tracks as a row of covers too, for tracks people pick by their picture (stations).
+DISPLAYS = ("shelf", "rows", "tiles", "grid", "covers")
+
+
+def section(title: str, items: list[dict[str, Any]], tracks: Optional[list[dict[str, Any]]] = None,
+            display: str = "shelf", mine: bool = False) -> dict[str, Any]:
+    """A titled group of collections and/or tracks. `mine`: the user's playlists, where the plugin
+    adds the playlists made in MusicDeck."""
+    s: dict[str, Any] = {"title": title, "items": items, "tracks": tracks or []}
+    if display != "shelf":
+        s["display"] = display
+    if mine:
+        s["mine"] = True
+    return s
+
+
+def notice(text: str) -> dict[str, Any]:
+    """A note in place of a section, for a tab with nothing in it yet (how to fill it)."""
+    return {"title": "", "items": [], "tracks": [], "notice": text}
+
+
+def is_categories(s: dict[str, Any]) -> bool:
+    """A section of ways in ("All albums", genres), not music to pick from."""
+    return bool(s["items"]) and not s.get("tracks") and all(c["kind"] in ("list", "folder") for c in s["items"])
 
 
 def count(n: int, noun: str) -> str:
