@@ -111,6 +111,8 @@ class RadioService(MusicService):
         self.server = ""
         self.server_at = 0.0
         self.stations: Cache[dict[str, Any]] = Cache(STATION_TTL, STATIONS_KEPT)
+        # (when, the directory's genre names), for similar stations
+        self.genres: Optional[tuple[float, set[str]]] = None
 
     @classmethod
     def prepare_config(cls, config: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -172,7 +174,7 @@ class RadioService(MusicService):
     # --- mapping ---
 
     def _station(self, s: dict[str, Any]) -> dict[str, Any]:
-        place = s.get("state") or s.get("country") or ""
+        place = s.get("state") or (country_name(s["country"]) if s.get("country") else "")
         tags = ", ".join(t for t in (s.get("tags") or "").split(",")[:3] if t)
         uuid = s["stationuuid"]
         return models.track(uuid, (s.get("name") or "").strip(), place, tags,
@@ -239,6 +241,43 @@ class RadioService(MusicService):
         return sections
 
     # --- media center ---
+
+    NOW_PLAYING = "radio"
+
+    async def _genre_names(self) -> set[str]:
+        """The directory's 150 biggest tags, which are its genres (kept for a day)."""
+        if not self.genres or time.time() - self.genres[0] > SERVER_TTL * 4:
+            try:
+                tags = await self._get("/json/tags", order="stationcount", reverse=True, limit=150)
+                self.genres = (time.time(), {t["name"].lower() for t in tags if t.get("name")})
+            except ServiceError:
+                return self.genres[1] if self.genres else set()
+        return self.genres[1]
+
+    async def details(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+        s = await self._station_info(str(track.get("id", "")))
+        tags = [t.strip() for t in (s.get("tags") or "").split(",") if t.strip()]
+        quality = " ".join(x for x in ((s.get("codec") or "").upper(),
+                                       f"{s['bitrate']} kbps" if s.get("bitrate") else "") if x)
+        place = ", ".join(x for x in (s.get("state"), country_name(s["country"]) if s.get("country") else "") if x)
+        facts = [[label, value] for label, value in (
+            ("From", place), ("Language", (s.get("language") or "").title()), ("Genres", ", ".join(tags[:6])),
+            ("Quality", quality), ("Website", s.get("homepage") or ""),
+            ("Votes", f"{s['votes']:,}" if s.get("votes") else "")) if value]
+        related = None
+        # stations like it by its genre: its first tag that's one of the directory's genres ("pop", not
+        # the "iheart" network a station is tagged with first)
+        genres = await self._genre_names()
+        genre = next((t for t in tags if t.lower() in genres), tags[0] if tags else "")
+        if genre:
+            try:
+                similar = await self._stations(f"/json/stations/bytagexact/{quote(genre, safe='')}",
+                                               order="clickcount", reverse=True, limit=21)
+                similar = [x for x in similar if x["id"] != track.get("id")][:20]
+                related = models.section(f"More {genre}", [], similar) if similar else None
+            except ServiceError:
+                pass
+        return {"facts": facts, "related": related}
 
     TABS = (("home", "Home"), ("genres", "Genres"), ("countries", "Countries"), ("languages", "Languages"))
 

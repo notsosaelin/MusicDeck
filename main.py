@@ -196,6 +196,8 @@ class Plugin:
             "castable": bool(instance and instance.castable),
             # the media center's tabs for it (MusicService.center_tabs)
             "tabs": instance.center_tabs() if instance else [{"id": "home", "title": "Home"}],
+            # how Now Playing shows its tracks (MusicService.NOW_PLAYING)
+            "now_playing": instance.NOW_PLAYING if instance else "music",
             "status": instance.status() if instance else {},
         }
 
@@ -354,6 +356,13 @@ class Plugin:
                   if not PlaylistStore.is_ours(c["id"]) or c["id"] in current]
         return (([{"title": "Jump back in", "items": recent}] if recent else [])
                 + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections)
+
+    @_when_ready
+    async def track_details(self, instance_id: str, track: dict[str, Any]) -> dict[str, Any]:
+        """More about the playing track for Now Playing (MusicService.details): notes, facts, related."""
+        if not isinstance(track, dict):
+            return {"ok": False, "error": "No track"}
+        return await _result(self._call(instance_id, lambda s: s.details(track)))
 
     @_when_ready
     async def center_tab(self, instance_id: str, tab_id: str) -> dict[str, Any]:

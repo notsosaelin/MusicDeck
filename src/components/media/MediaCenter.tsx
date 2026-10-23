@@ -8,12 +8,13 @@ import {
   FaRedo,
   FaStepBackward,
   FaStepForward,
+  FaUndo,
   FaVolumeDown,
   FaVolumeMute,
   FaVolumeUp,
 } from "react-icons/fa";
 import { MdRepeatOne } from "react-icons/md";
-import { CenterSettings, CenterTabInfo, ServiceInfo, setSetting } from "../../api";
+import { CenterSettings, CenterTabInfo, NowPlayingKind, ServiceInfo, setSetting } from "../../api";
 import { CenterTab, centerTab, leaveMediaCenter } from "../../nav";
 import { player } from "../../player";
 import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
@@ -22,6 +23,7 @@ import { Equalizer } from "../Equalizer";
 import { canCast, prepareCastMenu, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
+import { DetailsPanel, OnAirPanel, PANELS, RelatedPanel, SetlistPanel, isTalk, useDetails } from "./nowplaying";
 import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto, snapRows } from "./parts";
 import {
   CollectionPage,
@@ -175,22 +177,37 @@ const Volume: FC = () => {
 };
 
 /** Shuffle, previous, play/pause, next, repeat. */
-const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean }> = ({ size = "large", focusPlay }) => {
+const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean; kind?: NowPlayingKind }> = ({
+  size = "large",
+  focusPlay,
+  kind = "music",
+}) => {
   const state = useStore(player.state);
   const big = size === "large";
   const side = { height: big ? 48 : 40, fontSize: big ? 17 : 15 };
   const skip = { height: big ? 48 : 40, fontSize: big ? 20 : 17 };
+  // talk skips back and ahead where music shuffles and repeats; a station does neither
+  const talk = isTalk(kind);
+  const radio = kind === "radio";
   return (
     <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: 8, width: big ? 380 : 300 }}>
-      <IconButton
-        look="plain"
-        label="Shuffle"
-        active={state.shuffle}
-        onClick={() => player.setShuffle(!state.shuffle)}
-        style={side}
-      >
-        <FaRandom />
-      </IconButton>
+      {talk ? (
+        <IconButton look="plain" label="Back 15 seconds" onClick={() => player.skipBy(-15)} style={side}>
+          <SkipLabel back seconds={15} />
+        </IconButton>
+      ) : radio ? (
+        <div style={{ width: side.height }} />
+      ) : (
+        <IconButton
+          look="plain"
+          label="Shuffle"
+          active={state.shuffle}
+          onClick={() => player.setShuffle(!state.shuffle)}
+          style={side}
+        >
+          <FaRandom />
+        </IconButton>
+      )}
       <IconButton look="plain" label="Previous" onClick={() => player.previous()} style={skip}>
         <FaStepBackward />
       </IconButton>
@@ -206,15 +223,61 @@ const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean }> = ({ siz
       <IconButton look="plain" label="Next" onClick={() => player.next()} style={skip}>
         <FaStepForward />
       </IconButton>
-      <IconButton
-        look="plain"
-        label="Repeat"
-        active={state.repeat !== "off"}
-        onClick={() => player.cycleRepeat()}
-        style={side}
-      >
-        {state.repeat === "one" ? <MdRepeatOne /> : <FaRedo />}
-      </IconButton>
+      {talk ? (
+        <IconButton look="plain" label="Ahead 30 seconds" onClick={() => player.skipBy(30)} style={side}>
+          <SkipLabel seconds={30} />
+        </IconButton>
+      ) : radio ? (
+        <div style={{ width: side.height }} />
+      ) : (
+        <IconButton
+          look="plain"
+          label="Repeat"
+          active={state.repeat !== "off"}
+          onClick={() => player.cycleRepeat()}
+          style={side}
+        >
+          {state.repeat === "one" ? <MdRepeatOne /> : <FaRedo />}
+        </IconButton>
+      )}
+    </Focusable>
+  );
+};
+
+/** A skip button's face: the arrow round, with how far it goes inside, as podcast apps draw it. */
+const SkipLabel: FC<{ seconds: number; back?: boolean }> = ({ seconds, back }) => (
+  <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+    {back ? <FaUndo style={{ fontSize: "1.5em" }} /> : <FaRedo style={{ fontSize: "1.5em" }} />}
+    <span
+      style={{ position: "absolute", fontSize: "0.5em", fontWeight: 700, top: "52%", transform: "translateY(-50%)" }}
+    >
+      {seconds}
+    </span>
+  </span>
+);
+
+const SPEEDS = [0.8, 1, 1.2, 1.5, 1.75, 2];
+
+/** How fast talk plays: A goes to the next speed, round again after the fastest. */
+const SpeedButton: FC = () => {
+  const { speed } = useStore(player.state);
+  const next = SPEEDS.find((x) => x > speed + 0.01) ?? SPEEDS[0];
+  return (
+    <Focusable
+      className="mc-row"
+      noFocusRing
+      onActivate={() => player.setSpeed(next)}
+      onClick={() => player.setSpeed(next)}
+      onOKActionDescription={`Speed ${next}×`}
+      style={{
+        padding: "6px 14px",
+        borderRadius: 16,
+        fontSize: 15,
+        fontWeight: 700,
+        background: "rgba(255, 255, 255, 0.08)",
+      }}
+    >
+      {`${speed}×`}
     </Focusable>
   );
 };
@@ -278,36 +341,44 @@ const Seek: FC = () => {
  */
 const LYRICS_SIZES = { small: [18, 14], medium: [22, 17], large: [28, 21] } as const;
 
-/** What Now Playing shows beside the cover; kept while the media center is closed. */
-const nowPlayingSide = new Store<{ side: "lyrics" | "queue" }>({ side: "lyrics" });
-const toggleSide = () => nowPlayingSide.set({ side: nowPlayingSide.get().side === "lyrics" ? "queue" : "lyrics" });
+/** What Now Playing shows beside the cover, per kind of source; kept while the media center is closed. */
+const nowPlayingSide = new Store<Partial<Record<NowPlayingKind, string>>>({});
+const sideOf = (kind: NowPlayingKind, chosen: Partial<Record<NowPlayingKind, string>>) =>
+  PANELS[kind].find((p) => p.id === chosen[kind]) ?? PANELS[kind][0];
+/** R2: the next panel, round again after the last. */
+const nextSide = (kind: NowPlayingKind) => {
+  const panels = PANELS[kind];
+  const at = panels.indexOf(sideOf(kind, nowPlayingSide.get()));
+  nowPlayingSide.update({ [kind]: panels[(at + 1) % panels.length].id });
+};
 
 // GamepadButton.TRIGGER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
 const R2 = 8;
 
-/** Lyrics | Queue, beside the title: switched with R2, or by pressing (or tapping) either. */
-const SideSwitch: FC<{ upNext: number }> = ({ upNext }) => {
-  const { side } = useStore(nowPlayingSide);
+/** The panels' names beside the title (Lyrics | Queue, On air | Station...): R2, or pressing one. */
+const SideSwitch: FC<{ kind: NowPlayingKind; upNext: number }> = ({ kind, upNext }) => {
+  const side = sideOf(kind, useStore(nowPlayingSide)).id;
+  const pick = (id: string) => nowPlayingSide.update({ [kind]: id });
   return (
     <Focusable flow-children="row" style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-      {(["lyrics", "queue"] as const).map((s) => (
+      {PANELS[kind].map(({ id, label }) => (
         <Focusable
-          key={s}
+          key={id}
           className="mc-row"
           noFocusRing
-          onActivate={() => nowPlayingSide.set({ side: s })}
-          onClick={() => nowPlayingSide.set({ side: s })}
-          onOKActionDescription={s === "lyrics" ? "Lyrics" : "Queue"}
+          onActivate={() => pick(id)}
+          onClick={() => pick(id)}
+          onOKActionDescription={label}
           style={{
             padding: "5px 12px",
             borderRadius: 14,
             fontSize: 13,
             fontWeight: 600,
-            color: side === s ? "#0e141b" : "#dcdedf",
-            background: side === s ? "#dcdedf" : "rgba(255, 255, 255, 0.08)",
+            color: side === id ? "#0e141b" : "#dcdedf",
+            background: side === id ? "#dcdedf" : "rgba(255, 255, 255, 0.08)",
           }}
         >
-          {s === "lyrics" ? "Lyrics" : upNext ? `Queue · ${upNext}` : "Queue"}
+          {id === "queue" && upNext ? `${label} · ${upNext}` : label}
         </Focusable>
       ))}
     </Focusable>
@@ -317,24 +388,33 @@ const SideSwitch: FC<{ upNext: number }> = ({ upNext }) => {
 const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyrics"] }> = ({ onSleep, lyricsSize }) => {
   const [syncedSize, plainSize] = LYRICS_SIZES[lyricsSize] ?? LYRICS_SIZES.medium;
   const state = useStore(player.state);
-  const { side } = useStore(nowPlayingSide);
   const item = state.queue[state.index];
+  const services = useStore(pluginState)?.services;
+  const kind: NowPlayingKind = services?.find((s) => s.id === item?.instanceId)?.now_playing ?? "music";
+  const side = sideOf(kind, useStore(nowPlayingSide)).id;
   const upNext = Math.max(player.playOrder.length - 1 - player.playOrder.indexOf(state.index), 0);
-  const lyrics = useLyrics(item);
+  const lyrics = useLyrics(side === "lyrics" ? item : undefined);
+  const details = useDetails(item, ["notes", "station", "related"].includes(side));
   const page = useRef<HTMLDivElement>(null);
   const room = useFitBelow(page);
   const area = useRef<HTMLDivElement>(null);
   const height = useHeight(area);
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const subtitle = item ? [item.track.artist, item.track.album].filter(Boolean).join(" · ") : "";
+  // a book's chapters come as its "lyrics"
+  const book = kind === "book";
   const message = !item
     ? null
     : lyrics === undefined
-      ? "Looking for lyrics…"
+      ? book
+        ? "Looking for chapters…"
+        : "Looking for lyrics…"
       : lyrics === null
-        ? "No lyrics for this track"
+        ? book
+          ? "No chapters in this part"
+          : "No lyrics for this track"
         : "error" in lyrics
-          ? `Couldn't load lyrics: ${lyrics.error}`
+          ? `Couldn't load ${book ? "chapters" : "lyrics"}: ${lyrics.error}`
           : null;
 
   return (
@@ -348,7 +428,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
           onOptionsButton={onSleep}
           onButtonDown={(e: any) => {
             if (e?.detail?.button === R2) {
-              toggleSide();
+              nextSide(kind);
               e.stopPropagation?.();
             }
           }}
@@ -361,7 +441,12 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                 aspectRatio: "1",
                 flexShrink: 0,
                 borderRadius: 8,
-                background: art ? `center / cover no-repeat url("${art}")` : "rgba(255, 255, 255, 0.08)",
+                // a station's logo is small: whole, on a dark square, rather than blown up to fill it
+                background: !art
+                  ? "rgba(255, 255, 255, 0.08)"
+                  : kind === "radio"
+                    ? `center / 62% no-repeat url("${art}"), rgba(255, 255, 255, 0.06)`
+                    : `center / cover no-repeat url("${art}")`,
                 boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
               }}
             />
@@ -370,7 +455,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <RowText size="large" scroll="always" title={item.track.title} subtitle={subtitle} />
                 </div>
-                <SideSwitch upNext={upNext} />
+                <SideSwitch kind={kind} upNext={upNext} />
                 <span
                   onClick={onSleep}
                   title="Screen off"
@@ -386,9 +471,23 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   <FaMoon />
                 </span>
               </div>
-              <div ref={area} style={{ flex: 1, minHeight: 0, overflowY: side === "queue" ? "auto" : "hidden" }}>
+              <div ref={area} style={{ flex: 1, minHeight: 0, overflowY: side === "lyrics" ? "hidden" : "auto" }}>
                 {side === "queue" ? (
                   <QueueList />
+                ) : side === "onair" ? (
+                  <OnAirPanel item={item} />
+                ) : side === "station" ? (
+                  <DetailsPanel details={details} show="facts" empty="Nothing more about this station" />
+                ) : side === "notes" ? (
+                  <DetailsPanel details={details} show="notes" empty="No notes for this one" />
+                ) : side === "related" ? (
+                  <RelatedPanel
+                    item={item}
+                    details={details}
+                    empty={kind === "radio" ? "No stations like this one found" : "Nothing more from this show"}
+                  />
+                ) : side === "setlist" ? (
+                  <SetlistPanel />
                 ) : message ? (
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>
                 ) : lyrics && !("error" in lyrics) && height > 0 ? (
@@ -405,9 +504,11 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
             {!item.track.live && <Seek />}
             <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: "2vw" }}>
               <Volume />
-              <Transport focusPlay />
-              {/* balances the volume, so the transport sits in the middle */}
-              <div style={{ flex: 1 }} />
+              <Transport focusPlay kind={kind} />
+              {/* balances the volume, so the transport sits in the middle (talk's speed at its end) */}
+              <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+                {isTalk(kind) && <SpeedButton />}
+              </div>
             </Focusable>
           </Focusable>
         </Focusable>

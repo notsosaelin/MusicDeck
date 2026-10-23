@@ -262,6 +262,24 @@ class PodcastService(MusicService):
 
     # --- media center ---
 
+    NOW_PLAYING = "podcast"
+
+    async def details(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+        track_id, show = str(track.get("id", "")), str(track.get("album_id") or "")
+        if not track_id.startswith("e:") or not show.startswith("p:"):
+            return None
+        feed = _decode(show[2:])
+        podcast = await self._feed(feed)
+        url = _decode(track_id[2:])
+        episode = next((e for e in podcast["episodes"] if e["url"] == url), None)
+        facts = [[label, value] for label, value in (
+            ("Show", podcast["title"]), ("By", podcast["author"]),
+            ("Published", _date(episode["published"]) if episode else "")) if value]
+        others = [e for e in self._episodes(feed, podcast, 40) if e["id"] != track_id][:30]
+        return {"notes": (episode or {}).get("description") or podcast.get("description") or "",
+                "facts": facts,
+                "related": models.section(f"More from {podcast['title']}", [], others) if others else None}
+
     TABS = (("home", "Home"), ("yours", "Your podcasts"), ("categories", "Categories"))
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:

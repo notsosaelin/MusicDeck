@@ -46,7 +46,7 @@ const Seek: FC = () => {
 const ON_AIR_POLL_MS = 20_000;
 
 /** The song a live station is playing, polled while it plays (null when it doesn't say). */
-function useOnAir(item: QueueItem | undefined, playing: boolean): OnAir | null {
+export function useOnAir(item: QueueItem | undefined, playing: boolean): OnAir | null {
   const [song, setSong] = useState<OnAir | null>(null);
   const live = item?.track.live ? item : undefined;
   useEffect(() => {

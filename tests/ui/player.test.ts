@@ -219,6 +219,27 @@ describe("transport", () => {
   });
 });
 
+describe("talk", () => {
+  test("podcast episodes play at the chosen speed, music always as it is, and skips stay in the track", async () => {
+    pluginState.set({ ...pluginState.get()!, services: [{ id: "src", features: [] }, { id: "pod", features: ["progress"] }] } as any);
+    player.setSpeed(1.5);
+    player.playList("pod", tracks("ep"), 0);
+    await settle();
+    assert.equal((audio() as any).playbackRate, 1.5);
+    audio().currentTime = 10;
+    player.skipBy(-15);
+    assert.equal(audio().currentTime, 0);
+    player.skipBy(30);
+    assert.equal(audio().currentTime, 30);
+    player.playList("src", tracks("song"), 0);
+    await settle();
+    assert.equal((audio() as any).playbackRate, 1);
+    player.setSpeed(9);
+    assert.equal(player.state.get().speed, 3);
+    player.setSpeed(1);
+  });
+});
+
 describe("stream links that run out", () => {
   const expiring = (expires: number) => async () => ({ ok: true, data: { hls: false, gain: null, start_at: 0, expires } });
 

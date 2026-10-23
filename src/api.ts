@@ -125,6 +125,21 @@ export interface Section {
   notice?: string;
 }
 
+/**
+ * What a source plays, as Now Playing shows it: songs (lyrics, the queue), radio (what's on air, the
+ * station), podcast episodes and books (notes, episodes or chapters, skip and speed), concerts (setlist)
+ */
+export type NowPlayingKind = "music" | "radio" | "podcast" | "book" | "concert";
+
+/** More about the playing track (MusicService.details) */
+export interface TrackDetails {
+  /** show notes, a book's blurb, a concert's notes: a paragraph a line */
+  notes?: string;
+  facts?: [string, string][];
+  /** similar stations, the show's other episodes */
+  related?: Section | null;
+}
+
 /** One of a source's own tabs in the media center */
 export interface CenterTabInfo {
   id: string;
@@ -154,6 +169,8 @@ export interface ServiceInfo {
   castable: boolean;
   /** its tabs in the media center, between Now Playing and Search */
   tabs: CenterTabInfo[];
+  /** how the media center's Now Playing shows its tracks */
+  now_playing: NowPlayingKind;
 }
 
 export interface ServiceType {
@@ -230,6 +247,7 @@ export const rescan = callable<[id: string], void>("rescan");
 export const getHome = callable<[id: string], Result<Section[]>>("home");
 /** Genres, moods and charts, for sources with feature "browse" */
 export const getBrowse = callable<[id: string], Result<Section[]>>("browse");
+export const getTrackDetails = callable<[id: string, track: Track], Result<TrackDetails | null>>("track_details");
 /** One of a source's media center tabs: its sections, each saying how to show it */
 export const getCenterTab = callable<[id: string, tab: string], Result<Section[]>>("center_tab");
 export const openCollection = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Page>>(

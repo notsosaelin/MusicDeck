@@ -31,7 +31,7 @@ from typing import Any, Optional
 
 import aiohttp
 
-from .. import models
+from .. import feeds, models
 from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
@@ -418,6 +418,29 @@ class AudiobookshelfService(MusicService):
         return tracks
 
     # --- media center ---
+
+    NOW_PLAYING = "book"
+
+    async def details(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+        kind, _, rest = str(track.get("id", "")).partition(":")
+        item_id, _, sub = rest.partition(":")
+        if kind not in ("f", "e") or not item_id:
+            return None
+        item = await self._item(item_id)
+        meta = _meta(item)
+        if kind == "e":
+            episode = next((e for e in (item.get("media") or {}).get("episodes") or [] if e.get("id") == sub), {})
+            return {"notes": feeds.notes_text(episode.get("description") or meta.get("description") or ""),
+                    "facts": [["Podcast", meta.get("title") or ""]]}
+        series = ", ".join(s.get("name", "") + (f" #{s['sequence']}" if s.get("sequence") else "")
+                           for s in meta.get("series") or [] if s.get("name"))
+        duration = (item.get("media") or {}).get("duration") or 0
+        facts = [[label, value] for label, value in (
+            ("By", meta.get("authorName") or ""), ("Read by", meta.get("narratorName") or ""),
+            ("Series", series), ("Published", str(meta.get("publishedYear") or "")),
+            ("Length", _minutes(duration) if duration else ""),
+            ("Genres", ", ".join(meta.get("genres") or []))) if value]
+        return {"notes": feeds.notes_text(meta.get("description") or ""), "facts": facts}
 
     TABS = (("home", "Home"), ("library", "Library"), ("authors", "Authors"), ("series", "Series"))
 

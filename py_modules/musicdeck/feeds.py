@@ -45,6 +45,15 @@ def plain_text(html: str) -> str:
     return " ".join(unescape(TAGS.sub(" ", html)).split())
 
 
+BREAKS = re.compile(r"(?i)<br\s*/?>|</(?:p|div|li|h[1-6])>")
+
+
+def notes_text(html: str) -> str:
+    """Like plain_text, keeping its paragraphs: one per line."""
+    lines = (" ".join(unescape(TAGS.sub(" ", part)).split()) for part in BREAKS.sub("\n", html).split("\n"))
+    return "\n".join(line for line in lines if line)
+
+
 class Element:
     def __init__(self, tag: str, attrs: dict[str, str]):
         self.tag = tag
@@ -177,7 +186,7 @@ def parse_feed(data: bytes) -> dict[str, Any]:
             "url": url,
             "duration": duration_seconds(item.text_of("itunes:duration")),
             "published": published(item.text_of("pubDate")),
-            "description": plain_text(item.text_of("itunes:summary") or item.text_of("description"))[:500],
+            "description": notes_text(item.text_of("description") or item.text_of("itunes:summary"))[:1500],
             "art": _image(item) or art,
         })
     episodes.sort(key=lambda e: e["published"], reverse=True)

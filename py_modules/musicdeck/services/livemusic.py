@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .. import models
+from .. import feeds, models
 from ..cache import Cache
 from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
@@ -199,6 +199,22 @@ class LiveMusicService(MusicService):
         return sections
 
     # --- media center ---
+
+    NOW_PLAYING = "concert"
+
+    async def details(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+        track_id = str(track.get("id", ""))
+        item = track_id[2:].partition("/")[0] if track_id.startswith("t:") else ""
+        if not item or not SAFE_ID.match(item):
+            return None
+        meta = (await self._metadata(item))["metadata"]
+        text = lambda key: self._text(meta.get(key))  # noqa: E731
+        facts = [[label, value] for label, value in (
+            ("Date", text("date")[:10]), ("Venue", text("venue")), ("Where", text("coverage")),
+            ("Recorded by", text("taper")), ("Transferred by", text("transferer")),
+            ("Source", text("source")), ("Lineage", text("lineage"))) if value]
+        notes = "\n\n".join(x for x in (feeds.notes_text(text("description")), feeds.notes_text(text("notes"))) if x)
+        return {"notes": notes, "facts": facts}
 
     TABS = (("home", "Home"), ("bands", "Bands"), ("years", "Years"))
 

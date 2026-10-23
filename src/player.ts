@@ -66,6 +66,8 @@ export interface PlayerState {
   shuffle: boolean;
   repeat: RepeatMode;
   volume: number;
+  /** How fast talk plays (podcast episodes, books: sources with feature "progress"); music is always 1 */
+  speed: number;
   /** The speaker or TV playing instead of the Deck, if any */
   castingTo: { name: string; kind: CastDevice["kind"] } | null;
 }
@@ -141,6 +143,7 @@ export class Player {
     shuffle: false,
     repeat: "off",
     volume: 0.8,
+    speed: 1,
     castingTo: null,
   });
   readonly position = new Store<Position>({ current: 0, duration: 0 });
@@ -225,6 +228,7 @@ export class Player {
       audio.addEventListener(name, () => deck === this.deck && handler());
     on("playing", () => {
       dlog("audio playing", { at: audio.currentTime });
+      this.applySpeed();
       this.state.update({ playing: true, loading: false });
       this.onPlaying();
     });
@@ -494,6 +498,31 @@ export class Player {
     if (!Number.isFinite(seconds)) return;
     this.cancelFade();
     this.audio.currentTime = seconds;
+  }
+
+  /** Back or ahead by `seconds` (talk's skip buttons), within the track. */
+  skipBy(seconds: number) {
+    const { duration } = this.position.get();
+    const to = Math.max(0, this.audio.currentTime + seconds);
+    this.seek(duration ? Math.min(to, duration - 1) : to);
+  }
+
+  /** How fast podcast episodes and books play (0.5–3); kept for the next one too. */
+  setSpeed(speed: number) {
+    if (!Number.isFinite(speed)) return;
+    this.state.update({ speed: Math.min(3, Math.max(0.5, speed)) });
+    this.applySpeed();
+  }
+
+  /** Talk at the chosen speed, at its own pitch; music, and anything on a speaker or TV, as it is. */
+  private applySpeed() {
+    const item = this.current;
+    const talk = !!item && !this.casting && hasFeature(item.instanceId, "progress");
+    const rate = talk ? this.state.get().speed : 1;
+    for (const deck of this.decks) {
+      deck.audio.preservesPitch = true;
+      if (deck.audio.playbackRate !== rate) deck.audio.playbackRate = rate;
+    }
   }
 
   setVolume(volume: number) {

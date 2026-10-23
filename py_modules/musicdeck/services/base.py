@@ -160,6 +160,17 @@ class MusicService:
 
     # --- the media center ---
 
+    #: How the media center's Now Playing shows this source's tracks: "music" (lyrics, the queue),
+    #: "radio" (what's on air, the station, similar stations), "podcast" and "book" (notes, the show's
+    #: episodes or the book's chapters; skip and speed controls), "concert" (the setlist, the show's notes)
+    NOW_PLAYING = "music"
+
+    async def details(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """More about a track than its title and artist, for Now Playing: {"notes": text (show notes,
+        a book's blurb), "facts": [[label, value]], "related": a section (similar stations, the show's
+        other episodes)}, any of them left out. None when there's nothing more to say."""
+        return None
+
     #: The media center's tabs for this source, between Now Playing and Search: (id, title), each a
     #: page of sections from tab(id). None: Home, and Browse for sources with feature "browse".
     TABS: Optional[tuple[tuple[str, str], ...]] = None
