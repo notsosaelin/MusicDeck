@@ -21,6 +21,17 @@ from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 API = "https://api-v2.soundcloud.com"
+# Genres for the Browse tab: (tag its search filters by, name shown). SoundCloud's per-genre charts are
+# gone, so a genre is a tag search, tested to give playable tracks.
+GENRES = [("hip-hop", "Hip-hop & Rap"), ("electronic", "Electronic"), ("pop", "Pop"), ("rnb", "R&B & Soul"),
+          ("edm", "Dance & EDM"), ("house", "House"), ("deep house", "Deep House"), ("techno", "Techno"),
+          ("dnb", "Drum & Bass"), ("dubstep", "Dubstep"), ("trap", "Trap"), ("phonk", "Phonk"), ("drill", "Drill"),
+          ("jersey club", "Jersey Club"), ("hyperpop", "Hyperpop"), ("rock", "Rock"), ("indie", "Indie"),
+          ("metal", "Metal"), ("lofi", "Lo-fi"), ("ambient", "Ambient"), ("jazz", "Jazz"), ("classical", "Classical"),
+          ("piano", "Piano"), ("soundtrack", "Soundtrack"), ("folk", "Folk"), ("country", "Country"),
+          ("latin", "Latin"), ("reggaeton", "Reggaeton"), ("afrobeats", "Afrobeats"), ("amapiano", "Amapiano"),
+          ("reggae", "Reggae"), ("dancehall", "Dancehall"), ("k-pop", "K-pop"), ("disco", "Disco"),
+          ("trance", "Trance")]
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/130.0 Safari/537.36")
 SCRIPT_SRC = re.compile(r'<script crossorigin src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"')
@@ -57,7 +68,7 @@ class SoundCloudService(MusicService):
 
     type = "soundcloud"
     display_name = "SoundCloud"
-    features = frozenset({"radio"})
+    features = frozenset({"radio", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
@@ -199,7 +210,24 @@ class SoundCloudService(MusicService):
                 sections.append(models.section(selection.get("title") or "Discover", playlists))
         return sections
 
+    async def browse(self) -> list[dict[str, Any]]:
+        return [models.section("Charts", [models.collection("chart:trending", "list", "Trending")]),
+                models.section("Genres", [models.collection(f"genre:{tag}", "list", name) for tag, name in GENRES])]
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id == "chart:trending":
+            chart = await self._get("/charts", kind="trending", genre="soundcloud:genres:all-music", limit=50)
+            tracks = [entry.get("track") or {} for entry in chart.get("collection", [])]
+            return models.page("Trending", "On SoundCloud", tracks=self._tracks_of(tracks))
+        if kind == "list" and id.startswith("genre:"):
+            tag = id[6:]
+            # plenty of tracks: many are previews of Go+ tracks, which are left out
+            tracks, playlists = await asyncio.gather(
+                self._get("/search/tracks", q="", **{"filter.genre_or_tag": tag}, limit=80),
+                self._get("/search/playlists_without_albums", q="", **{"filter.genre_or_tag": tag}, limit=12))
+            return models.page(dict(GENRES).get(tag, tag.title()), "On SoundCloud",
+                               collections=[self._playlist(p) for p in playlists.get("collection", [])],
+                               tracks=self._tracks_of(tracks.get("collection", [])))
         if kind in ("playlist", "album"):
             if id.startswith("urn:"):
                 p = await self._get(f"/system-playlists/{id[4:]}")

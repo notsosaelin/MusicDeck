@@ -3,6 +3,7 @@ Navidrome or any Subsonic-compatible server, through the Subsonic REST API (1.16
 OpenSubsonic extensions where the server has them (lyrics, ReplayGain). The password is turned into
 the spec's salted token on save and never stored. Audio is the original file (format=raw).
 """
+import asyncio
 import hashlib
 import secrets
 from typing import Any, Optional
@@ -27,7 +28,7 @@ class SubsonicService(MusicService):
 
     type = "subsonic"
     display_name = "Navidrome / Subsonic"
-    features = frozenset({"star", "scrobble", "lyrics", "radio", "queue_sync", "playlists"})
+    features = frozenset({"star", "scrobble", "lyrics", "radio", "queue_sync", "playlists", "browse"})
     downloadable = True
 
     @classmethod
@@ -119,8 +120,8 @@ class SubsonicService(MusicService):
 
     # --- browsing ---
 
-    async def _album_list(self, list_type: str, size: int = 20) -> list[dict[str, Any]]:
-        data = await self._call("getAlbumList2", type=list_type, size=size)
+    async def _album_list(self, list_type: str, size: int = 20, **extra: Any) -> list[dict[str, Any]]:
+        data = await self._call("getAlbumList2", type=list_type, size=size, **extra)
         return [self._album(a) for a in data.get("albumList2", {}).get("album", [])]
 
     async def home(self) -> list[dict[str, Any]]:
@@ -141,7 +142,31 @@ class SubsonicService(MusicService):
         ]))
         return sections
 
+    async def browse(self) -> list[dict[str, Any]]:
+        genres = (await self._call("getGenres")).get("genres", {}).get("genre", [])
+        genres = sorted((g for g in genres if g.get("albumCount") and g.get("value")),
+                        key=lambda g: -g["albumCount"])
+        sections = []
+        if genres:
+            sections.append(models.section("Genres", [
+                models.collection(f"genre:{g['value']}", "list", g["value"], models.count(g["albumCount"], "album"))
+                for g in genres]))
+        sections.append(models.section("Decades", [models.collection(f"decade:{d}", "list", f"{d}s")
+                                                   for d in range(2020, 1950, -10)]))
+        return sections
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("genre:"):
+            genre = id[6:]
+            albums, songs = await asyncio.gather(
+                self._album_list("byGenre", 500, genre=genre),
+                self._call("getSongsByGenre", genre=genre, count=50))
+            return models.page(genre, models.count(len(albums), "album"), collections=albums,
+                               tracks=[self._track(x) for x in songs.get("songsByGenre", {}).get("song", [])])
+        if kind == "list" and id.startswith("decade:") and id[7:].isdigit():
+            start = int(id[7:])
+            albums = await self._album_list("byYear", 500, fromYear=start, toYear=start + 9)
+            return models.page(f"{start}s", models.count(len(albums), "album"), collections=albums)
         if kind == "list":
             if id == "artists":
                 data = await self._call("getArtists")

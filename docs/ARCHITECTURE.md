@@ -120,7 +120,7 @@ Details worth knowing:
 
 | File | Responsibility |
 | --- | --- |
-| `main.py` | `Plugin`: every RPC endpoint the frontend calls. Owns settings, playlist store, stream server, service instances, the sign-in in progress, ListenBrainz. Endpoints return `{"ok": True, "data": ...}` or `{"ok": False, "error": "message for the user"}` via `_result`. |
+| `main.py` | `Plugin`: every RPC endpoint the frontend calls (`browse` gives a source's genres, moods and charts). Owns settings, playlist store, stream server, service instances, the sign-in in progress, ListenBrainz. Endpoints return `{"ok": True, "data": ...}` or `{"ok": False, "error": "message for the user"}` via `_result`. |
 | `musicdeck/models.py` | The one data model every service returns: Track, Collection, Page, Section. Plain dicts, mirrored by TypeScript types in `src/api.ts`. |
 | `musicdeck/services/base.py` | `MusicService` (the interface every source implements), `StreamSource` (where audio/art comes from), `SignIn` (OAuth/device-code sign-ins), `ServiceError` (errors safe to show the user). |
 | `musicdeck/services/__init__.py` | `CATALOGUE` and `SERVICE_TYPES`: every source type, in "Add a source" order; a type's module is imported the first time it's needed. |
@@ -162,7 +162,7 @@ Details worth knowing:
 | `components/Browser.tsx` | Library and search views: home sections, collection pages, result caching. |
 | `components/NowPlaying.tsx` | Now playing card, seek bar (or LIVE bar), transport, volume. |
 | `components/LyricsView.tsx` | The lyrics under Now playing, and what the full-screen page shares with it: `useLyrics` (looked up once per track; a failed lookup isn't remembered) and `SyncedLyrics`. |
-| `components/media/` | The media center, a route in Steam's main window (`/musicdeck/player`, added in index.tsx) built on Steam's `Tabs`: `MediaCenter.tsx` (tabs, Now Playing with lyrics, the now-playing bar, screen off, Customize; its choices are the `center` setting), `pages.tsx` (Home, Library, collection pages, Search, Queue; each browsing tab keeps its own history in `centerNav`; Library gathers the playlists and favourites from the source's home rows, and its category rows, which Home then leaves out), `parts.tsx` (capsule cards, shelves, the track table, focus restoring). It reuses the panel's data loading and actions from `Browser.tsx`. |
+| `components/media/` | The media center, a route in Steam's main window (`/musicdeck/player`, added in index.tsx) built on Steam's `Tabs`: `MediaCenter.tsx` (tabs, Now Playing with lyrics or the queue (R2), the now-playing bar, screen off, Settings; its choices are the `center` setting), `pages.tsx` (Home with the source's `browse()` rows after its own, Library, collection pages, Search, the queue list; each browsing tab keeps its own history in `centerNav`; Library gathers the playlists and favourites from the source's home rows, and its category rows, which Home then leaves out), `parts.tsx` (capsule cards, shelves, the track table, focus restoring). It reuses the panel's data loading and actions from `Browser.tsx`. |
 | `components/CastMenu.tsx` | "Play on": this Deck or a device found on the network, opened with X on a volume slider. |
 | `components/Queue.tsx` | The queue in play order, with moving tracks (menu items, or "Move…" mode on the d-pad; see `RowMoving` in common.tsx). |
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |

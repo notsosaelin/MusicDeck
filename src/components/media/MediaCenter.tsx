@@ -1,4 +1,4 @@
-import { DropdownItem, Focusable, Navigation, SliderField, Tabs, ToggleField } from "@decky/ui";
+import { DropdownItem, Focusable, SliderField, Tabs, ToggleField } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
   FaMoon,
@@ -14,21 +14,21 @@ import {
 } from "react-icons/fa";
 import { MdRepeatOne } from "react-icons/md";
 import { CenterSettings, setSetting } from "../../api";
-import { CenterTab, centerTab } from "../../nav";
+import { CenterTab, centerTab, leaveMediaCenter } from "../../nav";
 import { player } from "../../player";
-import { mediaUrl, pluginState, refreshState, useStore } from "../../store";
+import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
 import { Equalizer } from "../Equalizer";
 import { canCast, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
-import { CENTER_CSS, Cover, Notice, focusInto } from "./parts";
+import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto } from "./parts";
 import {
   CenterStack,
   CollectionPage,
   HomePage,
   LibraryPage,
-  QueuePage,
+  QueueList,
   SearchPage,
   cardKey,
   centerNav,
@@ -270,10 +270,48 @@ const Seek: FC = () => {
  */
 const LYRICS_SIZES = { small: [18, 14], medium: [22, 17], large: [28, 21] } as const;
 
+/** What Now Playing shows beside the cover; kept while the media center is closed. */
+const nowPlayingSide = new Store<{ side: "lyrics" | "queue" }>({ side: "lyrics" });
+const toggleSide = () => nowPlayingSide.set({ side: nowPlayingSide.get().side === "lyrics" ? "queue" : "lyrics" });
+
+// GamepadButton.TRIGGER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
+const R2 = 8;
+
+/** Lyrics | Queue, beside the title: switched with R2, or by pressing (or tapping) either. */
+const SideSwitch: FC<{ upNext: number }> = ({ upNext }) => {
+  const { side } = useStore(nowPlayingSide);
+  return (
+    <Focusable flow-children="row" style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+      {(["lyrics", "queue"] as const).map((s) => (
+        <Focusable
+          key={s}
+          className="mc-row"
+          noFocusRing
+          onActivate={() => nowPlayingSide.set({ side: s })}
+          onClick={() => nowPlayingSide.set({ side: s })}
+          onOKActionDescription={s === "lyrics" ? "Lyrics" : "Queue"}
+          style={{
+            padding: "5px 12px",
+            borderRadius: 14,
+            fontSize: 13,
+            fontWeight: 600,
+            color: side === s ? "#0e141b" : "#dcdedf",
+            background: side === s ? "#dcdedf" : "rgba(255, 255, 255, 0.08)",
+          }}
+        >
+          {s === "lyrics" ? "Lyrics" : upNext ? `Queue · ${upNext}` : "Queue"}
+        </Focusable>
+      ))}
+    </Focusable>
+  );
+};
+
 const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyrics"] }> = ({ onSleep, lyricsSize }) => {
   const [syncedSize, plainSize] = LYRICS_SIZES[lyricsSize] ?? LYRICS_SIZES.medium;
   const state = useStore(player.state);
+  const { side } = useStore(nowPlayingSide);
   const item = state.queue[state.index];
+  const upNext = Math.max(player.playOrder.length - 1 - player.playOrder.indexOf(state.index), 0);
   const lyrics = useLyrics(item);
   const page = useRef<HTMLDivElement>(null);
   const room = useFitBelow(page);
@@ -299,6 +337,13 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
         <Focusable
           onOptionsButton={onSleep}
           onOptionsActionDescription="Screen off"
+          actionDescriptionMap={{ [R2]: side === "lyrics" ? "Queue" : "Lyrics" }}
+          onButtonDown={(e: any) => {
+            if (e?.detail?.button === R2) {
+              toggleSide();
+              e.stopPropagation?.();
+            }
+          }}
           style={{ display: "flex", flexDirection: "column", gap: "2vh", height: "100%" }}
         >
           <div style={{ flex: 1, minHeight: 0, display: "flex", gap: "3.5vw" }}>
@@ -317,22 +362,26 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <RowText size="large" scroll="always" title={item.track.title} subtitle={subtitle} />
                 </div>
+                <SideSwitch upNext={upNext} />
                 <span
                   onClick={onSleep}
+                  title="Screen off"
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 6,
-                    fontSize: 13,
+                    fontSize: 15,
                     opacity: 0.55,
                     cursor: "pointer",
+                    padding: 6,
                   }}
                 >
-                  <FaMoon /> Screen off
+                  <FaMoon />
                 </span>
               </div>
-              <div ref={area} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-                {message ? (
+              <div ref={area} style={{ flex: 1, minHeight: 0, overflowY: side === "queue" ? "auto" : "hidden" }}>
+                {side === "queue" ? (
+                  <QueueList />
+                ) : message ? (
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>
                 ) : lyrics && !("error" in lyrics) && height > 0 ? (
                   lyrics.synced ? (
@@ -400,10 +449,11 @@ const NowPlayingBar: FC = () => {
 };
 
 /** One browsing tab: its history's latest view, with the controller put back where it belongs. */
-const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: boolean }> = ({
+const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: boolean; withBrowse: boolean }> = ({
   stack,
   instanceId,
   withoutCategories,
+  withBrowse,
 }) => {
   const views = useStore(centerNav)[stack];
   const view = views[views.length - 1];
@@ -423,7 +473,7 @@ const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: bo
         stack === "library" ? (
           <LibraryPage instanceId={instanceId} />
         ) : (
-          <HomePage instanceId={instanceId} withoutCategories={withoutCategories} />
+          <HomePage instanceId={instanceId} withoutCategories={withoutCategories} withBrowse={withBrowse} />
         )
       ) : view.type === "search" ? (
         <SearchPage key={view.query} instanceId={instanceId} query={view.query} />
@@ -444,16 +494,12 @@ const TAB_TITLES: Record<CenterTab, string> = {
   home: "Home",
   library: "Library",
   search: "Search",
-  queue: "Queue",
-  sound: "Sound",
-  customize: "Customize",
+  settings: "Settings",
 };
 
-/** The tabs Customize leaves showing, in order. */
+/** The tabs showing, in order (Library as Settings says). */
 function visibleTabs(center: CenterSettings): CenterTab[] {
-  return (Object.keys(TAB_TITLES) as CenterTab[]).filter(
-    (t) => (t !== "library" || center.show_library) && (t !== "sound" || center.show_sound),
-  );
+  return (Object.keys(TAB_TITLES) as CenterTab[]).filter((t) => t !== "library" || center.show_library);
 }
 
 const DEFAULT_CENTER: CenterSettings = {
@@ -462,7 +508,7 @@ const DEFAULT_CENTER: CenterSettings = {
   cards: "medium",
   lyrics: "medium",
   show_library: true,
-  show_sound: true,
+  show_browse: true,
   idle_off: 0,
 };
 
@@ -470,10 +516,7 @@ const DEFAULT_CENTER: CenterSettings = {
 const VIEW_BUTTON = 13;
 
 /** Leaves the media center for the Quick Access panel, where MusicDeck is. */
-function backToPanel() {
-  Navigation.NavigateBack();
-  window.setTimeout(openMusicDeck, 150);
-}
+const backToPanel = () => leaveMediaCenter(openMusicDeck);
 
 /**
  * Turns the screen off after `minutes` without input while Now Playing shows and music plays (Customize;
@@ -550,16 +593,22 @@ const CHOICES: { key: keyof CenterSettings; label: string; options: { data: any;
 ];
 
 async function setCenter(patch: Partial<CenterSettings>) {
-  const center = { ...DEFAULT_CENTER, ...pluginState.get()?.center, ...patch };
+  const current: Partial<CenterSettings> = { ...pluginState.get()?.center, ...patch };
+  // only the choices there are: the backend refuses the whole setting over one it doesn't know
+  const center = Object.fromEntries(
+    (Object.keys(DEFAULT_CENTER) as (keyof CenterSettings)[]).map((k) => [k, current[k] ?? DEFAULT_CENTER[k]]),
+  ) as unknown as CenterSettings;
   await setSetting("center", center);
   await refreshState();
 }
 
-/** The media center's own settings, in Steam's settings style. */
-const CustomizePage: FC = () => {
+/** Settings: the equalizer, then the media center's own choices, in Steam's settings style. */
+const SettingsPage: FC = () => {
   const center = { ...DEFAULT_CENTER, ...useStore(pluginState)?.center };
   return (
     <div style={{ maxWidth: 760 }}>
+      <Equalizer />
+      <SectionTitle>Media center</SectionTitle>
       {CHOICES.map((c) => (
         <DropdownItem
           key={c.key}
@@ -570,16 +619,16 @@ const CustomizePage: FC = () => {
         />
       ))}
       <ToggleField
-        label="Library tab"
-        description="Your playlists and the source's albums, artists and folders"
-        checked={center.show_library}
-        onChange={(on) => setCenter({ show_library: on })}
+        label="Genres and moods on Home"
+        description="Rows of the source's genres, moods and charts, below its own"
+        checked={center.show_browse}
+        onChange={(on) => setCenter({ show_browse: on })}
       />
       <ToggleField
-        label="Sound tab"
-        description="The equalizer"
-        checked={center.show_sound}
-        onChange={(on) => setCenter({ show_sound: on })}
+        label="Library tab"
+        description="Your playlists and favourites, and the source's albums, artists and folders"
+        checked={center.show_library}
+        onChange={(on) => setCenter({ show_library: on })}
       />
       <div style={{ fontSize: 13, opacity: 0.55, marginTop: 16, lineHeight: 1.5 }}>
         Volume levelling, crossfade and the rest of playback are in Decky → MusicDeck. Press the View button to go back
@@ -591,9 +640,10 @@ const CustomizePage: FC = () => {
 
 /**
  * MusicDeck's media center, full screen in Steam's main window and laid out like Steam's own library:
- * tabs along the top (L1/R1), Home's rows as shelves of covers, the Library's playlists and
- * categories, albums and playlists as pages with their track lists, a Now Playing view with lyrics,
- * the queue, the equalizer and its own settings. Start plays or pauses from anywhere; B steps back
+ * tabs along the top (L1/R1): Now Playing (lyrics or the queue beside the cover), Home (the source's
+ * rows as shelves of covers, then its genres, moods and charts), the Library's playlists and
+ * favourites, Search, and Settings (the equalizer and the center's own choices); albums and
+ * playlists open as pages with their track lists. Start plays or pauses from anywhere; B steps back
  * through a tab's pages, then up to the tabs, then to the Quick Access panel; so does View, at once.
  */
 export const MediaCenter: FC = () => {
@@ -606,13 +656,13 @@ export const MediaCenter: FC = () => {
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const live = state?.active_service ?? null;
   const tabs = visibleTabs(center);
-  // a tab Customize just hid: back to the first
+  // a tab just hidden in Settings: back to the first
   const shown = tabs.includes(tab) ? tab : tabs[0];
   useIdleScreenOff(center.idle_off, shown === "playing" && playing && !screenOff, sleep);
 
   const browse = (stack: CenterStack) =>
     live ? (
-      <Browse stack={stack} instanceId={live} withoutCategories={center.show_library} />
+      <Browse stack={stack} instanceId={live} withoutCategories={center.show_library} withBrowse={center.show_browse} />
     ) : (
       <Notice>Add a music source in Decky → MusicDeck to browse it here.</Notice>
     );
@@ -621,13 +671,7 @@ export const MediaCenter: FC = () => {
     home: browse("home"),
     library: browse("library"),
     search: browse("search"),
-    queue: <QueuePage />,
-    sound: (
-      <div style={{ maxWidth: 760 }}>
-        <Equalizer />
-      </div>
-    ),
-    customize: <CustomizePage />,
+    settings: <SettingsPage />,
   };
 
   return (

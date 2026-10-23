@@ -64,7 +64,7 @@ def _clean_url(url: str) -> str:
 class BandcampService(MusicService):
     type = "bandcamp"
     display_name = "Bandcamp"
-    features = frozenset({"lyrics", "radio"})
+    features = frozenset({"lyrics", "radio", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
@@ -158,6 +158,9 @@ class BandcampService(MusicService):
         sections.append(models.section("Genres", [models.collection(f"genre:{tag}", "list", name)
                                                   for tag, name in GENRES]))
         return sections
+
+    async def browse(self) -> list[dict[str, Any]]:
+        return [models.section("Genres", [models.collection(f"genre:{tag}", "list", name) for tag, name in GENRES])]
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         if kind == "list" and id.startswith("genre:"):

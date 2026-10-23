@@ -17,9 +17,12 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Native Quick Access tab:** Now playing (with lyrics), Library, Search, Queue and Equalizer, with a mini player while you browse, built from Steam's
   own components and controller conventions.
 - **Media center:** the player full screen in Steam's main window, laid out like Steam's library: Now Playing
-  with lyrics, Home's rows as shelves of covers, a Library of your playlists, favourites and the source's
-  categories, album and playlist pages, Search, the Queue, the equalizer and a Customize page (what it opens
-  on, background, cover and lyrics sizes, which tabs show, screen off when idle), all on the controller.
+  with the lyrics or the queue beside the cover; Home's rows as shelves of covers, then the source's genres,
+  moods and charts; a Library of your playlists, favourites and the source's categories; album and playlist
+  pages; Search; and Settings (the equalizer; what it opens on, background, cover and lyrics sizes, screen
+  off when idle), all on the controller.
+- **Genres, moods and charts** from SoundCloud, YouTube Music, Qobuz, Navidrome/Subsonic, Bandcamp, radio and
+  podcasts, as rows of tiles on the media center's Home.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
 - **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, plus UPnP/DLNA
   devices (Sonos, AV receivers, smart TVs). The speaker fetches the music itself; the queue, play reports and
@@ -103,10 +106,11 @@ up so the d-pad carries it until **A** or **B** puts it down.
 
 Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
 
-**Media center:** **L1**/**R1** switch tabs (Now Playing, Home, Library, Search, Queue, Sound, Customize);
-**A** opens an album or playlist, **X** plays it straight away, **B** goes back a page, then up to the tabs,
-then back to the Quick Access panel; **View** goes back to the panel at once; **Start** plays or pauses from
-anywhere; **Y** on Now Playing turns the screen off (Customize can do it after a few idle minutes). Handhelds only switch the backlight fully off for root, so "off" is Steam's
+**Media center:** **L1**/**R1** switch tabs (Now Playing, Home, Library, Search, Settings); **A** opens an
+album or playlist, **X** plays it straight away, **B** goes back a page, then up to the tabs, then back to the
+Quick Access panel; **View** goes back to the panel at once; **Start** plays or pauses from anywhere. On Now
+Playing, **R2** switches between the lyrics and the queue, and **Y** turns the screen off (Settings can do it
+after a few idle minutes). Handhelds only switch the backlight fully off for root, so "off" is Steam's
 lowest brightness under a black screen: nearly dark, on any device.
 
 **Casting:** **X** on the volume slider lists the speakers and TVs on your network (and This Deck). The

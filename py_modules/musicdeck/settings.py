@@ -26,7 +26,7 @@ DEFAULTS: dict[str, Any] = {
     # the media center (src/components/media): the tab it opens on, its look, which tabs show, and
     # minutes idle on Now Playing before the screen goes off (0 = never)
     "center": {"open_on": "last", "background": "art", "cards": "medium", "lyrics": "medium",
-               "show_library": True, "show_sound": True, "idle_off": 0},
+               "show_library": True, "show_browse": True, "idle_off": 0},
 }
 
 

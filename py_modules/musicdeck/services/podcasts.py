@@ -36,6 +36,14 @@ USER_AGENT = "MusicDeck/0.1.0"
 FEED_TTL = 30 * 60
 FEEDS_KEPT = 100  # a parsed feed can be large (hundreds of episodes)
 CHARTS_TTL = 6 * 3600
+# Apple's podcast categories (genre ids), for the Browse tab; each opens to its chart, which only the
+# older iTunes feed offers by category
+CATEGORIES = [(1489, "News"), (1303, "Comedy"), (1488, "True Crime"), (1324, "Society & Culture"),
+              (1321, "Business"), (1545, "Sports"), (1310, "Music"), (1309, "TV & Film"), (1487, "History"),
+              (1533, "Science"), (1318, "Technology"), (1512, "Health & Fitness"), (1304, "Education"),
+              (1301, "Arts"), (1483, "Fiction"), (1305, "Kids & Family"), (1502, "Leisure"),
+              (1314, "Religion & Spirituality"), (1511, "Government")]
+CATEGORY_CHART = "https://itunes.apple.com/{country}/rss/toppodcasts/limit=50/genre={genre}/json"
 CHARTS_SIZE = 25
 NEW_EPISODES = 20
 # a show's page lists at most this many episodes (some feeds go back over a thousand)
@@ -86,7 +94,7 @@ def _minutes(seconds: float) -> str:
 class PodcastService(MusicService):
     type = "podcasts"
     display_name = "Podcasts"
-    features = frozenset({"progress"})
+    features = frozenset({"progress", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
@@ -234,7 +242,30 @@ class PodcastService(MusicService):
             return feed
         raise ServiceError("Unknown podcast")
 
+    async def browse(self) -> list[dict[str, Any]]:
+        return [models.section("Categories", [models.collection(f"genre:{g}", "list", name)
+                                              for g, name in CATEGORIES])]
+
+    async def _category(self, genre: int) -> list[dict[str, Any]]:
+        country = (self.config.get("country") or "us").lower()
+        data = await self._json(CATEGORY_CHART.format(country=country, genre=genre))
+        shows = []
+        for e in (data.get("feed") or {}).get("entry") or []:
+            show_id = ((e.get("id") or {}).get("attributes") or {}).get("im:id")
+            images = e.get("im:image") or []
+            art = images[-1].get("label") if images else None
+            if show_id:
+                shows.append(models.collection(f"a:{show_id}", "album", (e.get("im:name") or {}).get("label") or "Podcast",
+                                               (e.get("im:artist") or {}).get("label") or "",
+                                               art.replace("170x170bb", "600x600bb") if art else None))
+        return shows
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("genre:"):
+            if not id[6:].isdigit():
+                raise ServiceError("Unknown category")
+            shows = await self._category(int(id[6:]))
+            return models.page(dict(CATEGORIES).get(int(id[6:]), "Podcasts"), "Top podcasts", collections=shows)
         feed = await self._feed_of(id)
         podcast = await self._feed(feed)
         subscribed = self._subscribed(feed)

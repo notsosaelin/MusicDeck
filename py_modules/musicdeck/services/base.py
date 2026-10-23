@@ -37,6 +37,7 @@ FEATURES = {
     "queue_sync",  # save / restore the play queue on the server, to resume on another device
     "playlists",   # add tracks to the user's playlists
     "progress",    # long tracks (podcast episodes) resume where they were left and can be marked played
+    "browse",      # genres, moods or charts to explore (browse())
 }
 
 
@@ -140,6 +141,11 @@ class MusicService:
 
     async def home(self) -> list[dict[str, Any]]:
         """Sections shown on the service's landing view."""
+        raise NotImplementedError
+
+    async def browse(self) -> list[dict[str, Any]]:
+        """For sources with feature "browse": ways into the catalogue, as sections of "list"
+        collections (genres, moods, charts) that open() opens. Shown in the media center's Browse tab."""
         raise NotImplementedError
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:

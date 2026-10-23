@@ -100,7 +100,7 @@ class QobuzService(MusicService):
 
     type = "qobuz"
     display_name = "Qobuz"
-    features = frozenset({"star", "playlists", "scrobble"})
+    features = frozenset({"star", "playlists", "scrobble", "browse"})
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:
@@ -282,7 +282,25 @@ class QobuzService(MusicService):
             raise results[0]
         return sections
 
+    async def browse(self) -> list[dict[str, Any]]:
+        data = await self._get("genre/list")
+        genres = (data.get("genres") or {}).get("items") or []
+        return [models.section("Genres", [models.collection(f"genre:{g['id']}#{g.get('name', '')}", "list",
+                                                            g.get("name") or "Genre")
+                                          for g in genres if str(g.get("id", "")).isdigit()])]
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("genre:"):
+            genre, _, name = id[6:].partition("#")
+            if not genre.isdigit():
+                raise ServiceError("Unknown genre")
+            new, popular = await asyncio.gather(
+                self._get("album/getFeatured", type="new-releases-full", genre_ids=genre, limit=40),
+                self._get("album/getFeatured", type="most-streamed", genre_ids=genre, limit=40))
+            seen: set[str] = set()
+            albums = [self._album(a) for result in (popular, new)
+                      for a in (result.get("albums") or {}).get("items", []) if not (a["id"] in seen or seen.add(a["id"]))]
+            return models.page(name or "Genre", "Most streamed and new on Qobuz", collections=albums)
         if kind == "list" and id == "favourite-tracks":
             data = await self._get("favorite/getUserFavorites", user_id=self.config.get("user_id"), type="tracks",
                                    limit=500)

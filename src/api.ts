@@ -23,7 +23,7 @@ export interface Track {
   live?: boolean;
 }
 
-export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress";
+export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse";
 
 export interface LyricLine {
   /** seconds; null for unsynced lyrics */
@@ -150,7 +150,8 @@ export interface CenterSettings {
   cards: "small" | "medium" | "large";
   lyrics: "small" | "medium" | "large";
   show_library: boolean;
-  show_sound: boolean;
+  /** the source's genres, moods and charts in rows on Home */
+  show_browse: boolean;
   /** minutes idle on Now Playing before the screen goes off; 0 = never */
   idle_off: 0 | 1 | 2 | 5 | 10;
 }
@@ -201,6 +202,8 @@ export const setActiveService = callable<[id: string], void>("set_active_service
 export const testService = callable<[id: string], Result<string>>("test_service");
 export const rescan = callable<[id: string], void>("rescan");
 export const getHome = callable<[id: string], Result<Section[]>>("home");
+/** Genres, moods and charts, for sources with feature "browse" */
+export const getBrowse = callable<[id: string], Result<Section[]>>("browse");
 export const openCollection = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Page>>(
   "open_collection",
 );

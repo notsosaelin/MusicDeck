@@ -39,6 +39,8 @@ NEEDS_JS_FOR = 6 * 3600
 IDLE_STOP = 5 * 60
 # what YouTube's ids look like; nothing else is put into a YouTube address for yt-dlp
 VIDEO_ID = re.compile(r"^[\w-]{11}$")
+# a "Moods & genres" category's params, as YouTube Music hands them out (opaque, URL-safe)
+MOOD_PARAMS = re.compile(r"^[\w%=-]{4,200}$")
 CHANNEL_ID = re.compile(r"^UC[\w-]{22}$")
 LYRICS_IDS_TTL = 6 * 3600
 LYRICS_IDS_KEPT = 1000
@@ -213,7 +215,7 @@ class YouTubeService(MusicService):
 
     type = "youtube"
     display_name = "YouTube Music"
-    features = frozenset({"radio", "lyrics"})
+    features = frozenset({"radio", "lyrics", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
@@ -341,7 +343,38 @@ class YouTubeService(MusicService):
                 sections.append(models.section(row.get("title") or "For you", items, tracks))
         return sections
 
+    async def browse(self) -> list[dict[str, Any]]:
+        """YouTube Music's "Moods & genres" (each opens to its playlists) and its charts."""
+        categories, charts = await asyncio.gather(self._music("get_mood_categories"),
+                                                  self._music("get_charts", country="ZZ"), return_exceptions=True)
+        sections = []
+        if isinstance(charts, dict):
+            # charts' shape varies by region and version: take whatever playlists it offers
+            lists = [c for key in ("videos", "trending", "genres") for c in (charts.get(key) or [])
+                     if isinstance(c, dict) and c.get("playlistId")]
+            items = [c for c in (self._collection(c) for c in lists) if c]
+            if items:
+                sections.append(models.section("Charts", items))
+        if isinstance(categories, dict):
+            for title, entries in categories.items():
+                items = [models.collection(f"mood:{e['params']}#{e.get('title', '')}", "list", e.get("title", ""))
+                         for e in entries or [] if isinstance(e, dict) and MOOD_PARAMS.match(str(e.get("params", "")))]
+                if items:
+                    sections.append(models.section(str(title), items))
+        if not sections:
+            failure = categories if isinstance(categories, Exception) else charts
+            if isinstance(failure, Exception):
+                raise failure
+        return sections
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("mood:"):
+            params, _, title = id[5:].partition("#")
+            if not MOOD_PARAMS.match(params):
+                raise ServiceError("That isn't a YouTube Music category")
+            playlists = await self._music("get_mood_playlists", params)
+            items = [c for c in (self._collection(p) for p in playlists or [] if isinstance(p, dict)) if c]
+            return models.page(title or "Moods & genres", models.count(len(items), "playlist"), collections=items)
         if kind == "album":
             a = await self._music("get_album", id)
             artist, _ = _artists(a)

@@ -312,21 +312,42 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
     const active = doc.activeElement;
     if (seen === undefined) seen = active;
     else if (active !== seen && container.contains(active)) return window.clearInterval(timer);
+    const remembered = key ? container.querySelector<HTMLElement>(`[data-mc="${CSS.escape(key)}"]`) : null;
     const target =
-      (key && container.querySelector<HTMLElement>(`[data-mc="${CSS.escape(key)}"]`)) ||
-      container.querySelector<HTMLElement>(".mc-results .mc-row, .mc-results .mc-card") ||
-      (!container.querySelector(".mc-results") && container.querySelector<HTMLElement>(".mc-row, .mc-card, input"));
+      remembered ||
+      container.querySelector<HTMLElement>(".mc-results .mc-row, .mc-results .mc-card, .mc-results .mc-tile") ||
+      (!container.querySelector(".mc-results") &&
+        container.querySelector<HTMLElement>(".mc-row, .mc-card, .mc-tile, input"));
     if (target) {
       target.focus();
-      target.scrollIntoView?.({ block: "nearest" });
+      if (remembered) target.scrollIntoView?.({ block: "nearest" });
+      // the page's first thing: from the very top, so its heading shows too
+      else scrollParent(container)?.scrollTo?.({ top: 0 });
       window.clearInterval(timer);
     }
   }, 100);
   return () => window.clearInterval(timer);
 }
 
-/** A big labelled square for a part of the library ("All albums", "Artists"), Media Center style. */
-export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) => (
+/** The nearest ancestor of `el` that scrolls (in the media center, the tab's contents). */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement;
+  while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) node = node.parentElement;
+  return node;
+}
+
+/** A tile's colour, from its title: the same every visit, varied from tile to tile. */
+function hueOf(title: string): number {
+  let h = 0;
+  for (const ch of title) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
+/**
+ * A big labelled tile for a part of the library ("All albums", "Artists"), Media Center style, or with
+ * `colour`, a genre or mood in its own colour, as music apps show them.
+ */
+export const Tile: FC<{ c: Collection; onOpen: () => void; colour?: boolean }> = ({ c, onOpen, colour }) => (
   <Focusable
     className="mc-tile"
     data-mc={c.kind + ":" + c.id}
@@ -336,16 +357,23 @@ export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) =
     onOKActionDescription="Open"
     style={{
       width: "clamp(120px, 17vw, 230px)",
+      flexShrink: 0, // the same size in a row that scrolls as in a grid
       height: "clamp(64px, 9vw, 120px)",
       padding: "12px 14px",
       boxSizing: "border-box",
       display: "flex",
       flexDirection: "column",
       justifyContent: "space-between",
-      background: "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
+      background: colour
+        ? `linear-gradient(135deg, hsl(${hueOf(c.title)}, 55%, 42%), hsl(${(hueOf(c.title) + 40) % 360}, 60%, 26%))`
+        : "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
     }}
   >
-    <div style={{ fontSize: 20, opacity: 0.7 }}>{KIND_ICON[c.kind]}</div>
+    {colour ? (
+      <div style={{ fontSize: 12, opacity: 0.75, color: "#ffffff" }}>{c.subtitle}</div>
+    ) : (
+      <div style={{ fontSize: 20, opacity: 0.7 }}>{KIND_ICON[c.kind]}</div>
+    )}
     <div style={{ fontSize: 15, fontWeight: 600, color: "#ffffff", lineHeight: 1.2 }}>{c.title}</div>
   </Focusable>
 );

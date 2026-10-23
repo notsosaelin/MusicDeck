@@ -69,7 +69,8 @@ def channel(req: dict) -> dict:
 
 
 # the YouTube Music calls the plugin makes; nothing else of ytmusicapi can be asked for
-MUSIC_METHODS = {"search", "get_home", "get_album", "get_artist", "get_playlist", "get_watch_playlist", "get_lyrics"}
+MUSIC_METHODS = {"search", "get_home", "get_album", "get_artist", "get_playlist", "get_watch_playlist", "get_lyrics",
+                 "get_mood_categories", "get_mood_playlists", "get_charts"}
 music_client = None
 music_lock = threading.Lock()
 
@@ -84,11 +85,47 @@ def music(req: dict):
         if music_client is None:
             from ytmusicapi import YTMusic
             music_client = YTMusic()
+    if req["method"] == "get_mood_playlists":
+        return mood_playlists(music_client, *req.get("args", []))
     result = getattr(music_client, req["method"])(*req.get("args", []), **req.get("kwargs", {}))
     if req["method"] == "get_lyrics" and isinstance(result, dict) and isinstance(result.get("lyrics"), list):
         result = {**result, "lyrics": [{"start_time": getattr(line, "start_time", 0), "text": getattr(line, "text", "")}
                                        for line in result["lyrics"]]}
     return result
+
+
+def mood_playlists(client, params: str) -> list[dict]:
+    """A "Moods & genres" category's playlists and albums. ytmusicapi's own parser gives up on the whole
+    page over one item it doesn't expect (some genres carry music videos), so this takes every
+    playlist and album it can read and skips the rest."""
+    page = client._send_request("browse", {"browseId": "FEmusic_moods_and_genres_category", "params": params})
+    found: list[dict] = []
+
+    def text(node: dict) -> str:
+        return "".join(run.get("text", "") for run in (node or {}).get("runs", []))
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, dict):
+            item = node.get("musicTwoRowItemRenderer")
+            if isinstance(item, dict):
+                browse_id = (((item.get("navigationEndpoint") or {}).get("browseEndpoint") or {}).get("browseId") or "")
+                thumbnails = ((((item.get("thumbnailRenderer") or {}).get("musicThumbnailRenderer") or {})
+                               .get("thumbnail") or {}).get("thumbnails") or [])
+                entry = {"title": text(item.get("title")), "description": text(item.get("subtitle")),
+                         "thumbnails": thumbnails}
+                if browse_id.startswith("VL"):
+                    found.append({**entry, "playlistId": browse_id[2:]})
+                elif browse_id.startswith("MPRE"):
+                    found.append({**entry, "browseId": browse_id, "resultType": "album"})
+                return
+            for value in node.values():
+                walk(value)
+
+    walk(page)
+    return found
 
 
 def version(req: dict) -> str:

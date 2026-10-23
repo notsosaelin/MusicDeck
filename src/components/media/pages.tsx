@@ -16,6 +16,7 @@ import {
   Page,
   Section,
   Track,
+  getBrowse,
   getHome,
   getUserPlaylists,
   localPlaylists,
@@ -120,15 +121,25 @@ const isYours = (s: Section) => s.items.length > 0 && /\b(your|my|liked|saved|fa
 
 /** The source's home rows, each a shelf (or, for rows of songs, a short list). */
 
-export const HomePage: FC<{ instanceId: string; withoutCategories?: boolean }> = ({
+export const HomePage: FC<{ instanceId: string; withoutCategories?: boolean; withBrowse?: boolean }> = ({
   instanceId,
   withoutCategories,
+  withBrowse,
 }) => {
   const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
+  const browse = useResult<Section[]>(`${instanceId}:browse`, () =>
+    withBrowse && hasFeature(instanceId, "browse")
+      ? getBrowse(instanceId)
+      : Promise.resolve({ ok: true as const, data: [] }),
+  );
   if (!result?.ok) return <Loading result={result} />;
+  // genres and the like come below, in rows of their own (Bandcamp's home has a row of them too)
+  const browsable = new Set(browse?.ok ? browse.data.flatMap((s) => s.items.map((c) => c.id)) : []);
   // with a Library tab, the library's categories live there
-  const sections = withoutCategories ? result.data.filter((s) => !isCategories(s)) : result.data;
-  if (!sections.length) return <Notice>Nothing here yet</Notice>;
+  const sections = result.data.filter(
+    (s) => !(withoutCategories && isCategories(s)) && !(isCategories(s) && s.items.every((c) => browsable.has(c.id))),
+  );
+  if (!sections.length && !browsable.size) return <Notice>Nothing here yet</Notice>;
   return (
     <>
       {sections.map((s) => (
@@ -166,6 +177,20 @@ export const HomePage: FC<{ instanceId: string; withoutCategories?: boolean }> =
           )}
         </Fragment>
       ))}
+      {/* the source's genres, moods and charts (MusicService.browse), each a row of colour tiles */}
+      {browse?.ok &&
+        browse.data.map((s) => (
+          <Shelf key={`browse:${s.title}`} title={s.title}>
+            {s.items.map((c) => (
+              <Tile
+                key={c.kind + c.id}
+                c={c}
+                colour
+                onOpen={() => pushCenter("home", { type: "collection", collection: c })}
+              />
+            ))}
+          </Shelf>
+        ))}
     </>
   );
 };
@@ -418,46 +443,31 @@ const RecentSearches: FC<{ instanceId: string; onSearch: (q: string) => void }> 
   );
 };
 
-/** What's playing and what plays next, in play order. A plays a track, X takes it out. */
-export const QueuePage: FC = () => {
+/** What plays next, in play order, beside Now Playing. A plays a track, X takes it out, Y its menu. */
+export const QueueList: FC = () => {
   const { queue, index } = useStore(player.state);
   const order = player.playOrder;
   const at = order.indexOf(index);
-  const current = queue[index];
   const upcoming = order.slice(at + 1).map((i) => ({ i, item: queue[i] }));
-  if (!current) return <Notice>The queue is empty. Play something from Home or Search.</Notice>;
+  if (!upcoming.length) return <Notice>Nothing after this track</Notice>;
   return (
     <>
-      <SectionTitle>Now playing</SectionTitle>
-      <div style={{ marginBottom: 28 }}>
-        <TrackLine
-          instanceId={current.instanceId}
-          track={current.track}
-          active
-          onPlay={() => player.toggle()}
-          onOptions={(e) => showTrackMenu(current.instanceId, current.track, e?.currentTarget)}
-        />
-      </div>
-      <SectionTitle>{upcoming.length ? `Up next · ${upcoming.length}` : "Up next"}</SectionTitle>
-      {upcoming.length ? (
-        <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {upcoming.map(({ i, item }) => (
-            <TrackLine
-              key={`${i}:${item.track.id}`}
-              instanceId={item.instanceId}
-              track={item.track}
-              onPlay={() => player.jumpTo(i)}
-              onSecondary={() => player.removeAt(i)}
-              secondaryLabel="Remove"
-              onOptions={(e) => showTrackMenu(item.instanceId, item.track, e?.currentTarget)}
-            />
-          ))}
-        </Focusable>
-      ) : (
-        <Notice>Nothing after this track</Notice>
-      )}
+      <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {upcoming.map(({ i, item }) => (
+          <TrackLine
+            key={`${i}:${item.track.id}`}
+            instanceId={item.instanceId}
+            track={item.track}
+            showAlbum={false}
+            onPlay={() => player.jumpTo(i)}
+            onSecondary={() => player.removeAt(i)}
+            secondaryLabel="Remove"
+            onOptions={(e) => showTrackMenu(item.instanceId, item.track, e?.currentTarget)}
+          />
+        ))}
+      </Focusable>
       {/* last, as in the panel's queue: never where the controller lands first */}
-      <div style={{ display: "flex", marginTop: 20 }}>
+      <div style={{ display: "flex", margin: "16px 0 8px" }}>
         <PageButton label="Clear queue" onClick={confirmClearQueue}>
           Clear queue
         </PageButton>
@@ -476,6 +486,9 @@ export const LibraryPage: FC<{ instanceId: string }> = ({ instanceId }) => {
     hasFeature(instanceId, "playlists")
       ? getUserPlaylists(instanceId)
       : Promise.resolve({ ok: true as const, data: [] }),
+  );
+  const browse = useResult<Section[]>(`${instanceId}:browse`, () =>
+    hasFeature(instanceId, "browse") ? getBrowse(instanceId) : Promise.resolve({ ok: true as const, data: [] }),
   );
   const [mine, setMine] = useState<Collection[] | null>(null);
   useEffect(() => {
@@ -496,7 +509,12 @@ export const LibraryPage: FC<{ instanceId: string }> = ({ instanceId }) => {
   const kept = yours
     .map((s) => ({ title: s.title, items: s.items.filter((c) => c.kind !== "playlist") }))
     .filter((s) => s.items.length > 0);
-  const categories = home.data.filter(isCategories).flatMap((s) => s.items);
+  // genres and the like are Browse's (Bandcamp's home has a row of them)
+  const browsable = new Set(browse?.ok ? browse.data.flatMap((s) => s.items.map((c) => c.id)) : []);
+  const categories = home.data
+    .filter(isCategories)
+    .flatMap((s) => s.items)
+    .filter((c) => !browsable.has(c.id));
   const open = (c: Collection) => pushCenter("library", { type: "collection", collection: c });
   return (
     <>

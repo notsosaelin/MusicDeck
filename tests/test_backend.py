@@ -235,10 +235,13 @@ async def run():
         print("media center settings")
         center = (await plugin.get_state())["center"]
         check(center["open_on"] == "last" and center["idle_off"] == 0, "the media center starts with its defaults")
-        await plugin.set_setting("center", {**center, "cards": "large", "idle_off": 5, "show_sound": False})
+        await plugin.set_setting("center", {**center, "cards": "large", "idle_off": 5, "show_browse": False})
         center = (await plugin.get_state())["center"]
-        check(center["cards"] == "large" and center["idle_off"] == 5 and center["show_sound"] is False,
+        check(center["cards"] == "large" and center["idle_off"] == 5 and center["show_browse"] is False,
               "its choices are kept")
+        plugin.settings.set("center", {**center, "show_sound": True})  # a choice an older version had
+        check("show_sound" not in (await plugin.get_state())["center"], "choices that no longer exist aren't handed out")
+        plugin.settings.set("center", center)
         for bad in ({"cards": "huge"}, {"idle_off": 3}, {"idle_off": True}, {"open_on": ["home"]}, {"theme": "x"},
                     {"show_library": "yes"}):
             await plugin.set_setting("center", {**center, **bad})
@@ -1466,6 +1469,13 @@ async def run():
                 return lrweb.json_response({"feed": {"results": [
                     {"id": "123", "name": "Top Show", "artistName": "Someone",
                      "artworkUrl100": "https://x/100x100bb.jpg"}]}})
+            if request.path == "/category.json":
+                # the older iTunes chart feed, the only one with categories
+                return lrweb.json_response({"feed": {"entry": [
+                    {"id": {"attributes": {"im:id": "999"}}, "im:name": {"label": "Crime Show"},
+                     "im:artist": {"label": "Network"}, "im:image": [{"label": "https://x/55x55bb.png"},
+                                                                     {"label": "https://x/170x170bb.png"}]},
+                    {"id": {}, "im:name": {"label": "No id, left out"}}]}})
             return lrweb.Response(status=404)
         pod_app = lrweb.Application()
         pod_app.router.add_get("/{path:.*}", fake_directory)
@@ -1476,11 +1486,21 @@ async def run():
         base_url = f"http://127.0.0.1:{pod_site._server.sockets[0].getsockname()[1]}"
         real_charts = podmod.CHARTS
         podmod.CHARTS = base_url + "/charts.json?country={country}&count={count}"
+        real_category = podmod.CATEGORY_CHART
+        podmod.CATEGORY_CHART = base_url + "/category.json?country={country}&genre={genre}"
         try:
             pod = (await plugin.save_service({"type": "podcasts", "name": "", "config": {"country": "gb"}}))["data"]
             pid = pod["id"]
-            check(pod["name"] == "Podcasts" and pod["config"]["country"] == "GB" and pod["features"] == ["progress"],
+            check(pod["name"] == "Podcasts" and pod["config"]["country"] == "GB" and pod["features"] == ["browse", "progress"],
                   "add the Podcasts source")
+            browse = (await plugin.browse(pid))["data"]
+            check(browse[0]["title"] == "Categories" and {"id": "genre:1488", "kind": "list", "title": "True Crime",
+                                                          "subtitle": "", "art": None} in browse[0]["items"],
+                  "browse: Apple's podcast categories")
+            crime = (await plugin.open_collection(pid, "list", "genre:1488"))["data"]
+            check(crime["title"] == "True Crime" and [c["id"] for c in crime["collections"]] == ["a:999"]
+                  and crime["collections"][0]["art"] == "https://x/600x600bb.png", "a category: its top shows, big artwork")
+            check(not (await plugin.open_collection(pid, "list", "genre:../x"))["ok"], "a made-up category is refused")
             home = (await plugin.home(pid))["data"]
             check([s["title"] for s in home] == ["Top podcasts"] and home[0]["items"][0]["id"] == "a:123"
                   and home[0]["items"][0]["art"] == "https://x/600x600bb.jpg", "home: the top charts, big artwork")
@@ -1536,6 +1556,7 @@ async def run():
             check(not os.path.exists(progress_file), "removing the source deletes its progress")
         finally:
             podmod.CHARTS = real_charts
+            podmod.CATEGORY_CHART = real_category
             await pod_runner.cleanup()
 
         print("live music archive")

@@ -12,6 +12,7 @@ import random
 import re
 import time
 from typing import Any, Optional
+from urllib.parse import quote
 
 import aiohttp
 
@@ -79,7 +80,7 @@ class RadioService(MusicService):
 
     type = "radio"
     display_name = "Internet radio"
-    features = frozenset({"star"})
+    features = frozenset({"star", "browse"})
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
@@ -197,9 +198,32 @@ class RadioService(MusicService):
             raise next(v for v in got.values() if isinstance(v, Exception))
         return sections
 
+    async def browse(self) -> list[dict[str, Any]]:
+        tags, countries = await asyncio.gather(
+            self._get("/json/tags", order="stationcount", reverse=True, limit=60),
+            self._get("/json/countries", order="stationcount", reverse=True, limit=60), return_exceptions=True)
+        sections = []
+        if isinstance(tags, list):
+            sections.append(models.section("Genres", [self._tag(t) for t in tags if t.get("name")]))
+        if isinstance(countries, list):
+            sections.append(models.section("Countries", [
+                models.collection(f"country:{c['iso_3166_1']}#{c.get('name') or ''}", "list", c.get("name") or c["iso_3166_1"],
+                                  models.count(c.get("stationcount") or 0, "station"))
+                for c in countries if COUNTRY_CODE.match(c.get("iso_3166_1") or "")]))
+        if not sections:
+            raise tags if isinstance(tags, Exception) else countries  # type: ignore[misc]
+        return sections
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("country:"):
+            code, _, name = id[8:].partition("#")
+            if not COUNTRY_CODE.match(code):
+                raise ServiceError("Unknown country")
+            stations = await self._stations(f"/json/stations/bycountrycodeexact/{code}", order="clickcount",
+                                            reverse=True, limit=100)
+            return models.page(name or code, models.count(len(stations), "station"), tracks=stations)
         if kind == "list" and id.startswith("tag:"):
-            tag = id[4:]
+            tag = quote(id[4:], safe="")
             stations = await self._stations(f"/json/stations/bytagexact/{tag}", order="clickcount", reverse=True,
                                             limit=100)
             return models.page(tag.title(), models.count(len(stations), "station"), tracks=stations)

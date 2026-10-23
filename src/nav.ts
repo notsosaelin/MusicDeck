@@ -1,4 +1,4 @@
-import { Navigation } from "@decky/ui";
+import { Navigation, Router } from "@decky/ui";
 import { Collection, Result, Track, playedCollection } from "./api";
 import { player } from "./player";
 import { RecentlyUsed, Store, pluginState } from "./store";
@@ -89,14 +89,42 @@ export const invalidateBrowserCache = () => {
 
 /** The media center (components/media), full screen in Steam's main window, and its open tab. */
 export const PLAYER_ROUTE = "/musicdeck/player";
-export type CenterTab = "playing" | "home" | "library" | "search" | "queue" | "sound" | "customize";
+export type CenterTab = "playing" | "home" | "library" | "search" | "settings";
 export const centerTab = new Store<{ tab: CenterTab }>({ tab: "playing" });
 
-/** Opens the media center, at `tab` (by default the one Customize says, or where it was left). */
+/** The page Steam's main window shows ("/library/home", PLAYER_ROUTE...), or "" if it can't tell. */
+function mainWindowPath(): string {
+  return (Router as any).WindowStore?.GamepadUIMainWindowInstance?.m_history?.location?.pathname ?? "";
+}
+
+/**
+ * Opens the media center, at `tab` (by default the one Customize says, or where it was left). When it's
+ * already the page behind the menu, the menu just closes: navigating again would stack a second copy in
+ * Steam's history, and leaving would then land on the first.
+ */
 export function openMediaCenter(tab?: CenterTab) {
   const openOn = pluginState.get()?.center?.open_on;
   const start = tab ?? (openOn && openOn !== "last" ? openOn : undefined);
   if (start) centerTab.set({ tab: start });
   Navigation.CloseSideMenus();
-  Navigation.Navigate(PLAYER_ROUTE);
+  if (mainWindowPath() !== PLAYER_ROUTE) Navigation.Navigate(PLAYER_ROUTE);
+}
+
+/**
+ * Leaves the media center for the Quick Access panel: back to the page it was opened over (past any
+ * copies of itself an older version stacked), or Steam's home when there's nothing to go back to.
+ */
+export function leaveMediaCenter(openPanel: () => void) {
+  let steps = 0;
+  const back = () => {
+    if (mainWindowPath() === PLAYER_ROUTE && steps < 5) {
+      steps++;
+      Navigation.NavigateBack();
+      window.setTimeout(back, 60);
+      return;
+    }
+    if (mainWindowPath() === PLAYER_ROUTE) Navigation.Navigate("/library/home");
+    window.setTimeout(openPanel, 120);
+  };
+  back();
 }

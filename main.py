@@ -205,7 +205,8 @@ class Plugin:
                              "pending": self.listenbrainz.pending_count()},
             "game_music": self.settings.get("game_music"),
             "offline": self.offline.status(),
-            "center": {**DEFAULTS["center"], **self.settings.get("center")},
+            # only today's choices: one an older version saved (since renamed) would make saving fail
+            "center": {k: self.settings.get("center").get(k, d) for k, d in DEFAULTS["center"].items()},
         }
 
     @_when_ready
@@ -281,6 +282,11 @@ class Plugin:
 
     async def _call(self, instance_id: str, fn) -> Any:
         return await fn(self._instance(instance_id))
+
+    @_when_ready
+    async def browse(self, instance_id: str) -> dict[str, Any]:
+        """Genres, moods and charts, for sources with feature "browse"."""
+        return await _result(self._instance(instance_id).browse())
 
     @_when_ready
     async def home(self, instance_id: str) -> dict[str, Any]:
