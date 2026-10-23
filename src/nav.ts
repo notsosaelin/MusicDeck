@@ -8,10 +8,10 @@ import { RecentlyUsed, Store, pluginState } from "./store";
  * so anything (track menus, the now-playing card) can navigate without importing the views.
  */
 
-export type PanelTab = "playing" | "library" | "search" | "queue" | "eq";
+export type PanelTab = "playing" | "library" | "search" | "eq";
 export const panelTab = new Store<{ tab: PanelTab }>({ tab: "library" });
 /** The tabs in the order the panel shows them. */
-export const TAB_ORDER: PanelTab[] = ["playing", "library", "search", "queue", "eq"];
+export const TAB_ORDER: PanelTab[] = ["playing", "library", "search", "eq"];
 
 /** The panel's tab strip (set by MusicPanel), so a tab change can move focus there first. */
 let tabStrip: HTMLElement | null = null;

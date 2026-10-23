@@ -1,10 +1,7 @@
-import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Lyrics, getLyrics } from "../api";
-import { openMediaCenter } from "../nav";
 import { QueueItem, player } from "../player";
 import { RecentlyUsed, useStore } from "../store";
-import { Message, scrollIntoCentre } from "./common";
 
 /** The full-screen lyrics page (registered in index.tsx). */
 
@@ -136,65 +133,5 @@ export const ScrollingPlainLyrics: FC<{ lyrics: Lyrics; height: number; fontSize
         ))}
       </div>
     </div>
-  );
-};
-
-/**
- * The Lyrics view in the Quick Access panel. The lyrics themselves are a focus stop, so the d-pad can
- * reach them (and the panel scrolls them wholly into view); A or a tap there opens them full screen.
- */
-export const LyricsView: FC = () => {
-  const { queue, index } = useStore(player.state);
-  const item = queue[index];
-  const lyrics = useLyrics(item);
-  const [focused, setFocused] = useState(false);
-
-  if (!item) return <Message>Play something to see its lyrics</Message>;
-  if (lyrics === undefined)
-    return (
-      <PanelSection>
-        <PanelSectionRow>
-          <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
-            <Spinner style={{ width: 32, height: 32 }} />
-          </div>
-        </PanelSectionRow>
-      </PanelSection>
-    );
-  if (!lyrics) return <Message>No lyrics found for this track</Message>;
-  if ("error" in lyrics) return <Message>Couldn't load lyrics: {lyrics.error}</Message>;
-  return (
-    <PanelSection title={lyrics.title ?? "Lyrics"}>
-      <PanelSectionRow>
-        <Focusable
-          onActivate={() => openMediaCenter("playing")}
-          onOKActionDescription="Full screen"
-          onGamepadFocus={(e: any) => {
-            setFocused(true);
-            scrollIntoCentre(e);
-          }}
-          onGamepadBlur={() => setFocused(false)}
-          style={{
-            borderRadius: 4,
-            padding: "0 8px",
-            margin: "0 -8px",
-            // the same quiet highlight Steam gives a focused row
-            background: focused ? "rgba(255, 255, 255, 0.08)" : undefined,
-            transition: "background 150ms",
-          }}
-        >
-          {lyrics.synced ? (
-            // a tap here opens the full-screen view (where tapping a line seeks)
-            <SyncedLyrics lyrics={lyrics} height={300} fontSize={16} seekable={false} />
-          ) : (
-            <ScrollingPlainLyrics lyrics={lyrics} height={300} fontSize={14} />
-          )}
-        </Focusable>
-      </PanelSectionRow>
-      {lyrics.source && (
-        <PanelSectionRow>
-          <div style={{ fontSize: 12, opacity: 0.5, padding: "8px 0" }}>Lyrics from {lyrics.source}</div>
-        </PanelSectionRow>
-      )}
-    </PanelSection>
   );
 };

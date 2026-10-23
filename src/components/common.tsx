@@ -102,10 +102,6 @@ function scrollerOf(el: Element | null): HTMLElement | null {
 export const scrollPanelToTop = (evt: { currentTarget: EventTarget | null }) =>
   scrollerOf(evt.currentTarget as Element)?.scrollTo({ top: 0, behavior: "smooth" });
 
-/** Bring a focused block that's taller than a row (the lyrics) wholly into view, centred. */
-export const scrollIntoCentre = (evt: { currentTarget: EventTarget | null }) =>
-  (evt.currentTarget as Element | null)?.scrollIntoView({ block: "center", behavior: "smooth" });
-
 export const ellipsis: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
 /**
@@ -466,6 +462,11 @@ export const IconButton: FC<{
  * where the controller is. "round" is play/pause: one filled circle the eye finds first.
  */
 export const PLAYER_CSS = `
+.md-pill { outline: none; transition: background 0.12s; }
+.md-pill.gpfocus:not(.md-on), .md-pill:hover:not(.md-on) { background: rgba(255, 255, 255, 0.24) !important; }
+.md-pill.gpfocus.md-on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+.md-line { outline: none; transition: background 0.15s; }
+.md-line.gpfocus { background: rgba(255, 255, 255, 0.06); }
 button.DialogButton.md-plain:not(.gpfocus):not(:hover):not(:active) { background: transparent !important; }
 button.DialogButton.md-round { border-radius: 50% !important; flex: 0 0 44px !important; width: 44px; height: 44px !important; }
 .md-mini { border-radius: 4px; }

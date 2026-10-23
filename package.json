@@ -1,6 +1,6 @@
 {
   "name": "musicdeck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Turns the Soundtracks tab of the Quick Access Menu into a music player for local files, Steam soundtracks, media servers, streaming services, internet radio, podcasts and live concert recordings",
   "type": "module",
   "scripts": {

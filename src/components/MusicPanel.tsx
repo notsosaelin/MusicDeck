@@ -1,21 +1,18 @@
 import { Focusable, PanelSection, PanelSectionRow } from "@decky/ui";
 import { FC, ReactNode } from "react";
-import { FaCompactDisc, FaExpand, FaListOl, FaMusic, FaSearch, FaSlidersH } from "react-icons/fa";
-import { LyricsView } from "./LyricsView";
-import { player } from "../player";
+import { FaCompactDisc, FaExpand, FaMusic, FaSearch, FaSlidersH } from "react-icons/fa";
 import { pluginState, useStore } from "../store";
 import { Browser } from "./Browser";
 import { PanelTab, TAB_ORDER, openMediaCenter, panelTab, popView, resetStack, setTabStrip, showTab } from "../nav";
 import { Equalizer } from "./Equalizer";
-import { MiniPlayer, NowPlaying } from "./NowPlaying";
-import { Queue, confirmClearQueue } from "./Queue";
+import { MiniPlayer } from "./NowPlaying";
+import { PlayerPages } from "./PlayerPages";
 import { ACCENT, IconButton, Message, PLAYER_CSS } from "./common";
 
 const TAB_LOOKS: Record<PanelTab, { label: string; icon: ReactNode }> = {
   playing: { label: "Now playing", icon: <FaCompactDisc /> },
   library: { label: "Library", icon: <FaMusic /> },
   search: { label: "Search", icon: <FaSearch /> },
-  queue: { label: "Queue", icon: <FaListOl /> },
   eq: { label: "Equalizer", icon: <FaSlidersH /> },
 };
 
@@ -30,7 +27,7 @@ function stepTab(by: number) {
 }
 
 /** The tab strip at the top of the panel: plain icons over one line, the open tab underlined. */
-const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
+const Tabs: FC<{ tab: PanelTab }> = ({ tab }) => (
   // in a section, for the same side margins as everything below it
   <PanelSection>
     <PanelSectionRow>
@@ -45,9 +42,6 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
               key={t.id}
               look="plain"
               label={t.label}
-              // X on the Queue tab clears it (it asks first), wherever the queue is scrolled to
-              onSecondary={t.id === "queue" && queued ? confirmClearQueue : undefined}
-              secondaryLabel="Clear queue"
               active={tab === t.id}
               style={{ height: 40, fontSize: 16, borderRadius: 0 }}
               onClick={() => {
@@ -57,7 +51,6 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
               }}
             >
               {t.icon}
-              {t.id === "queue" && queued ? <span style={{ fontSize: 11 }}>{queued}</span> : null}
               {/* the underline is an element, not an inset shadow: on a button of fractional width
                 Chromium also draws a hairline down the shadow's right edge */}
               {tab === t.id && (
@@ -82,13 +75,13 @@ const Tabs: FC<{ tab: PanelTab; queued: number }> = ({ tab, queued }) => (
 
 /**
  * The player in the Quick Access Menu (in place of Soundtracks, or as its own tab). Laid out like a
- * music app: tabs at the top, always in the same place; the full player (and the song's lyrics) on
- * Now playing; a one-row mini player above Library, Search and Queue, so browsing gets the space.
+ * music app: tabs at the top, always in the same place; Now playing as two pages (the player, then the
+ * song's lyrics or the queue below it, see PlayerPages); a one-row mini player above Library and
+ * Search, so browsing gets the space.
  */
 export const MusicPanel: FC = () => {
   const state = useStore(pluginState);
   const { tab } = useStore(panelTab);
-  const { queue } = useStore(player.state);
   const active = state?.services.find((s) => s.id === state.active_service);
   const browsing = tab === "library" || tab === "search";
 
@@ -108,22 +101,14 @@ export const MusicPanel: FC = () => {
       }}
     >
       <style>{PLAYER_CSS}</style>
-      <Tabs tab={tab} queued={queue.length} />
-      {tab === "playing" ? (
-        <>
-          <NowPlaying />
-          {queue.length > 0 && <LyricsView />}
-        </>
-      ) : (
-        tab !== "eq" && <MiniPlayer onOpen={() => showTab("playing")} />
-      )}
+      <Tabs tab={tab} />
+      {tab === "playing" ? <PlayerPages /> : tab !== "eq" && <MiniPlayer onOpen={() => showTab("playing")} />}
       {browsing &&
         (!state ? null : active ? (
           <Browser instanceId={active.id} stack={tab} />
         ) : (
           <Message>Add a music source in Decky → MusicDeck</Message>
         ))}
-      {tab === "queue" && <Queue />}
       {tab === "eq" && <Equalizer />}
     </Focusable>
   );
