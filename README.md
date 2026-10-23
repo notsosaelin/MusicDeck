@@ -5,9 +5,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 ## Features
 
-- **Sixteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
+- **Seventeen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
   Audiobookshelf, SoundCloud, YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live
-  Music Archive, Qobuz, TIDAL and Spotify. One source is live at a time, chosen in the plugin's Decky page.
+  Music Archive, Qobuz, TIDAL, Spotify and Soulseek. One source is live at a time, chosen in the plugin's Decky page.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
 - **Games:** pick an album or playlist for a game and it plays when the game starts; or have the music
@@ -49,8 +49,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
   station its logo as big as its square, and an On air page: the song and its cover when the station says
-  (the cover looked up when it doesn't send one); where it's from, its language, quality, today's
-  listeners and genres; and what it played earlier (only what looks like songs: a station's own name or its
+  (the cover looked up when it doesn't send one); its language, quality and today's listeners; and what it
+  played earlier (only what looks like songs: a station's own name or its
   playout codes aren't); stations like it under Similar, and the stations you listened to in Jump back in; a podcast episode its show notes and the
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
   Live Music Archive its setlist and recording notes.
@@ -102,13 +102,15 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | Live Music Archive | None | Over 250,000 concert recordings bands allow to be shared ([archive.org](https://archive.org/details/etree)): concerts played on this day, popular this week, bands and their shows, search, same-band radio |
 | Qobuz | Your subscription | Your playlists and favourites (synced), editorial picks, search, MP3 up to 24-bit/192 kHz FLAC, plays reported as from the official player |
 | TIDAL | Your subscription | Your playlists, mixes and favourites, TIDAL's home page, search, track radio, synced lyrics, up to CD-quality FLAC |
+| Soulseek | A Soulseek name (registered when you first sign in with it) | Search what other people share, albums by folder with their format and quality, play a track (downloaded first), download an album into your music folder (default `~/Music/Soulseek`), where your local files pick it up and get it ready |
 | Spotify | Premium | Your playlists, Liked Songs (synced), recently played, top tracks and artists, saved albums, new releases, search, Spotify's synced lyrics, up to 320 kbps, Spotify's own loudness levelling |
 
 **No accounts where a service doesn't need one.** SoundCloud, YouTube, Bandcamp, radio, podcasts and the Live Music Archive are used signed
 out, as NewPipe does: nothing ties your listening to an identity, and there's no account to get flagged for
 using an unofficial client. Your playlists and favourites for those stay on the Deck.
 
-**Passwords are never stored.** Navidrome passwords become Subsonic tokens and Jellyfin, Emby and
+**Passwords are never stored**, except Soulseek's: its protocol signs in with the password every time and
+has no tokens, so it's kept like the tokens below (and never in backups). Navidrome passwords become Subsonic tokens and Jellyfin, Emby and
 Audiobookshelf passwords become access tokens on save (or skip the password with Jellyfin's Quick Connect).
 Plex signs in with a code entered at plex.tv/link. Qobuz, TIDAL and Spotify sign in on their own websites, in
 Steam's browser, and MusicDeck only receives the resulting tokens.

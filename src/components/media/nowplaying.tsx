@@ -1,6 +1,5 @@
 import { Focusable } from "@decky/ui";
 import { FC, ReactNode, useEffect, useRef, useState } from "react";
-import { FaHeadphones, FaLanguage, FaMapMarkerAlt, FaSignal } from "react-icons/fa";
 import { NowPlayingKind, OnAir, TrackDetails, getTrackDetails } from "../../api";
 import { QueueItem, player } from "../../player";
 import { RecentlyUsed, Store, useStore } from "../../store";
@@ -154,32 +153,6 @@ const formatListening = (seconds: number) => {
     : `${m}:${String(s % 60).padStart(2, "0")}`;
 };
 
-const CHIP_ICONS: Record<string, ReactNode> = {
-  From: <FaMapMarkerAlt />,
-  Language: <FaLanguage />,
-  Quality: <FaSignal />,
-  Today: <FaHeadphones />,
-};
-
-/** A small fact about the station, as a pill. */
-const Chip: FC<{ icon?: ReactNode; children: ReactNode }> = ({ icon, children }) => (
-  <span
-    style={{
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 7,
-      padding: "6px 12px",
-      borderRadius: 999,
-      background: "rgba(255, 255, 255, 0.08)",
-      fontSize: 14,
-      whiteSpace: "nowrap",
-    }}
-  >
-    {icon && <span style={{ opacity: 0.6, display: "flex" }}>{icon}</span>}
-    {children}
-  </span>
-);
-
 const Label: FC<{ children: ReactNode }> = ({ children }) => (
   <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.5, letterSpacing: "0.06em", marginBottom: 8 }}>
     {children}
@@ -188,7 +161,8 @@ const Label: FC<{ children: ReactNode }> = ({ children }) => (
 
 /**
  * A station's Now Playing: what's on (its song when it says), how long you've listened, the station at a
- * glance (where from, language, quality, today's listeners, genres) and what it played earlier, as much
+ * glance (its language, quality and today's listeners, as text: its place and genres are under its name)
+ * and what it played earlier, as much
  * of that as fits `height`: it never scrolls. Stations like it are on Similar.
  */
 export const OnAirPanel: FC<{
@@ -201,7 +175,7 @@ export const OnAirPanel: FC<{
   const { current } = useStore(player.position);
   const key = `${item.instanceId}:${item.track.id}`;
   // what it played earlier: as many as fit under the rest (LIVE, the song, the station's row)
-  const room = height - 22 - (song ? 76 : 0) - 50 - 34;
+  const room = height - 22 - (song ? 76 : 0) - 3 * 26 - 50;
   const earlier = (useStore(heard)[key] ?? [])
     .filter((h) => h.text !== song?.text)
     .slice(0, Math.max(0, Math.floor(room / 26)));
@@ -213,14 +187,13 @@ export const OnAirPanel: FC<{
   }, [song?.text, key]);
   const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const facts = Object.fromEntries(details?.facts ?? []);
-  // what the line under the station's name says already (its place, its first genres) isn't said again
-  const said = `${item.track.artist}, ${item.track.album}`.toLowerCase();
-  const told = (text: string) => said.includes(text.toLowerCase().split(",")[0].trim());
-  const genres = (facts.Genres ?? "")
-    .split(",")
-    .map((g: string) => g.trim())
-    .filter((g: string) => g && !said.split(/,|·/).some((x) => x.trim() === g.toLowerCase()))
-    .slice(0, 4);
+  const stationFacts = (
+    [
+      ["Language", facts.Language],
+      ["Quality", facts.Quality],
+      ["Listeners today", (facts.Today ?? "").replace(/ listeners$/, "")],
+    ] as [string, string][]
+  ).filter(([, value]) => value);
   return (
     <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
@@ -239,32 +212,8 @@ export const OnAirPanel: FC<{
           {song.artist && <div style={{ fontSize: 18, opacity: 0.75, marginTop: 4 }}>{song.artist}</div>}
         </div>
       )}
-      {details === undefined ? (
-        <div style={{ fontSize: 14, opacity: 0.5 }}>Loading…</div>
-      ) : (
-        // one row: what doesn't fit fades out at its end rather than taking another row
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            overflow: "hidden",
-            maskImage: "linear-gradient(to right, black 88%, transparent)",
-          }}
-        >
-          {["From", "Language", "Quality", "Today"].map(
-            (k) =>
-              facts[k] &&
-              !(k === "From" && told(facts[k])) && (
-                <Chip key={k} icon={CHIP_ICONS[k]}>
-                  {facts[k]}
-                </Chip>
-              ),
-          )}
-          {genres.map((g: string) => (
-            <Chip key={g}>{g}</Chip>
-          ))}
-        </div>
-      )}
+      {/* the station in a few words: what the line under its name doesn't already say */}
+      {details !== undefined && stationFacts.length > 0 && <Facts facts={stationFacts} />}
       {earlier.length > 0 && (
         <div>
           <Label>EARLIER</Label>

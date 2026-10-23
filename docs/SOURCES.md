@@ -316,8 +316,8 @@ source (`MusicService.remove`).
   counts too) instead of the station's logo, place and genres. A song named without a cover gets one
   from Apple's catalogue (the iTunes Search API, no account; exactly that title by that artist, 600 px),
   remembered a day, "none" included. The media center's On air page shows it with the station's facts
-  (`details`: place, language, quality, today's listeners, genres) as one row of chips and the songs heard
-  earlier, as many as fit; stations like it are on Similar. `believable()` drops what isn't a song: the
+  (`details`: language, quality and today's listeners, as text; its place and genres are under its name)
+  and the songs heard earlier, as many as fit; stations like it are on Similar. `believable()` drops what isn't a song: the
   station's own name, playout codes ("PLAY_8_NEW", "ID1234"; a number alone can be a title), adverts,
   idents and web addresses. `tidy_on_air()` first drops a half that's the station's own (its name, its
   website): what's left counts only as "<song> by <artist>".
@@ -396,6 +396,32 @@ source (`MusicService.remove`).
   editing (with TIDAL's required `If-None-Match` ETag).
 - Catalogue calls were tested with an app-only token; sign-in, playback, favourites and lyrics need
   a TIDAL subscription and were not yet tested end to end.
+
+## Soulseek (`soulseek.py`, `slsk.py`)
+
+- **Protocol**: `slsk.py` speaks Soulseek in pure Python (aioslsk, the Python library, needs pydantic's
+  compiled core and an `xml.etree` UPnP library, neither of which Decky's Python can load), per
+  Nicotine+'s documentation. One server connection (Login, SetWaitPort, SharedFoldersFiles 0/0,
+  HaveNoParent, FileSearch, GetPeerAddress, ConnectToPeer); peer connections "P" (search results,
+  QueueUpload, TransferRequest/Response) and "F" (a file), each opened directly or, when that can't work,
+  by the other side after ConnectToPeer through the server (PierceFireWall with the asker's token).
+  Listens on 2234 (the next free port up to 2253); no UPnP, so behind a router peers that can't be
+  reached either aren't heard from.
+- **Untrusted peers**: messages over 16 MB refused, fields read with bounds checks, at most 5,000 files a
+  response; only audio files up to 2 GB are fetched; a file's and folder's names are cleaned (`_safe`:
+  no separators, no dots at the ends) before they become paths; a search result's user is the
+  connection's, not what it claims. Nothing is shared; requests for our files go unanswered.
+- **Sign-in**: name and password; a new name is registered by signing in with it. The password is kept
+  (`SECRET_KEYS`; never in backups): the protocol sends it at every sign-in and has no token.
+- **Search**: answers gathered for 6 s; albums are one user's folder of two or more audio files, ranked
+  by a free upload slot, queue, speed, lossless, bitrate; tracks likewise. Results are kept in memory to
+  open and play.
+- **Playing** downloads the file into `soulseek-<id>/` (1 GB, oldest let go first) and plays it from
+  there; a user who hasn't started sending in 90 s is reported (with its place in their queue, when
+  they say), and the download carries on.
+- **Download album** (the page's action): every file asked for at once, saved in the chosen folder under
+  the album's folder name; Home lists what's downloading and what's done (`soulseek-<id>.json`). Inside a
+  local files source's folders, the album is noticed and gets ready as new music.
 
 ## Spotify (`spotify.py`, `backend/spotify-helper/`)
 

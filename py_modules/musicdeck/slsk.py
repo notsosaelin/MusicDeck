@@ -323,6 +323,8 @@ class Client:
                 await self._read_peer(user, reader, writer)
             elif kind == "F":
                 await self._receive_file(reader, writer)
+        except (OSError, asyncio.IncompleteReadError, asyncio.TimeoutError, SoulseekError):
+            pass  # the peer hung up, or sent what can't be read: that connection is done
         finally:
             if self.peers.get(user) is writer:
                 del self.peers[user]
@@ -431,6 +433,8 @@ class Client:
         d = self.downloads.get(key)
         if not d or d.done.done():
             d = self.downloads[key] = Download(user, path, size, dest)
+            # a download failed with nobody waiting (left to run on) is seen, not logged as forgotten
+            d.done.add_done_callback(lambda f: f.cancelled() or f.exception())
             writer = await self._peer(user)
             writer.write(message(43, string(path)))
             self.on_change()

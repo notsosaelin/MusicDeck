@@ -3,6 +3,22 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.9.0
+
+**Soulseek** (new source, under File sharing)
+- Search what other people share: albums by folder, with format and quality, and the best places to get
+  them first (a free slot, speed); tracks too.
+- Play a track: it's downloaded first, usually in seconds; a busy user's queue is said, and the download
+  carries on.
+- **Download album** saves it into your music folder (default `~/Music/Soulseek`), where your local files
+  notice it and get it ready like any new album. Home shows what's downloading and what's done.
+- Sign in with a Soulseek name and password (a new name is registered for you). Soulseek has no sign-in
+  tokens, so the password is kept (never in backups). Nothing is shared from your Deck.
+
+**Internet radio**
+- On air's station details are plain text: language, quality, today's listeners (its place and genres
+  are already under its name).
+
 ## 0.8.4
 
 - On air reads stations that pad the song with themselves ("Theme from Joy House by Jimmy Smith - Adroit

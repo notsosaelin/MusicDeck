@@ -126,6 +126,7 @@ Details worth knowing:
 | `musicdeck/services/__init__.py` | `CATALOGUE` and `SERVICE_TYPES`: every source type, in "Add a source" order; a type's module is imported the first time it's needed. |
 | `musicdeck/tagging.py` | Writing tags: the editor's fields as each format's keys (EasyID3, Vorbis comments, EasyMP4 with composer and label registered, raw ID3 frames in WAV/AIFF), to a copy that replaces the file; returns what changed keys held, for undo. |
 | `musicdeck/watch.py` | `FolderWatcher`: inotify through ctypes on every folder under the local source's roots, reporting a change once they've been quiet a while (new albums being copied in). Unavailable elsewhere: the periodic scan covers it. |
+| `musicdeck/slsk.py` | A Soulseek client in pure Python: sign-in, search, peer connections direct or through the server, downloads; peers' messages bounded and parsed defensively. |
 | `musicdeck/catalogues.py` | Apple's (iTunes Search API) and Deezer's public catalogues: album searches, albums in MusicBrainz's release shape, and covers, for the local source's look-ups and artwork. |
 | `musicdeck/pictures.py` | Artists' pictures from Deezer's public catalogue API (exact name match), and the whole-file picture download it shares with `musicbrainz.py`. |
 | `musicdeck/musicbrainz.py` | MusicBrainz (release search and details, one request a second, a User-Agent naming the app) and the Cover Art Archive (front covers), for the local source's look-ups and artwork. |

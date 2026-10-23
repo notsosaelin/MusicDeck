@@ -27,6 +27,7 @@ CATALOGUE = [
     ("qobuz", "qobuz", "QobuzService", "Qobuz", "streaming"),
     ("tidal", "tidal", "TidalService", "TIDAL", "streaming"),
     ("spotify", "spotify", "SpotifyService", "Spotify", "streaming"),
+    ("soulseek", "soulseek", "SoulseekService", "Soulseek", "sharing"),
 ]
 
 
