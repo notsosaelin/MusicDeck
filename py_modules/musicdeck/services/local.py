@@ -301,7 +301,10 @@ def read_lyrics(path: str) -> Optional[dict[str, Any]]:
         text = frames[0].text if frames else None
     else:
         for key in LYRIC_TAGS:
-            value = tags.get(key) if hasattr(tags, "get") else None
+            try:
+                value = tags.get(key) if hasattr(tags, "get") else None
+            except (ValueError, KeyError):  # a key the format can't have (MP4's "©lyr" in a Vorbis comment)
+                continue
             if value:
                 text = value[0] if isinstance(value, list) else value
                 break

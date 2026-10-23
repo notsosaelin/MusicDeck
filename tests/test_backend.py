@@ -237,6 +237,22 @@ async def run():
         check(restarted.plays[piece["id"]]["count"] == 2, "play counts are kept on the Deck")
         await restarted.stop()
 
+        print("local library: lyrics in FLAC")
+        from musicdeck.services.local import read_lyrics
+        from mutagen.flac import FLAC
+        flac_path = os.path.join(tmp, "plain.flac")
+        info = (4096).to_bytes(2, "big") * 2 + bytes(6) + ((44100 << 44) | (1 << 41) | (15 << 36)).to_bytes(8, "big") + bytes(16)
+        with open(flac_path, "wb") as f:
+            f.write(b"fLaC" + bytes([0x80]) + len(info).to_bytes(3, "big") + info)
+        flac = FLAC(flac_path)
+        flac["TITLE"] = "Tagged"
+        flac.save()
+        check(read_lyrics(flac_path) is None, "a tagged FLAC file without lyrics has none (MP4's lyrics key isn't asked of it)")
+        flac = FLAC(flac_path)
+        flac["LYRICS"] = "la la"
+        flac.save()
+        check(read_lyrics(flac_path)["lines"][0]["text"] == "la la", "and its own lyrics are read")
+
         print("local library: tags and artwork")
         from aiohttp import web as mbweb
         from musicdeck import musicbrainz as mbmod

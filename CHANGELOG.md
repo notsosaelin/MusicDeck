@@ -3,6 +3,11 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.6.1
+
+- Lyrics for FLAC and Ogg files: looking in their tags for lyrics failed, which stopped the online lookup
+  as well, so tagged FLAC and Ogg files never showed lyrics unless an .lrc sat beside them.
+
 ## 0.6.0
 
 **Browse, organized**
