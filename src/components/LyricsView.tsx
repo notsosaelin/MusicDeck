@@ -37,6 +37,9 @@ export function useLyrics(item: QueueItem | undefined): LyricsResult {
  * Lines that follow the song: the current one sits a third of the way down a window of `height` pixels
  * and lines before and after fade out at the edges. With `seekable`, tapping a line jumps there.
  */
+/** The share of the lyrics' height their top and bottom fade over */
+const TOP_FADE = 0.12;
+
 export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number; seekable?: boolean }> = ({
   lyrics,
   height,
@@ -54,9 +57,11 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
     if ((lyrics.lines[i].t ?? 0) <= current + 0.25) active = i;
     else break;
   }
-  // Lines wrap, so position by the active line's measured offset rather than a fixed line height
+  // Lines wrap, so position by the active line's measured offset rather than a fixed line height. The
+  // active line rides a third of the way down; until the song gets that far the lines start at the top
+  // (just under the fade), not a third of the way down with nothing above them
   const el = lineRefs.current[Math.max(active, 0)];
-  const offset = height / 3 - (el ? el.offsetTop + el.offsetHeight / 2 : 0);
+  const offset = Math.min(height * TOP_FADE, height / 3 - (el ? el.offsetTop + el.offsetHeight / 2 : 0));
   return (
     <div
       style={{
@@ -64,8 +69,8 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
         overflow: "hidden",
         position: "relative",
         // fade lines in and out at the edges instead of cutting them off
-        maskImage: "linear-gradient(transparent, black 18%, black 82%, transparent)",
-        WebkitMaskImage: "linear-gradient(transparent, black 18%, black 82%, transparent)",
+        maskImage: `linear-gradient(transparent, black ${TOP_FADE * 100}%, black ${100 - TOP_FADE * 100}%, transparent)`,
+        WebkitMaskImage: `linear-gradient(transparent, black ${TOP_FADE * 100}%, black ${100 - TOP_FADE * 100}%, transparent)`,
       }}
     >
       <div style={{ transform: `translateY(${offset}px)`, transition: "transform 350ms ease" }}>

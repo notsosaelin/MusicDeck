@@ -80,7 +80,16 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
         {hasSecond && (
           <div ref={second} style={{ height: page, overflowY: side === "queue" ? "auto" : "clip" }}>
             <PageSwitch side={side} upNext={queue.length} />
-            {side === "lyrics" ? <PanelLyrics height={page - SWITCH_HEIGHT - 8} /> : <Queue titled={false} />}
+            {side === "lyrics" ? (
+              <PanelLyrics height={page - SWITCH_HEIGHT - 8} /> // the list's section spacing under the header would be a second gap
+            ) : (
+              <div style={{ marginTop: -20 }}>
+                // the list's section spacing would make a second gap under the header
+                <div style={{ marginTop: -20 }}>
+                  <Queue titled={false} />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -126,7 +135,14 @@ const PageSwitch: FC<{ side: "lyrics" | "queue"; upNext: number }> = ({ side, up
     <PanelSectionRow>
       <Focusable
         flow-children="row"
-        style={{ display: "flex", alignItems: "center", height: SWITCH_HEIGHT, margin: "0 -8px" }}
+        // the hairline under it as under the tabs: the header apart from what it heads
+        style={{
+          display: "flex",
+          alignItems: "center",
+          height: SWITCH_HEIGHT,
+          margin: "0 -8px",
+          borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+        }}
       >
         <HeaderWord on={side === "lyrics"} label="Lyrics" onPick={() => pageTwo.set({ side: "lyrics" })}>
           Lyrics
