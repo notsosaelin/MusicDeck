@@ -1783,7 +1783,7 @@ async def run():
                 kind = slsk.Reader(payload)
                 kind.string()
                 if kind.string() == "F":
-                    token = struct.unpack("<I", await reader.readexactly(4))[0]
+                    await reader.readexactly(4)  # the transfer token
                     writer.write(slu64(0))
                     data = b""
                     while len(data) < len(shared_bytes):
