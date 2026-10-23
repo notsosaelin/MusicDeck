@@ -101,8 +101,15 @@ export const MusicPanel: FC = () => {
       }}
     >
       <style>{PLAYER_CSS}</style>
-      <Tabs tab={tab} />
-      {tab === "playing" ? <PlayerPages /> : tab !== "eq" && <MiniPlayer onOpen={() => showTab("playing")} />}
+      {/* on Now playing the tabs are part of its first page, and slide away with it */}
+      {tab === "playing" ? (
+        <PlayerPages head={<Tabs tab={tab} />} />
+      ) : (
+        <>
+          <Tabs tab={tab} />
+          {tab !== "eq" && <MiniPlayer onOpen={() => showTab("playing")} />}
+        </>
+      )}
       {browsing &&
         (!state ? null : active ? (
           <Browser instanceId={active.id} stack={tab} />

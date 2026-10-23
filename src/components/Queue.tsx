@@ -21,14 +21,17 @@ export function confirmClearQueue() {
   );
 }
 
-/** The queue in the order it plays (shuffled or not). Y → Move… picks a track up for the d-pad. */
-export const Queue: FC = () => {
+/**
+ * The queue in the order it plays (shuffled or not). Y → Move… picks a track up for the d-pad.
+ * `titled`: with its "Up next · n tracks" heading (Now playing's switch says it already).
+ */
+export const Queue: FC<{ titled?: boolean }> = ({ titled = true }) => {
   const { queue, index } = useStore(player.state);
   const [moving, setMoving] = useState<QueueItem | null>(null);
   if (!queue.length) return <Message>The queue is empty</Message>;
   return (
     <>
-      <PanelSection title={`Up next · ${queue.length} track${queue.length === 1 ? "" : "s"}`}>
+      <PanelSection title={titled ? `Up next · ${queue.length} track${queue.length === 1 ? "" : "s"}` : undefined}>
         {player.playOrder.map((i, position) => {
           const item = queue[i];
           if (!item) return null;

@@ -5,12 +5,15 @@ import { player } from "../player";
 import { Store, useStore } from "../store";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "./LyricsView";
 import { NowPlaying } from "./NowPlaying";
-import { Queue, confirmClearQueue } from "./Queue";
+import { Queue } from "./Queue";
 import { Visualizer } from "./media/nowplaying";
 import { watchSize } from "./common";
 
 /** The second page's view: the song's lyrics or what's up next; kept while the panel is closed. */
 const pageTwo = new Store<{ side: "lyrics" | "queue" }>({ side: "lyrics" });
+
+/** The Lyrics | Queue switch atop the second page */
+const SWITCH_HEIGHT = 40;
 
 /** How long a page takes to slide into place */
 const SLIDE = "transform 0.24s cubic-bezier(0.25, 0.8, 0.3, 1)";
@@ -23,18 +26,18 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * Now playing in the Quick Access panel, as two pages in a frame that fills the panel below the tabs:
- * the player (cover, title, seek bar, controls, volume), and under it the song's lyrics or the queue,
- * switched at its top. The controller moving between them slides the frame a whole page; the panel
- * itself never scrolls, so neither Steam's focus scrolling nor its scroll restore can leave a page
- * half shown. A long queue scrolls inside its own page.
+ * Now playing in the Quick Access panel, as two pages in a frame as tall as the panel: the tabs and the
+ * player (cover, title, seek bar, controls, volume), and under it the song's lyrics or the queue, all
+ * the panel's room to themselves. The controller moving between them slides the frame a whole page;
+ * the panel itself never scrolls, so neither Steam's focus scrolling nor its scroll restore can leave a
+ * page half shown. A long queue scrolls inside its own page.
  */
-export const PlayerPages: FC = () => {
+export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
   const { queue } = useStore(player.state);
   const { side } = useStore(pageTwo);
   const root = useRef<HTMLDivElement>(null);
   const second = useRef<HTMLDivElement>(null);
-  const [room, setRoom] = useState(0); // the panel's height below the tabs: one page
+  const [room, setRoom] = useState(0); // the panel's height: one page
   const [onSecond, setOnSecond] = useState(false);
   const hasSecond = queue.length > 0;
 
@@ -65,21 +68,19 @@ export const PlayerPages: FC = () => {
     // clip, not hidden: Steam's focus scrolling can move an overflow:hidden box
     <div ref={root} style={{ height: page, overflow: "clip" }}>
       <div style={{ transform: `translateY(${showing ? -page : 0}px)`, transition: SLIDE }}>
-        <div
-          style={{
-            height: page,
-            overflowY: "auto", // only if the player is ever taller than the panel
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-          }}
-        >
-          <NowPlaying />
+        <div style={{ height: page, display: "flex", flexDirection: "column" }}>
+          {head}
+          {/* the player in the room under the tabs, with what's left over spread round it */}
+          <div
+            style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-evenly" }}
+          >
+            <NowPlaying />
+          </div>
         </div>
         {hasSecond && (
           <div ref={second} style={{ height: page, overflowY: side === "queue" ? "auto" : "clip" }}>
             <PageSwitch side={side} upNext={queue.length} />
-            {side === "lyrics" ? <PanelLyrics height={page - 64} /> : <Queue />}
+            {side === "lyrics" ? <PanelLyrics height={page - SWITCH_HEIGHT - 8} /> : <Queue titled={false} />}
           </div>
         )}
       </div>
@@ -87,13 +88,13 @@ export const PlayerPages: FC = () => {
   );
 };
 
-/** Lyrics | Queue at the top of the second page. X on Queue, while it shows, clears it (it asks first). */
+/** Lyrics | Queue at the top of the second page (the queue's own end clears it). */
 const PageSwitch: FC<{ side: "lyrics" | "queue"; upNext: number }> = ({ side, upNext }) => (
   <PanelSection>
     <PanelSectionRow>
       <Focusable
         flow-children="row"
-        style={{ display: "flex", gap: 6, justifyContent: "center", padding: "10px 0 6px" }}
+        style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center", height: SWITCH_HEIGHT }}
       >
         {(["lyrics", "queue"] as const).map((s) => (
           <Focusable
@@ -103,13 +104,10 @@ const PageSwitch: FC<{ side: "lyrics" | "queue"; upNext: number }> = ({ side, up
             onActivate={() => pageTwo.set({ side: s })}
             onClick={() => pageTwo.set({ side: s })}
             onOKActionDescription={s === "lyrics" ? "Lyrics" : "Queue"}
-            // clearing is the queue's: only on its own pill, while it shows
-            onSecondaryButton={s === "queue" && side === "queue" ? confirmClearQueue : undefined}
-            onSecondaryActionDescription={s === "queue" && side === "queue" ? "Clear queue" : undefined}
             style={{
-              padding: "5px 14px",
-              borderRadius: 14,
-              fontSize: 13,
+              padding: "3px 12px",
+              borderRadius: 12,
+              fontSize: 12,
               fontWeight: 600,
               color: side === s ? "#0e141b" : "#dcdedf",
               background: side === s ? "#dcdedf" : "rgba(255, 255, 255, 0.08)",
@@ -162,12 +160,9 @@ const PanelLyrics: FC<{ height: number }> = ({ height }) => {
   return focusable(
     <>
       {lyrics.synced ? (
-        <SyncedLyrics lyrics={lyrics} height={height - 24} fontSize={18} seekable={false} />
+        <SyncedLyrics lyrics={lyrics} height={height} fontSize={18} seekable={false} />
       ) : (
-        <ScrollingPlainLyrics lyrics={lyrics} height={height - 24} fontSize={15} />
-      )}
-      {lyrics.source && (
-        <div style={{ fontSize: 11, opacity: 0.45, padding: "6px 0 0" }}>Lyrics from {lyrics.source}</div>
+        <ScrollingPlainLyrics lyrics={lyrics} height={height} fontSize={15} />
       )}
     </>,
   );
