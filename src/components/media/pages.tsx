@@ -336,6 +336,7 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
           {/* one group needs no name of its own: the tab says Browse */}
           <SectionTitle>{groups.length > 1 ? g.title : "Browse"}</SectionTitle>
           <Focusable
+            className="mc-grid"
             style={{
               display: "grid",
               gridTemplateColumns:
@@ -564,6 +565,7 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
         {shelves}
         {mixed && <SectionTitle>Stations</SectionTitle>}
         <Focusable
+          className="mc-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))",

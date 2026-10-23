@@ -12,7 +12,7 @@ import random
 import re
 import time
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import aiohttp
 
@@ -253,7 +253,8 @@ class RadioService(MusicService):
 
     @staticmethod
     def _tag(t: dict[str, Any]) -> dict[str, Any]:
-        return models.collection(f"tag:{t['name']}", "list", t["name"].title(),
+        # some tags are stored encoded ("hip%20hop"): named as they read
+        return models.collection(f"tag:{t['name']}", "list", unquote(t["name"]).title(),
                                  models.count(t.get("stationcount") or 0, "station"))
 
     def _favourite_ids(self) -> set[str]:
@@ -391,7 +392,7 @@ class RadioService(MusicService):
             tag = quote(id[4:], safe="")
             stations = await self._stations(f"/json/stations/bytagexact/{tag}", order="clickcount", reverse=True,
                                             limit=100)
-            return models.page(tag.title(), models.count(len(stations), "station"), tracks=stations)
+            return models.page(unquote(id[4:]).title(), models.count(len(stations), "station"), tracks=stations)
         raise ServiceError(f"Unknown collection: {kind} {id}")
 
     async def search(self, query: str) -> dict[str, Any]:

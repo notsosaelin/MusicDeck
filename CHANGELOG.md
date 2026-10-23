@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.10.1
+
+- Radio genres named with spaces showed "%20" in their titles ("Hip%20Hop"); they read as they should.
+- Moving through grids in the media center (Browse's tiles, all albums or artists, genres, stations) glides
+  smoothly, as shelves do, scrolling only as far as shows the whole item, instead of Steam's juddering
+  scroll that could leave a row cut off.
+
 ## 0.10.0
 
 **Soulseek, much closer to a full client**

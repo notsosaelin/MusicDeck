@@ -227,7 +227,7 @@ export const CardGrid: FC<{ title: string; count: number; children: (shown: numb
         {title}
       </SectionTitle>
       {/* the padding is room for a focused card to grow */}
-      <Focusable style={{ display: "flex", flexWrap: "wrap", gap: 22, padding: "10px 0 0" }}>
+      <Focusable className="mc-grid" style={{ display: "flex", flexWrap: "wrap", gap: 22, padding: "10px 0 0" }}>
         {children(Math.min(shown, count))}
       </Focusable>
       {shown < count && <WhenNear key={shown} then={() => setShown(shown + GRID_STEP)} />}
@@ -605,6 +605,7 @@ export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) =
  */
 export const TileGrid: FC<{ children: ReactNode }> = ({ children }) => (
   <Focusable
+    className="mc-grid"
     style={{
       display: "grid",
       gridTemplateColumns: "repeat(auto-fill, minmax(clamp(150px, 18vw, 240px), 1fr))",
@@ -771,29 +772,54 @@ export function snapRows(container: HTMLElement | null): () => void {
     const el = focused();
     return container.contains(el) ? (el?.closest(".mc-row-block") as HTMLElement | null) : null;
   };
-  let glide: { scroller: HTMLElement; block: HTMLElement; from: number; start?: number; frame: number } | null = null;
+  let glide: {
+    scroller: HTMLElement;
+    block: HTMLElement;
+    nearest: boolean;
+    /** a grid item's end point, fixed when the glide starts (it depends on where the page was) */
+    to: number;
+    from: number;
+    start?: number;
+    frame: number;
+  } | null = null;
 
-  const target = (scroller: HTMLElement, block: HTMLElement) => {
-    const top = scroller.scrollTop + block.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-    return Math.max(0, Math.min(top - TAB_BAR - 8, scroller.scrollHeight - scroller.clientHeight));
+  /**
+   * Where the page scrolls to for a block: a row's top under the tabs; a grid's item (`nearest`) as
+   * little as shows it whole (up under the tabs, or down to the bottom edge), and not at all when it shows.
+   */
+  const target = (scroller: HTMLElement, block: HTMLElement, nearest = false) => {
+    const view = scroller.getBoundingClientRect();
+    const box = block.getBoundingClientRect();
+    const top = scroller.scrollTop + box.top - view.top;
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    if (!nearest) return Math.max(0, Math.min(top - TAB_BAR - 8, max));
+    const above = top - TAB_BAR - 16;
+    const below = top + box.height + 24 - scroller.clientHeight;
+    const to = above < scroller.scrollTop ? above : below > scroller.scrollTop ? below : scroller.scrollTop;
+    return Math.max(0, Math.min(to, max));
   };
   const step = (now: number) => {
     if (!glide) return;
     glide.start ??= now;
     const t = Math.min(1, (now - glide.start) / GLIDE_MS);
     const eased = 1 - Math.pow(1 - t, 3);
-    glide.scroller.scrollTop = glide.from + (target(glide.scroller, glide.block) - glide.from) * eased;
+    // a row's top is looked up each frame (rows can move as covers load); a grid item's end point is fixed
+    const to = glide.nearest ? glide.to : target(glide.scroller, glide.block);
+    glide.scroller.scrollTop = glide.from + (to - glide.from) * eased;
     if (t < 1) glide.frame = win.requestAnimationFrame(step);
     else glide = null;
   };
-  const glideTo = (block: HTMLElement) => {
+  const glideTo = (block: HTMLElement, nearest = false) => {
     const scroller = scrollParent(block);
     if (!scroller) return;
     ownScrolling(scroller);
     if (glide) win.cancelAnimationFrame(glide.frame);
     glide = null;
-    if (Math.abs(target(scroller, block) - scroller.scrollTop) < 1) return;
-    glide = { scroller, block, from: scroller.scrollTop, frame: win.requestAnimationFrame(step) };
+    // where it ends is worked out once, from where things are now: an item's target doesn't move as the
+    // page does, so the glide eases straight there
+    const to = target(scroller, block, nearest);
+    if (Math.abs(to - scroller.scrollTop) < 1) return;
+    glide = { scroller, block, nearest, to, from: scroller.scrollTop, frame: win.requestAnimationFrame(step) };
   };
   // Steam's position restore, off while the controller is in this page
   const ownScrolling = (scroller: HTMLElement & { mcOwned?: () => boolean }) => {
@@ -808,7 +834,17 @@ export function snapRows(container: HTMLElement | null): () => void {
   const onFocus = (e: FocusEvent) => {
     const el = e.target as HTMLElement & { mcAlong?: boolean };
     const block = el?.closest?.(".mc-row-block") as HTMLElement | null;
-    if (!block) return;
+    if (!block) {
+      // an item in a grid: this page scrolls to it, smoothly, not Steam (whose own scrolling judders)
+      const grid = el?.closest?.(".mc-grid");
+      if (!grid || !container.contains(grid)) return;
+      if (!el.mcAlong) {
+        el.mcAlong = true;
+        el.scrollIntoView = () => {};
+      }
+      glideTo(el, true);
+      return;
+    }
     if (!el.mcAlong) {
       // Steam calls this on what it focuses, after this event: along the row only
       el.mcAlong = true;
