@@ -28,7 +28,7 @@ import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../game
 import { hasFeature, player } from "../player";
 import { pluginState } from "../store";
 import { NameModal } from "./NameModal";
-import { albumManageItems, editTags } from "./TagEditor";
+import { albumManageItems, artistManageItems, editTags, saveTrackLyrics } from "./TagEditor";
 
 type Item = { instanceId: string; track: Track };
 
@@ -238,6 +238,9 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
       {hasFeature(instanceId, "tags") && (
         <MenuItem onSelected={() => editTags(instanceId, "track", track.id, track.title)}>Edit tags</MenuItem>
       )}
+      {hasFeature(instanceId, "tags") && (
+        <MenuItem onSelected={() => saveTrackLyrics(instanceId, track.id, track.title)}>Save lyrics to file</MenuItem>
+      )}
       {ctx.playlistId && (
         <MenuItem
           tone="destructive"
@@ -394,6 +397,10 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
       </Menu>,
       target,
     );
+    return;
+  }
+  if (c.kind === "artist" && hasFeature(instanceId, "artwork")) {
+    showContextMenu(<Menu label={c.title}>{artistManageItems(instanceId, c)}</Menu>, target);
     return;
   }
   if (c.kind === "playlist" || c.kind === "album") {

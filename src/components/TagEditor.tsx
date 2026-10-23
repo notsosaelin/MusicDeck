@@ -25,9 +25,12 @@ import {
   TagResult,
   albumArt,
   applyLookup,
+  artistArt,
+  findLyrics,
   getTags,
   lookupAlbum,
   lookupChanges,
+  saveLyrics,
   setTags,
   undoTags,
 } from "../api";
@@ -385,14 +388,19 @@ const PreviewModal: FC<{
   );
 };
 
-async function pickAlbumArt(instanceId: string, album: Collection) {
+/** A picture picked from the Deck's files, or null when the picker is closed. */
+async function pickImage(): Promise<string | null> {
   const home = pluginState.get()?.user_home || "/home";
-  let path: string;
   try {
-    path = (await openFilePicker(SELECT_FILE, home, true, true, undefined, IMAGE_EXTENSIONS)).realpath;
+    return (await openFilePicker(SELECT_FILE, home, true, true, undefined, IMAGE_EXTENSIONS)).realpath;
   } catch {
-    return; // picker cancelled
+    return null; // picker cancelled
   }
+}
+
+async function pickAlbumArt(instanceId: string, album: Collection) {
+  const path = await pickImage();
+  if (!path) return;
   const r = await albumArt(instanceId, album.id, "set", path);
   if (!r.ok) return notify("Couldn't set artwork", r.error);
   invalidateBrowserCache();
@@ -414,6 +422,63 @@ async function clearAlbumArt(instanceId: string, album: Collection) {
   notify(album.title, "Back to the files' own artwork");
 }
 
+/** Lyrics for every track of an album without them, kept beside each as an .lrc. */
+async function findAlbumLyrics(instanceId: string, album: Collection) {
+  notify(album.title, "Looking for lyrics…");
+  const r = await findLyrics(instanceId, album.id);
+  if (!r.ok) return notify(album.title, r.error);
+  const { found, total } = r.data;
+  notify(
+    album.title,
+    total === 0
+      ? "Every track has lyrics already"
+      : found === 0
+        ? "No lyrics found for its tracks"
+        : `Lyrics saved for ${found} of ${total} tracks`,
+  );
+}
+
+/** A track's lyrics, from the lyrics sites, kept beside it as an .lrc (synced when they are). */
+export async function saveTrackLyrics(instanceId: string, trackId: string, title: string) {
+  const r = await saveLyrics(instanceId, trackId);
+  if (!r.ok) return notify(title, r.error);
+  notify(title, r.data ? "Lyrics saved to a file beside the track" : "No lyrics found for it");
+}
+
+async function artistPicture(instanceId: string, artist: Collection, action: "set" | "find" | "clear") {
+  let path: string | undefined;
+  if (action === "set") {
+    path = (await pickImage()) ?? undefined;
+    if (!path) return;
+  }
+  if (action === "find") notify(artist.title, "Looking for their picture…");
+  const r = await artistArt(instanceId, artist.id, action, path);
+  if (!r.ok) return notify(action === "set" ? "Couldn't set the picture" : artist.title, r.error);
+  if (action === "find" && !r.data) return notify(artist.title, "No picture found for them");
+  invalidateBrowserCache();
+  notify(artist.title, action === "clear" ? "Picture removed" : action === "find" ? "Picture found" : "Picture set");
+}
+
+/** A local artist's menu items: their picture (an artist with one has an art id, "a:..."). */
+export function artistManageItems(instanceId: string, artist: Collection): ReactNode[] {
+  if (!hasFeature(instanceId, "artwork")) return [];
+  return [
+    <MenuItem key="pic-set" onSelected={() => artistPicture(instanceId, artist, "set")}>
+      Set picture
+    </MenuItem>,
+    <MenuItem key="pic-find" onSelected={() => artistPicture(instanceId, artist, "find")}>
+      Find picture online
+    </MenuItem>,
+    ...(artist.art?.startsWith("a:")
+      ? [
+          <MenuItem key="pic-clear" onSelected={() => artistPicture(instanceId, artist, "clear")}>
+            Remove picture
+          </MenuItem>,
+        ]
+      : []),
+  ];
+}
+
 /**
  * A local album's menu items for managing it: its tags, MusicBrainz, its picture. `info` (getTags) says
  * whether it has a picture of its own to take away.
@@ -430,6 +495,9 @@ export function albumManageItems(instanceId: string, album: Collection, info: Ta
         onSelected={() => showModal(<LookupModal instanceId={instanceId} album={album} files={info?.files ?? 0} />)}
       >
         Look up on MusicBrainz
+      </MenuItem>,
+      <MenuItem key="lyrics" onSelected={() => findAlbumLyrics(instanceId, album)}>
+        Find lyrics
       </MenuItem>,
     );
   }

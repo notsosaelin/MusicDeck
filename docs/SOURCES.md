@@ -71,7 +71,16 @@ source (`MusicService.remove`).
   folder covers and embedded art; art ids carry the picture's time (`t:<track>.<mtime>`) so a new one
   isn't taken from the browser's cache. Found covers come from the Cover Art Archive (500 px), only for
   a match whose title is the album's. "Find missing artwork" goes through every named album without a
-  picture in the background (`status.art`).
+  picture in the background (`status.art`), and every named artist without one.
+- **Artists' pictures** (`pictures.py`): Deezer's public catalogue API, no account or key (metadata only),
+  for the artist of exactly that name (case and punctuation aside), the best known of several; Deezer's
+  blank picture counts as none. Kept as `local-<id>-art/artist-<artist id>.<ext>`; art id `a:<id>.<mtime>`.
+- **Saving lyrics** (feature `tags`): what the lyrics sites have, as an `.lrc` beside the track (`[ar:]`,
+  `[ti:]`, `[al:]`, then timed lines when synced), written through a hidden copy; tracks with lyrics already
+  (a file, or in their tags) are skipped. For an album at once, or every track in the background
+  (`status.lyrics`), half a second apart.
+- **Browse tiles**: `center_tabs` adds what's in each section (counts) and a few covers or artists'
+  pictures for its tile, cached until the library or its pictures change.
 - **Art**: embedded pictures (extracted to `art-cache/`) or `cover.jpg`-style files next to the music.
 - **Lyrics**: `.lrc` next to the file, embedded lyric tags, then the lyrics sites (see below).
 - **Playlists**: `.m3u`/`.m3u8` files in the library (relative paths resolved against the playlist).

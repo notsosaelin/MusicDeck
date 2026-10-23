@@ -24,12 +24,15 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays.
 - **Library manager for your files:** edit a track's or a whole album's tags (**Y** → Edit tags; the last
   edit to each file can be undone), fill them in from a [MusicBrainz](https://musicbrainz.org) release you
-  pick after seeing exactly what would change, and give an album artwork: a picture of your own, its cover
-  from the Cover Art Archive, or every missing cover at once (Decky → MusicDeck → the source's menu →
-  Find missing artwork). Artwork is kept in MusicDeck; your music folders only change when you edit tags.
+  pick after seeing exactly what would change, and give albums and artists pictures: one of your own, an
+  album's cover from the Cover Art Archive, an artist's picture from Deezer's public catalogue (no account),
+  or every missing one at once (Decky → MusicDeck → the source's menu → Find missing artwork). Pictures are
+  kept in MusicDeck. Lyrics found online can be kept beside a track as an `.lrc` (synced when they are), for
+  an album at once, or for the whole library (Find missing lyrics): they then work offline and in other
+  players. Your music folders only change when you edit tags or save lyrics.
 - **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with the
   same five tabs for every source: Now Playing, Home, Browse, Search and Settings. Browse holds what each
-  source has besides its Home, as tiles (YouTube Music's New, Charts, Moods and Genres; radio's Genres,
+  source has besides its Home: your own music as large tiles with its covers and counts, then the ways in (YouTube Music's New, Charts, Moods and Genres; radio's Genres,
   Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists, Genres and Library;
   local files' Albums, Artists, Genres, Years, Composers and Folders; Qobuz's Discover; Spotify's Your top;
   Audiobookshelf's Authors and Series...). Settings has the equalizer; what it opens on, background, cover

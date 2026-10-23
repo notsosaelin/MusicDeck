@@ -506,6 +506,7 @@ class SpotifyService(MusicService):
     # --- media center ---
 
     TABS = (("home", "Home"), ("top", "Your top"), ("library", "Library"))
+    TAB_GROUP_OVERRIDES = {"top": "yours"}
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":

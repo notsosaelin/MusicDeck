@@ -137,7 +137,8 @@ export const hasCollectionMenu = (instanceId: string, c: Collection) =>
   isLocalPlaylist(c.id) ||
   canSave(instanceId, c) ||
   (!!runningGame.get() && canPlayWithGame(c)) ||
-  (c.kind === "album" && hasFeature(instanceId, "tags"));
+  (c.kind === "album" && hasFeature(instanceId, "tags")) ||
+  (c.kind === "artist" && hasFeature(instanceId, "artwork"));
 
 /**
  * Plays an album or playlist straight from its row (X). Uses the page if it's been opened already;

@@ -23,7 +23,8 @@ export interface Track {
   live?: boolean;
 }
 
-export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork";
+export type Feature =
+  "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork";
 
 export interface LyricLine {
   /** seconds; null for unsynced lyrics */
@@ -145,6 +146,12 @@ export interface TrackDetails {
 export interface CenterTabInfo {
   id: string;
   title: string;
+  /** where it sits on Browse: the user's own music, ways into the catalogue, folders on the Deck */
+  group?: "yours" | "explore" | "files";
+  /** what's in it ("128 albums") */
+  subtitle?: string;
+  /** art ids of a few of its covers or pictures, for its tile */
+  art?: string[];
 }
 
 export interface EqSettings {
@@ -314,20 +321,33 @@ export interface LookupChanges {
   matched: boolean;
 }
 export const getTags = callable<[id: string, kind: TagKind, itemId: string], Result<TagInfo>>("get_tags");
-export const setTags = callable<[id: string, kind: TagKind, itemId: string, changes: Record<string, string>], Result<TagResult>>(
-  "set_tags",
-);
+export const setTags = callable<
+  [id: string, kind: TagKind, itemId: string, changes: Record<string, string>],
+  Result<TagResult>
+>("set_tags");
 export const undoTags = callable<[id: string, kind: TagKind, itemId: string], Result<TagResult>>("undo_tags");
 export const lookupAlbum = callable<[id: string, albumId: string], Result<Release[]>>("lookup_album");
 export const lookupChanges = callable<[id: string, albumId: string, releaseId: string], Result<LookupChanges>>(
   "lookup_changes",
 );
-export const applyLookup = callable<[id: string, albumId: string, releaseId: string], Result<TagResult>>("apply_lookup");
+export const applyLookup = callable<[id: string, albumId: string, releaseId: string], Result<TagResult>>(
+  "apply_lookup",
+);
 export const albumArt = callable<
   [id: string, albumId: string, action: "set" | "find" | "clear", imagePath?: string],
   Result<boolean | null>
 >("album_art");
 export const findMissingArt = callable<[id: string], Result<null>>("find_missing_art");
+export const artistArt = callable<
+  [id: string, artistId: string, action: "set" | "find" | "clear", imagePath?: string],
+  Result<boolean | null>
+>("artist_art");
+/** A track's lyrics kept beside it as an .lrc: false when the lyrics sites have none. */
+export const saveLyrics = callable<[id: string, trackId: string], Result<boolean>>("save_lyrics");
+export const findLyrics = callable<[id: string, albumId: string], Result<{ found: number; total: number }>>(
+  "find_lyrics",
+);
+export const findMissingLyrics = callable<[id: string], Result<null>>("find_missing_lyrics");
 
 /** A new playlist on the source itself (feature "playlists"), holding these tracks. */
 export const createServicePlaylist = callable<[id: string, name: string, trackIds: string[]], Result<Collection>>(

@@ -755,6 +755,36 @@ class Plugin:
         return await self._managed(instance_id, "artwork", act)
 
     @_when_ready
+    async def artist_art(self, instance_id: str, artist_id: str, action: str, image_path: str = "") -> dict[str, Any]:
+        """An artist's picture: "set" (a file the user picked), "find" (Deezer's catalogue), "clear"."""
+        async def act(s: MusicService) -> Any:
+            if action == "set":
+                return await s.set_artist_art(artist_id, image_path)
+            if action == "find":
+                return await s.find_artist_art(artist_id)
+            if action == "clear":
+                return await s.clear_artist_art(artist_id)
+            raise ServiceError("Unknown artwork action")
+        return await self._managed(instance_id, "artwork", act)
+
+    @_when_ready
+    async def save_lyrics(self, instance_id: str, track_id: str) -> dict[str, Any]:
+        """A track's lyrics from the lyrics sites, kept beside it as an .lrc file."""
+        return await self._managed(instance_id, "tags", lambda s: s.save_lyrics(track_id))
+
+    @_when_ready
+    async def find_lyrics(self, instance_id: str, album_id: str) -> dict[str, Any]:
+        """Lyrics for every track of an album without them: {"found", "total"}."""
+        return await self._managed(instance_id, "tags", lambda s: s.find_lyrics(album_id))
+
+    @_when_ready
+    async def find_missing_lyrics(self, instance_id: str) -> dict[str, Any]:
+        """Lyrics for every track without, in the background (progress in status "lyrics")."""
+        async def start(s: MusicService) -> None:
+            s.find_missing_lyrics()
+        return await self._managed(instance_id, "tags", start)
+
+    @_when_ready
     async def find_missing_art(self, instance_id: str) -> dict[str, Any]:
         """Looks for every named album without a picture in the background (progress in status "art")."""
         async def start(s: MusicService) -> None:

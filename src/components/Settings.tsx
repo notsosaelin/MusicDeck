@@ -43,6 +43,7 @@ import {
   DownloadStatus,
   exportBackup,
   findMissingArt,
+  findMissingLyrics,
   Feature,
   importBackup,
   GameMusic,
@@ -120,7 +121,10 @@ const describeStatus = (s: ServiceInfo): string => {
     case "local": {
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;
       if (s.status.art?.running)
-        return s.status.art.total ? `Finding artwork… ${s.status.art.done} of ${s.status.art.total}` : "Finding artwork…";
+        return s.status.art.total
+          ? `Finding artwork… ${s.status.art.done} of ${s.status.art.total}`
+          : "Finding artwork…";
+      if (s.status.lyrics?.running) return `Finding lyrics… ${s.status.lyrics.done} of ${s.status.lyrics.total}`;
       if (s.status.error) return `Scan failed: ${s.status.error}`;
       const n = s.status.tracks ?? 0;
       return `${n} track${n === 1 ? "" : "s"}`;
@@ -241,6 +245,11 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
     if (!r.ok) return notify(service.name, r.error);
     await refreshState();
   };
+  const findLyrics = async () => {
+    const r = await findMissingLyrics(service.id);
+    if (!r.ok) return notify(service.name, r.error);
+    await refreshState();
+  };
   const remove = () =>
     showModal(
       <ConfirmModal
@@ -268,6 +277,11 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
         {service.features.includes("artwork") && (
           <MenuItem onSelected={findArt} disabled={!!service.status.art?.running || !!service.status.scanning}>
             Find missing artwork
+          </MenuItem>
+        )}
+        {service.features.includes("tags") && (
+          <MenuItem onSelected={findLyrics} disabled={!!service.status.lyrics?.running || !!service.status.scanning}>
+            Find missing lyrics
           </MenuItem>
         )}
         <MenuSeparator />
@@ -554,98 +568,98 @@ export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }
   const has = (feature: Feature) => state.services.some((s) => s.features.includes(feature));
   return (
     <>
-        <Section title="Playback">
-          <PanelSectionRow>
-            <DropdownItem
-              label="Volume levelling"
-              rgOptions={[
-                { data: "off", label: "Off" },
-                { data: "track", label: "Per track" },
-                { data: "album", label: "Per album" },
-              ]}
-              selectedOption={state.playback.levelling}
-              onChange={(o) => setPlayback({ levelling: o.data })}
-            />
-          </PanelSectionRow>
-          <PanelSectionRow>
-            <DropdownItem
-              label="Crossfade"
-              rgOptions={[0, 2, 4, 6, 8, 12].map((s) => ({ data: s, label: s ? `${s} s` : "Off" }))}
-              selectedOption={state.playback.crossfade ?? 0}
-              onChange={(o) => setPlayback({ crossfade: o.data })}
-            />
-          </PanelSectionRow>
+      <Section title="Playback">
+        <PanelSectionRow>
+          <DropdownItem
+            label="Volume levelling"
+            rgOptions={[
+              { data: "off", label: "Off" },
+              { data: "track", label: "Per track" },
+              { data: "album", label: "Per album" },
+            ]}
+            selectedOption={state.playback.levelling}
+            onChange={(o) => setPlayback({ levelling: o.data })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <DropdownItem
+            label="Crossfade"
+            rgOptions={[0, 2, 4, 6, 8, 12].map((s) => ({ data: s, label: s ? `${s} s` : "Off" }))}
+            selectedOption={state.playback.crossfade ?? 0}
+            onChange={(o) => setPlayback({ crossfade: o.data })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Autoplay"
+            description="Similar songs when the queue ends"
+            checked={state.playback.autoplay !== false}
+            onChange={(autoplay) => setPlayback({ autoplay })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Resume where you left off"
+            checked={state.playback.resume}
+            onChange={(resume) => setPlayback({ resume })}
+          />
+        </PanelSectionRow>
+        {has("queue_sync") && (
           <PanelSectionRow>
             <ToggleField
-              label="Autoplay"
-              description="Similar songs when the queue ends"
-              checked={state.playback.autoplay !== false}
-              onChange={(autoplay) => setPlayback({ autoplay })}
+              label="Sync queue"
+              description="Pick up on another device"
+              checked={state.playback.queue_sync}
+              onChange={(queue_sync) => setPlayback({ queue_sync })}
             />
           </PanelSectionRow>
+        )}
+      </Section>
+
+      <Section title="Scrobbling">
+        {has("scrobble") && (
           <PanelSectionRow>
             <ToggleField
-              label="Resume where you left off"
-              checked={state.playback.resume}
-              onChange={(resume) => setPlayback({ resume })}
+              label="Report plays"
+              description="Play counts on the source"
+              checked={state.playback.scrobble}
+              onChange={(scrobble) => setPlayback({ scrobble })}
             />
           </PanelSectionRow>
-          {has("queue_sync") && (
-            <PanelSectionRow>
-              <ToggleField
-                label="Sync queue"
-                description="Pick up on another device"
-                checked={state.playback.queue_sync}
-                onChange={(queue_sync) => setPlayback({ queue_sync })}
-              />
-            </PanelSectionRow>
-          )}
-        </Section>
+        )}
+        <ListenBrainzRow user={state.listenbrainz?.user ?? ""} pending={state.listenbrainz?.pending ?? 0} />
+        {state.lastfm && <LastfmRow lastfm={state.lastfm} />}
+      </Section>
 
-        <Section title="Scrobbling">
-          {has("scrobble") && (
-            <PanelSectionRow>
-              <ToggleField
-                label="Report plays"
-                description="Play counts on the source"
-                checked={state.playback.scrobble}
-                onChange={(scrobble) => setPlayback({ scrobble })}
-              />
-            </PanelSectionRow>
-          )}
-          <ListenBrainzRow user={state.listenbrainz?.user ?? ""} pending={state.listenbrainz?.pending ?? 0} />
-          {state.lastfm && <LastfmRow lastfm={state.lastfm} />}
-        </Section>
-
-        <Section title="Games">
-          <PanelSectionRow>
-            <DropdownItem
-              // under its label, full width: its value (a source's name, a choice) is never cut short
-              layout="below"
-              label="In games"
-              description={
-                state.playback.game_pause
-                  ? "Resumes when the game closes"
-                  : (state.playback.game_duck ?? 1) < 1
-                    ? "While the game is in front"
-                    : undefined
-              }
-              // lowering keeps a share of the volume: -6, -10 and -16 dB, about a little, half and a lot as heard
-              rgOptions={[
-                { data: 1, label: "Keep playing" },
-                { data: 0.5, label: "Lower a little" },
-                { data: 0.3, label: "Lower by half" },
-                { data: 0.15, label: "Lower a lot" },
-                { data: "pause", label: "Pause" },
-              ]}
-              selectedOption={state.playback.game_pause ? "pause" : (state.playback.game_duck ?? 1)}
-              onChange={(o) =>
-                setPlayback(o.data === "pause" ? { game_pause: true } : { game_pause: false, game_duck: o.data })
-              }
-            />
-          </PanelSectionRow>
-          <GameMusicRows state={state} />
-        </Section>
+      <Section title="Games">
+        <PanelSectionRow>
+          <DropdownItem
+            // under its label, full width: its value (a source's name, a choice) is never cut short
+            layout="below"
+            label="In games"
+            description={
+              state.playback.game_pause
+                ? "Resumes when the game closes"
+                : (state.playback.game_duck ?? 1) < 1
+                  ? "While the game is in front"
+                  : undefined
+            }
+            // lowering keeps a share of the volume: -6, -10 and -16 dB, about a little, half and a lot as heard
+            rgOptions={[
+              { data: 1, label: "Keep playing" },
+              { data: 0.5, label: "Lower a little" },
+              { data: 0.3, label: "Lower by half" },
+              { data: 0.15, label: "Lower a lot" },
+              { data: "pause", label: "Pause" },
+            ]}
+            selectedOption={state.playback.game_pause ? "pause" : (state.playback.game_duck ?? 1)}
+            onChange={(o) =>
+              setPlayback(o.data === "pause" ? { game_pause: true } : { game_pause: false, game_duck: o.data })
+            }
+          />
+        </PanelSectionRow>
+        <GameMusicRows state={state} />
+      </Section>
     </>
   );
 };
@@ -655,18 +669,27 @@ export const Settings: FC = () => {
 
   useEffect(() => {
     refreshState();
-    // keep scan and artwork progress fresh while this page is open, and say when artwork is done
-    const finding = new Set<string>();
+    // keep scan, artwork and lyrics progress fresh while this page is open, and say when a job is done
+    const jobs: Record<string, (found: number, total: number) => string> = {
+      art: (found, total) =>
+        total ? `Found ${found} of ${total} missing pictures` : "No albums or artists were missing pictures",
+      lyrics: (found) => (found ? `Lyrics saved for ${found} tracks` : "No new lyrics found"),
+    };
+    const running = new Set<string>();
     const timer = window.setInterval(async () => {
-      const busy = pluginState.get()?.services.some((s) => s.status.scanning || s.status.art?.running);
-      if (!busy && !finding.size) return;
+      const busy = pluginState
+        .get()
+        ?.services.some((s) => s.status.scanning || Object.keys(jobs).some((j) => s.status[j]?.running));
+      if (!busy && !running.size) return;
       const state = await refreshState();
       for (const s of state.services) {
-        if (s.status.art?.running) finding.add(s.id);
-        else if (finding.delete(s.id)) {
-          invalidateBrowserCache();
-          const { found = 0, total = 0 } = s.status.art ?? {};
-          notify(s.name, total ? `Found ${found} of ${total} missing covers` : "No albums were missing artwork");
+        for (const [job, done] of Object.entries(jobs)) {
+          const key = `${s.id}:${job}`;
+          if (s.status[job]?.running) running.add(key);
+          else if (running.delete(key)) {
+            invalidateBrowserCache();
+            notify(s.name, done(s.status[job]?.found ?? 0, s.status[job]?.total ?? 0));
+          }
         }
       }
     }, 1500);

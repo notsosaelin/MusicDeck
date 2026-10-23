@@ -47,7 +47,7 @@ import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../g
 import { View, playFrom, resultCache } from "../../nav";
 import { notify } from "../../notify";
 import { hasFeature, player } from "../../player";
-import { Store, pluginState, useStore } from "../../store";
+import { Store, mediaUrl, pluginState, useStore } from "../../store";
 import {
   KIND_TITLES,
   callAction,
@@ -196,44 +196,165 @@ const SECTION_ICONS: Record<string, ReactNode> = {
   yours: <FaPodcast />,
 };
 
+/** Browse's groups, in the order they show: the user's own music first. */
+const BROWSE_GROUPS: { id: NonNullable<CenterTabInfo["group"]>; title: string }[] = [
+  { id: "yours", title: "Your music" },
+  { id: "explore", title: "Explore" },
+  { id: "files", title: "On this Deck" },
+];
+
+const TILE_BACK = "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))";
+
+/** Up to four of a section's covers, as one picture: 2 by 2, or one filling the tile. */
+const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) => {
+  const [failed, setFailed] = useState<string[]>([]);
+  const shown = art.filter((a) => !failed.includes(a));
+  const four = shown.length >= 4 ? shown.slice(0, 4) : shown.slice(0, 1);
+  if (!four.length) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "grid",
+        gridTemplateColumns: four.length === 4 ? "1fr 1fr" : "1fr",
+        gridTemplateRows: four.length === 4 ? "1fr 1fr" : "1fr",
+      }}
+    >
+      {four.map((a) => (
+        <img
+          key={a}
+          src={mediaUrl("art", instanceId, a)}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed((f) => [...f, a])}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      ))}
+    </div>
+  );
+};
+
+/** One of "Your music": large, its own covers behind its name and how many. */
+const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> = ({ instanceId, t, open }) => (
+  <Focusable
+    className="mc-tile"
+    data-mc={sectionKey(t.id)}
+    noFocusRing
+    onActivate={open}
+    onClick={open}
+    onOKActionDescription="Open"
+    style={{ position: "relative", overflow: "hidden", aspectRatio: "16 / 10", background: TILE_BACK }}
+  >
+    <Mosaic instanceId={instanceId} art={t.art ?? []} />
+    {/* dark at the foot, so the name reads over any cover */}
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background:
+          "linear-gradient(to top, rgba(10, 13, 18, 0.92) 0%, rgba(10, 13, 18, 0.35) 55%, rgba(10, 13, 18, 0.1) 100%)",
+      }}
+    />
+    {!t.art?.length && (
+      <div style={{ position: "absolute", top: 16, left: 18, fontSize: 26, opacity: 0.6 }}>
+        {SECTION_ICONS[t.id] ?? <FaMusic />}
+      </div>
+    )}
+    <div style={{ position: "absolute", left: 18, right: 18, bottom: 14 }}>
+      <div style={{ fontSize: 20, fontWeight: 700, color: "#ffffff" }}>{t.title}</div>
+      {t.subtitle && <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>{t.subtitle}</div>}
+    </div>
+  </Focusable>
+);
+
+/** One of Explore (or a folder): compact, its icon beside its name and how many. */
+const WayInTile: FC<{ t: CenterTabInfo; open: () => void }> = ({ t, open }) => (
+  <Focusable
+    className="mc-tile"
+    data-mc={sectionKey(t.id)}
+    noFocusRing
+    onActivate={open}
+    onClick={open}
+    onOKActionDescription="Open"
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 14,
+      padding: "14px 16px",
+      minHeight: 72,
+      boxSizing: "border-box",
+      background: TILE_BACK,
+    }}
+  >
+    <div
+      style={{
+        flexShrink: 0,
+        width: 44,
+        height: 44,
+        borderRadius: "50%",
+        background: "rgba(255, 255, 255, 0.1)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
+        opacity: 0.85,
+      }}
+    >
+      {SECTION_ICONS[t.id] ?? <FaMusic />}
+    </div>
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "#ffffff" }}>{t.title}</div>
+      {t.subtitle && <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>{t.subtitle}</div>}
+    </div>
+  </Focusable>
+);
+
 /**
- * The media center's Browse: a tile for each of the source's own sections (albums, artists, genres;
- * charts, moods; countries...), each opening as a page in Browse's history, so the tab bar keeps to
- * Now Playing, Home, Browse, Search and Settings.
+ * The media center's Browse: the source's own sections past its Home, so the tab bar keeps to Now
+ * Playing, Home, Browse, Search and Settings. Grouped as the source says (MusicService.center_tabs):
+ * the user's own music first, large, with its covers; then the ways into the catalogue (genres, charts,
+ * countries...) and folders, compact. Each opens as a page in Browse's history.
  */
-export const BrowseIndex: FC<{ sections: CenterTabInfo[]; stack: CenterStack }> = ({ sections, stack }) => (
-  <>
-    <SectionTitle>Browse</SectionTitle>
-    <TileGrid>
-      {sections.map((t) => {
-        const open = () => pushCenter(stack, { type: "section", tab: t.id, title: t.title });
-        return (
+export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; stack: CenterStack }> = ({
+  instanceId,
+  sections,
+  stack,
+}) => {
+  const groups = BROWSE_GROUPS.map((g) => ({
+    ...g,
+    tabs: sections.filter((t) => (t.group ?? "explore") === g.id),
+  })).filter((g) => g.tabs.length);
+  const open = (t: CenterTabInfo) => () => pushCenter(stack, { type: "section", tab: t.id, title: t.title });
+  return (
+    <>
+      {groups.map((g) => (
+        <div key={g.id} style={{ marginBottom: 32 }}>
+          {/* one group needs no name of its own: the tab says Browse */}
+          <SectionTitle>{groups.length > 1 ? g.title : "Browse"}</SectionTitle>
           <Focusable
-            key={t.id}
-            className="mc-tile"
-            data-mc={sectionKey(t.id)}
-            noFocusRing
-            onActivate={open}
-            onClick={open}
-            onOKActionDescription="Open"
             style={{
-              minHeight: 110,
-              padding: "16px 18px",
-              boxSizing: "border-box",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-              background: "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))",
+              display: "grid",
+              gridTemplateColumns:
+                g.id === "yours"
+                  ? "repeat(auto-fill, minmax(clamp(220px, 24vw, 340px), 1fr))"
+                  : "repeat(auto-fill, minmax(clamp(200px, 20vw, 280px), 1fr))",
+              gap: 16,
             }}
           >
-            <div style={{ fontSize: 24, opacity: 0.75 }}>{SECTION_ICONS[t.id] ?? <FaMusic />}</div>
-            <div style={{ fontSize: 17, fontWeight: 600, color: "#ffffff" }}>{t.title}</div>
+            {g.tabs.map((t) =>
+              g.id === "yours" ? (
+                <LibraryTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
+              ) : (
+                <WayInTile key={t.id} t={t} open={open(t)} />
+              ),
+            )}
           </Focusable>
-        );
-      })}
-    </TileGrid>
-  </>
-);
+        </div>
+      ))}
+    </>
+  );
+};
 
 export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }> = ({ instanceId, tab, stack }) => {
   useStore(runningGame); // cards get a menu (play with the game) while one runs

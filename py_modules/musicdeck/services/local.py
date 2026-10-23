@@ -25,7 +25,7 @@ import shutil
 
 import aiohttp
 
-from .. import lyrics, models, tagging
+from .. import lyrics, models, pictures, tagging
 from ..background import spawn
 from ..musicbrainz import MusicBrainz
 from ..net import tls
@@ -72,6 +72,37 @@ SHELF = 20  # tracks or albums in a Home row
 LIST_MAX = 100  # tracks in a played or rated list
 ART_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_ART_BYTES = 15 * 1024 * 1024
+ARTIST = "artist-"  # an artist's picture's key among the albums' (album keys are hex: no clash)
+UNKNOWN = "Unknown artist"
+LYRICS_PACE = 0.5  # seconds between lyrics look-ups for many tracks, to be gentle with LRCLIB
+
+
+def _lrc(found: dict[str, Any], t: dict[str, Any]) -> str:
+    """Lyrics as an .lrc file: timed lines when they're synced, with the song's names at the top."""
+    head = [f"[ar:{t['artist'] or t['albumartist']}]", f"[ti:{t['title']}]", f"[al:{t['album']}]"]
+    lines = []
+    for line in found["lines"]:
+        if found.get("synced") and line.get("t") is not None:
+            minutes, seconds = divmod(float(line["t"]), 60)
+            lines.append(f"[{int(minutes):02d}:{seconds:05.2f}]{line['text']}")
+        else:
+            lines.append(line["text"])
+    return "\n".join([h for h in head if not h.endswith(":]")] + lines) + "\n"
+
+
+def _write_text(path: str, text: str) -> None:
+    """Writes beside the music through a hidden copy, so a crash never leaves half a file."""
+    directory, name = os.path.split(path)
+    temp = os.path.join(directory, f".{name}{tagging.TEMP_SUFFIX}")
+    try:
+        with open(temp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(temp, path)
+    except PermissionError:
+        raise ServiceError("MusicDeck isn't allowed to write in this folder")
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
 
 
 def _first(tags: Any, key: str) -> str:
@@ -367,6 +398,10 @@ class LocalService(MusicService):
         self.http: Optional[aiohttp.ClientSession] = None
         self.art_task: Optional[asyncio.Task[None]] = None
         self.art_progress = {"running": False, "done": 0, "total": 0, "found": 0}
+        self.lyrics_task: Optional[asyncio.Task[None]] = None
+        self.lyrics_progress = {"running": False, "done": 0, "total": 0, "found": 0}
+        # Browse's tiles (counts, covers), made again when the library or its pictures change
+        self._browse_cache: Optional[list[dict[str, Any]]] = None
         self.scan_task: Optional[asyncio.Task[None]] = None
         self.scan_progress = {"scanning": False, "found": 0, "last_scan": 0.0, "error": ""}
 
@@ -401,7 +436,7 @@ class LocalService(MusicService):
         self.rescan()
 
     async def stop(self) -> None:
-        for task in (self.scan_task, self.art_task):
+        for task in (self.scan_task, self.art_task, self.lyrics_task):
             if task:
                 task.cancel()
         if self.http:
@@ -424,7 +459,8 @@ class LocalService(MusicService):
         return f"{models.count(len(self.tracks), 'track')} indexed"
 
     def status(self) -> dict[str, Any]:
-        return {**self.scan_progress, "tracks": len(self.tracks), "art": dict(self.art_progress)}
+        return {**self.scan_progress, "tracks": len(self.tracks), "art": dict(self.art_progress),
+                "lyrics": dict(self.lyrics_progress)}
 
     # --- scanning ---
 
@@ -488,7 +524,7 @@ class LocalService(MusicService):
                                           "tracks": entries}
         self.tracks = tracks
         self.playlists = playlists
-        self._albums_cache = None
+        self._changed()
         self.folder_covers = {}
         self._save_index()
 
@@ -522,7 +558,7 @@ class LocalService(MusicService):
             return
         self.tracks = data.get("tracks", {})
         self.playlists = data.get("playlists", {})
-        self._albums_cache = None
+        self._changed()
         self.scan_progress["last_scan"] = data.get("scanned_at", 0.0)
 
     def _save_index(self) -> None:
@@ -576,16 +612,36 @@ class LocalService(MusicService):
         self._albums_cache = albums
         return albums
 
-    def _art_id(self, tid: str, t: dict[str, Any]) -> str:
-        """t:<track id>, with a version when its album has a picture of its own (a new one is a new id,
-        so the browser doesn't show the old one from its cache)."""
-        own = self.album_art.get(self._album_key(t))
-        if not own:
-            return f"t:{tid}"
+    def _changed(self) -> None:
+        """The tracks changed: albums and Browse's tiles are made again when next needed."""
+        self._albums_cache = None
+        self._browse_cache = None
+
+    def _stamp(self, key: str) -> str:
+        """".<time>" of an own picture: a new one is a new art id, so the browser doesn't show the old one
+        from its cache."""
+        own = self.album_art.get(key)
         try:
-            return f"t:{tid}.{int(os.path.getmtime(os.path.join(self.art_dir, own)))}"
+            return f".{int(os.path.getmtime(os.path.join(self.art_dir, own)))}" if own else ""
         except OSError:
-            return f"t:{tid}"
+            return ""
+
+    def _art_id(self, tid: str, t: dict[str, Any]) -> str:
+        """t:<track id>, with its album's own picture's version when it has one."""
+        return f"t:{tid}{self._stamp(self._album_key(t))}"
+
+    def _artist_art_id(self, artist_id: str) -> Optional[str]:
+        """a:<artist id> when the artist has a picture (set or found), else None."""
+        return f"a:{artist_id}{self._stamp(ARTIST + artist_id)}" if ARTIST + artist_id in self.album_art else None
+
+    def _artist_index(self) -> dict[str, tuple[str, int]]:
+        """{artist id: (name, albums)}, by album artist."""
+        artists: dict[str, tuple[str, int]] = {}
+        for items in self._albums().values():
+            name = self._album_owner(items)
+            key = _hash(name.lower())
+            artists[key] = (name, artists.get(key, (name, 0))[1] + 1)
+        return artists
 
     def _track(self, tid: str, t: dict[str, Any]) -> dict[str, Any]:
         return models.track(tid, t["title"], t["artist"] or t["albumartist"], t["album"], t["duration"],
@@ -646,10 +702,37 @@ class LocalService(MusicService):
             ("years", "Years"), ("composers", "Composers"), ("folders", "Folders"))
     NOW_PLAYING = "library"
 
-    def center_tabs(self) -> list[dict[str, str]]:
-        # a tab only for what the files are tagged with: no Composers for a library without any
-        return [t for t in super().center_tabs()
-                if t["id"] != "composers" or any(t2["composer"] for t2 in self.tracks.values())]
+    def center_tabs(self) -> list[dict[str, Any]]:
+        """With what's in each on Browse: how many, and a few covers (albums) or pictures (artists). A
+        section only for what the files are tagged with: no Composers for a library without any."""
+        if self._browse_cache is None:
+            self._browse_cache = self._browse_tiles()
+        return self._browse_cache
+
+    def _browse_tiles(self) -> list[dict[str, Any]]:
+        albums = self._albums()
+        artists = self._artist_index()
+        composers = {t["composer"].lower() for t in self.tracks.values() if t["composer"]}
+        genres = {g.lower() for t in self.tracks.values() for g in t.get("genres") or ([t["genre"]] if t["genre"] else [])}
+        decades = {_number(v[0][1]["year"]) // 10 for v in albums.values() if _number(v[0][1]["year"])}
+        # covers: albums with a picture of their own first, then the latest added
+        recent = sorted(albums.items(), key=lambda kv: (kv[0] not in self.album_art,
+                                                        -max(t.get("added", t["mtime"]) for _, t in kv[1])))
+        info = {
+            "albums": (models.count(len(albums), "album"), [self._art_id(*v[0]) for _, v in recent[:4]]),
+            "artists": (models.count(len(artists), "artist"),
+                        [a for a in (self._artist_art_id(k) for k in artists) if a][:4]),
+            "genres": (models.count(len(genres), "genre"), []),
+            "years": (models.count(len(decades), "decade"), []),
+            "composers": (models.count(len(composers), "composer"), []),
+        }
+        tabs = []
+        for tab in super().center_tabs():
+            if tab["id"] == "composers" and not composers:
+                continue
+            subtitle, art = info.get(tab["id"], ("", []))
+            tabs.append({**tab, **({"subtitle": subtitle} if subtitle else {}), **({"art": art} if art else {})})
+        return tabs
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
@@ -697,7 +780,7 @@ class LocalService(MusicService):
                 raise ServiceError("Artist not found")
             albums.sort(key=lambda kv: (kv[1][0][1]["year"], kv[1][0][1]["album"].lower()))
             name = self._album_owner(albums[0][1]) if albums else elsewhere[0][1]["artist"]
-            return models.page(name, models.count(len(albums), "album"),
+            return models.page(name, models.count(len(albums), "album"), self._artist_art_id(id),
                                collections=self._album_collections(albums),
                                tracks=[self._track(tid, t) for _, v in albums for tid, t in v],
                                extra=[{"title": "Appears on", "tracks": [self._track(tid, t) for tid, t in elsewhere]}])
@@ -724,14 +807,9 @@ class LocalService(MusicService):
             albums = sorted(self._albums().items(), key=lambda kv: (kv[1][0][1]["album"] or "~").lower())
             return models.page("Albums", collections=self._album_collections(albums))
         if id == "artists":
-            artists: dict[str, tuple[str, int]] = {}
-            for items in self._albums().values():
-                name = self._album_owner(items)
-                key = _hash(name.lower())
-                artists[key] = (name, artists.get(key, (name, 0))[1] + 1)
             return models.page("Artists", collections=[
-                models.collection(k, "artist", name, models.count(n, "album"))
-                for k, (name, n) in sorted(artists.items(), key=lambda kv: kv[1][0].lower())])
+                models.collection(k, "artist", name, models.count(n, "album"), art=self._artist_art_id(k))
+                for k, (name, n) in sorted(self._artist_index().items(), key=lambda kv: kv[1][0].lower())])
         if id == "genres":
             counts: dict[str, list[Any]] = {}
             for t in self.tracks.values():
@@ -956,7 +1034,7 @@ class LocalService(MusicService):
                     continue
                 await asyncio.to_thread(self._reread, tid)
                 changed += 1
-            self._albums_cache = None
+            self._changed()
             new_albums = {self._album_key(self.tracks[tid]) for tid, _ in edits if tid in self.tracks}
             # an album renamed as a whole keeps its picture
             if len(old_albums) == 1 and len(new_albums) == 1 and old_albums != new_albums:
@@ -985,11 +1063,17 @@ class LocalService(MusicService):
 
     # --- managing the library: MusicBrainz ---
 
-    def _musicbrainz(self) -> MusicBrainz:
-        if self.mb is None:
+    def _http(self) -> aiohttp.ClientSession:
+        """One connection pool for what the library asks the internet (MusicBrainz, pictures, lyrics),
+        made the first time it's needed."""
+        if self.http is None:
             self.http = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls()),
                                               timeout=aiohttp.ClientTimeout(total=20))
-            self.mb = MusicBrainz(self.http)
+        return self.http
+
+    def _musicbrainz(self) -> MusicBrainz:
+        if self.mb is None:
+            self.mb = MusicBrainz(self._http())
         return self.mb
 
     async def lookup(self, album_id: str) -> list[dict[str, Any]]:
@@ -1075,9 +1159,11 @@ class LocalService(MusicService):
             f.write(data)
         os.replace(tmp, os.path.join(self.art_dir, name))
         self.album_art[album_id] = name
+        self._browse_cache = None
 
     def _remove_art(self, album_id: str) -> None:
         name = self.album_art.pop(album_id, None)
+        self._browse_cache = None
         if name:
             try:
                 os.remove(os.path.join(self.art_dir, name))
@@ -1096,19 +1182,23 @@ class LocalService(MusicService):
         del self.album_art[old]
         self.album_art[new] = target
 
-    async def set_album_art(self, album_id: str, image_path: str) -> None:
-        """A picture the user picked becomes the album's own (a copy, so the original can move)."""
-        self._target("album", album_id)
+    @staticmethod
+    async def _read_image(image_path: str) -> tuple[bytes, str]:
+        """A picture the user picked: (bytes, extension). A copy is kept, so the original can move."""
         ext = os.path.splitext(image_path)[1].lower()
         if ext not in ART_TYPES:
             raise ServiceError("Pick a JPG, PNG, WebP or GIF image")
         try:
             if os.path.getsize(image_path) > MAX_ART_BYTES:
                 raise ServiceError("That image is too large (15 MB max)")
-            data = await asyncio.to_thread(lambda: open(image_path, "rb").read())
+            return await asyncio.to_thread(lambda: open(image_path, "rb").read()), ext
         except OSError as e:
             raise ServiceError(f"Couldn't read the image: {e.strerror or e}")
-        self._save_art(album_id, data, ext)
+
+    async def set_album_art(self, album_id: str, image_path: str) -> None:
+        """A picture the user picked becomes the album's own."""
+        self._target("album", album_id)
+        self._save_art(album_id, *await self._read_image(image_path))
 
     async def clear_album_art(self, album_id: str) -> None:
         """Back to the files' own picture (or none)."""
@@ -1127,8 +1217,39 @@ class LocalService(MusicService):
         self._save_art(album_id, *cover)
         return True
 
+    # --- managing the library: artists' pictures ---
+
+    def _artist_name(self, artist_id: str) -> str:
+        found = self._artist_index().get(artist_id)
+        if found:
+            return found[0]
+        # an artist with songs on other people's albums only
+        name = next((t["artist"] for t in self.tracks.values() if _hash((t["artist"] or "").lower()) == artist_id), None)
+        if not name:
+            raise ServiceError("That artist is no longer in the library")
+        return name
+
+    async def set_artist_art(self, artist_id: str, image_path: str) -> None:
+        self._artist_name(artist_id)
+        self._save_art(ARTIST + artist_id, *await self._read_image(image_path))
+
+    async def clear_artist_art(self, artist_id: str) -> None:
+        self._remove_art(ARTIST + artist_id)
+
+    async def find_artist_art(self, artist_id: str) -> bool:
+        """The artist's picture from Deezer's catalogue, for the artist of exactly this name."""
+        name = self._artist_name(artist_id)
+        if name in (VARIOUS, UNKNOWN):
+            raise ServiceError("Name the album artist first (Edit tags) to look for their picture")
+        picture = await pictures.artist_picture(self._http(), name)
+        if not picture:
+            return False
+        self._save_art(ARTIST + artist_id, *picture)
+        return True
+
     def find_missing_art(self) -> None:
-        """Looks for a cover for every named album without a picture, in the background (status "art")."""
+        """Looks for a cover for every named album, and a picture for every named artist, without one, in
+        the background (status "art")."""
         if self.art_task and not self.art_task.done():
             return
         self.art_progress.update(running=True, done=0, total=0, found=0)
@@ -1137,7 +1258,9 @@ class LocalService(MusicService):
     async def _find_missing_art(self) -> None:
         try:
             missing = [k for k, v in list(self._albums().items()) if v[0][1]["album"] and not await self._has_art(k)]
-            self.art_progress["total"] = len(missing)
+            artists = [k for k, (name, _) in self._artist_index().items()
+                       if name not in (VARIOUS, UNKNOWN) and ARTIST + k not in self.album_art]
+            self.art_progress["total"] = len(missing) + len(artists)
             for key in missing:
                 if key in self._albums():
                     try:
@@ -1146,8 +1269,81 @@ class LocalService(MusicService):
                     except ServiceError:
                         pass  # one album MusicBrainz can't answer for doesn't stop the rest
                 self.art_progress["done"] += 1
+            for key in artists:
+                try:
+                    if await self.find_artist_art(key):
+                        self.art_progress["found"] += 1
+                except ServiceError:
+                    pass
+                self.art_progress["done"] += 1
         finally:
             self.art_progress["running"] = False
+
+    # --- managing the library: lyrics ---
+
+    @staticmethod
+    def _sidecar(t: dict[str, Any]) -> str:
+        return os.path.splitext(t["path"])[0] + ".lrc"
+
+    async def _save_lyrics(self, tid: str) -> Optional[bool]:
+        """Looks a track's lyrics up and keeps them as an .lrc beside it: True when saved, False when the
+        sites have none, None when it has lyrics already (a file, or in its tags)."""
+        t = self.tracks[tid]
+        if await asyncio.to_thread(read_lyrics, t["path"]):
+            return None
+        found = await lyrics.lookup(self._http(), self._track(tid, t))
+        if not found:
+            return False
+        await asyncio.to_thread(_write_text, self._sidecar(t), _lrc(found, t))
+        return True
+
+    async def save_lyrics(self, track_id: str) -> bool:
+        """The lyrics the lyrics sites have for a track, kept beside it as an .lrc (synced when they
+        are): they then work offline, and in other players."""
+        if track_id not in self.tracks:
+            raise ServiceError("That's no longer in the library")
+        saved = await self._save_lyrics(track_id)
+        if saved is None:
+            raise ServiceError("This track has lyrics already")
+        return saved
+
+    async def find_lyrics(self, album_id: str) -> dict[str, int]:
+        """Lyrics for every track of an album that has none: {"found", "total"} (the tracks without)."""
+        found = total = 0
+        for tid, _ in self._target("album", album_id):
+            try:
+                saved = await self._save_lyrics(tid)
+            except ServiceError:
+                saved = False
+            if saved is None:
+                continue
+            total += 1
+            found += saved
+            await asyncio.sleep(LYRICS_PACE)
+        return {"found": found, "total": total}
+
+    def find_missing_lyrics(self) -> None:
+        """Lyrics for every track without, in the background (status "lyrics")."""
+        if self.lyrics_task and not self.lyrics_task.done():
+            return
+        self.lyrics_progress.update(running=True, done=0, total=len(self.tracks), found=0)
+        self.lyrics_task = spawn(self._find_missing_lyrics(), "finding missing lyrics")
+
+    async def _find_missing_lyrics(self) -> None:
+        try:
+            for tid in list(self.tracks):
+                if tid in self.tracks:
+                    try:
+                        saved = await self._save_lyrics(tid)
+                    except ServiceError:
+                        saved = False  # one the sites can't answer for doesn't stop the rest
+                    if saved:
+                        self.lyrics_progress["found"] += 1
+                    if saved is not None:
+                        await asyncio.sleep(LYRICS_PACE)
+                self.lyrics_progress["done"] += 1
+        finally:
+            self.lyrics_progress["running"] = False
 
     # --- media ---
 
@@ -1159,6 +1355,11 @@ class LocalService(MusicService):
 
     async def art(self, art_id: str) -> StreamSource:
         kind, _, tid = art_id.partition(":")
+        if kind == "a":  # an artist's picture
+            own = self.album_art.get(ARTIST + tid.partition(".")[0])
+            if not own or not os.path.isfile(os.path.join(self.art_dir, own)):
+                raise ServiceError("Art not found")
+            return StreamSource(path=os.path.join(self.art_dir, own))
         t = self.tracks.get(tid.partition(".")[0]) if kind == "t" else None
         if not t:
             raise ServiceError("Art not found")

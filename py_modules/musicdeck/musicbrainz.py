@@ -13,12 +13,12 @@ from typing import Any, Optional
 import aiohttp
 
 from . import version
+from .pictures import download, plain
 from .services.base import ServiceError
 
 API = "https://musicbrainz.org/ws/2"
 CAA = "https://coverartarchive.org"
 SPACING = 1.1  # seconds between MusicBrainz requests
-MAX_COVER_BYTES = 15 * 1024 * 1024
 COVER_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
 
 
@@ -29,11 +29,6 @@ def _year(date: Any) -> str:
 def _credit(credits: Any) -> str:
     """An artist credit as MusicBrainz writes it out ("A feat. B")."""
     return "".join(c.get("name", "") + c.get("joinphrase", "") for c in credits or [] if isinstance(c, dict))
-
-
-def _plain(text: str) -> str:
-    """A title compared loosely: case, punctuation and spacing aside ("Hits, Vol. 1" is "hits vol 1")."""
-    return " ".join("".join(c if c.isalnum() else " " for c in text.casefold()).split())
 
 
 def _quote(text: str) -> str:
@@ -114,23 +109,9 @@ class MusicBrainz:
         """The front cover (500 px) of a release, else of its release group: (bytes, extension), or None."""
         paths = [f"release/{release_id}/front-500"] + ([f"release-group/{group_id}/front-500"] if group_id else [])
         for path in paths:
-            try:
-                async with self.session.get(f"{CAA}/{path}", headers=self.headers) as resp:
-                    if resp.status != 200:
-                        continue
-                    ext = COVER_TYPES.get(resp.content_type)
-                    if not ext or (resp.content_length or 0) > MAX_COVER_BYTES:
-                        continue
-                    # the whole picture: content.read(n) hands back only what has arrived so far
-                    data = bytearray()
-                    async for chunk in resp.content.iter_chunked(64 * 1024):
-                        data += chunk
-                        if len(data) > MAX_COVER_BYTES:
-                            break
-                    if 0 < len(data) <= MAX_COVER_BYTES and len(data) >= (resp.content_length or 0):
-                        return bytes(data), ext
-            except (aiohttp.ClientError, asyncio.TimeoutError):
-                continue
+            picture = await download(self.session, f"{CAA}/{path}", self.headers, COVER_TYPES)
+            if picture:
+                return picture
         return None
 
     async def find_cover(self, artist: str, album: str) -> Optional[tuple[bytes, str]]:
@@ -139,7 +120,7 @@ class MusicBrainz:
             # a match by name alone: a weak one, or another title, could be the wrong record's cover
             if r["score"] < 90:
                 break
-            if _plain(r["title"]) != _plain(album):
+            if plain(r["title"]) != plain(album):
                 continue
             cover = await self.cover(r["id"], r["group"])
             if cover:

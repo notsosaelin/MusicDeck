@@ -7,6 +7,10 @@ from .. import models
 
 # a list of ways in up to this long shows as a row of music each; longer, as tiles to pick from
 ROWS_MAX = 40
+#: Where a source's sections sit on the media center's Browse: the user's own music ("yours": albums,
+#: artists, their library), ways into the catalogue ("explore", the rest), folders on the Deck ("files").
+TAB_GROUPS = {"library": "yours", "yours": "yours", "albums": "yours", "artists": "yours", "composers": "yours",
+              "authors": "yours", "series": "yours", "folders": "files"}
 #: How long a tab that's the same for everyone (SHARED_TABS) is kept before it's fetched again.
 TAB_CACHE_SECONDS = 600
 
@@ -181,9 +185,15 @@ class MusicService:
     #: TAB_CACHE_SECONDS by cached_tab(), so coming back to them, or a refresh after an edit, is instant
     SHARED_TABS: frozenset[str] = frozenset()
 
-    def center_tabs(self) -> list[dict[str, str]]:
+    #: sections this source groups otherwise than TAB_GROUPS says (Spotify's "Your top" is the user's own)
+    TAB_GROUP_OVERRIDES: dict[str, str] = {}
+
+    def center_tabs(self) -> list[dict[str, Any]]:
+        """{"id", "title", "group"}; a source can add "subtitle" (a count) and "art" (art ids for a
+        mosaic) to show on its Browse tile."""
         tabs = self.TABS or (("home", "Home"),) + ((("browse", "Browse"),) if "browse" in self.features else ())
-        return [{"id": id, "title": title} for id, title in tabs]
+        return [{"id": id, "title": title, "group": self.TAB_GROUP_OVERRIDES.get(id, TAB_GROUPS.get(id, "explore"))}
+                for id, title in tabs]
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         """One of center_tabs(): sections, each with how to show it (models.section's `display`).

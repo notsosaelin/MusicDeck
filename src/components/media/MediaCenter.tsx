@@ -598,7 +598,7 @@ const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }>
     >
       {view.type === "home" ? (
         tab === BROWSE.id && sections.length !== 1 ? (
-          <BrowseIndex sections={sections} stack={stack} />
+          <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
         ) : (
           // Browse with one section is that section
           <TabPage instanceId={instanceId} tab={tab === BROWSE.id ? sections[0].id : tab} stack={stack} />

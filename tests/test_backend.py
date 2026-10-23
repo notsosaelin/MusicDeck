@@ -314,6 +314,23 @@ async def run():
                      "artist-credit": [{"name": "Various Artists"}], "media": [{"track-count": 2}, {"track-count": 1}]}]})
             if request.path == "/ws/2/release/rel1":
                 return mbweb.json_response(mb_release)
+            if request.path == "/deezer/search/artist":
+                q = request.query.get("q")
+                return mbweb.json_response({"data": [
+                    {"name": q + " Tribute Band", "picture_xl": mb_base + "/pic/tribute.jpg", "nb_fan": 999},
+                    {"name": q.upper(), "picture_xl": mb_base + "/pic/real.jpg", "nb_fan": 50},
+                    {"name": q, "picture_xl": "https://e-cdns-images.dzcdn.net/images/artist//1000x1000.jpg", "nb_fan": 5},
+                ] if q == "Singer One" else [{"name": q, "picture_xl": "https://e-cdns-images.dzcdn.net/images/artist//x.jpg"}]})
+            if request.path == "/pic/real.jpg":
+                return mbweb.Response(body=JPEG, content_type="image/jpeg")
+            if request.path == "/lrclib/get":
+                if request.query.get("track_name") == "Hit 2":
+                    return mbweb.json_response({"syncedLyrics": "[00:01.50]Hello road\n[01:02.25]Goodbye"})
+                return mbweb.Response(status=404)
+            if request.path == "/lrclib/search":
+                return mbweb.json_response([])
+            if request.path == "/netease/search/get":
+                return mbweb.json_response({"result": {"songs": []}})
             if request.path == "/release/rel1/front-500":
                 # big, and in pieces with pauses between, as a real download arrives
                 resp = mbweb.StreamResponse(headers={"Content-Type": "image/jpeg", "Content-Length": str(len(big_cover))})
@@ -331,8 +348,12 @@ async def run():
         mb_site = mbweb.TCPSite(mb_runner, "127.0.0.1", 0)
         await mb_site.start()
         mb_base = f"http://127.0.0.1:{mb_site._server.sockets[0].getsockname()[1]}"
-        real_mb = (mbmod.API, mbmod.CAA, mbmod.SPACING)
+        from musicdeck import lyrics as lymod, pictures as picmod
+        from musicdeck.services import local as localmod
+        real_mb = (mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE)
         mbmod.API, mbmod.CAA, mbmod.SPACING = mb_base + "/ws/2", mb_base, 0
+        picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE = (mb_base + "/deezer", mb_base + "/lrclib",
+                                                                        mb_base + "/netease", 0)
         try:
             found = (await plugin.lookup_album(lid, hits[0]["id"]))["data"]
             check([r["id"] for r in found] == ["rel1", "rel2"] and found[0]["tracks"] == 3 and found[0]["group"] == "rg1",
@@ -364,8 +385,50 @@ async def run():
             st = next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["status"]["art"]
             check(not st["running"] and st["total"] >= 1 and st["found"] == 1 and new_hits in library.album_art,
                   f"missing artwork found in the background: {st}")
+            print("local library: artists' pictures, lyrics, Browse")
+            artists_now = (await plugin.open_collection(lid, "list", "artists"))["data"]["collections"]
+            singer = next(t for t in library.tracks.values() if t["title"] == "Hit One")
+            singer_key = hashlib.sha1(singer["artist"].lower().encode()).hexdigest()[:16]
+            found_pic = await plugin.artist_art(lid, singer_key, "find")
+            check(found_pic["ok"] and found_pic["data"] is True and "artist-" + singer_key in library.album_art,
+                  f"an artist's picture, for that exact name, not a tribute band's or a blank one: {found_pic}")
+            singer_page = (await plugin.open_collection(lid, "artist", singer_key))["data"]
+            check(singer_page["art"] and singer_page["art"].startswith("a:" + singer_key + "."),
+                  f"shown on their page: {singer_page['art']}")
+            src = await library.art(singer_page["art"])
+            check(open(src.path, "rb").read() == JPEG, "and served")
+            two = next(t for t in library.tracks.values() if t["title"] == "Hit 2")
+            two_key = hashlib.sha1(two["artist"].lower().encode()).hexdigest()[:16]
+            check((await plugin.artist_art(lid, two_key, "find"))["data"] is False, "a blank picture is no picture")
+            check(not (await plugin.artist_art(lid, "nobody", "find"))["ok"], "an artist who isn't there")
+            await plugin.artist_art(lid, singer_key, "clear")
+            check("artist-" + singer_key not in library.album_art, "and let go")
+            del artists_now
+
+            hit2 = next(tid for tid, t in library.tracks.items() if t["title"] == "Hit 2")
+            saved_lyrics = await plugin.save_lyrics(lid, hit2)
+            lrc = os.path.splitext(library.tracks[hit2]["path"])[0] + ".lrc"
+            check(saved_lyrics["data"] is True and open(lrc, encoding="utf-8").read()
+                  == "[ar:Singer Two]\n[ti:Hit 2]\n[al:Hits 1999]\n[00:01.50]Hello road\n[01:02.25]Goodbye\n",
+                  f"lyrics kept beside the track as a synced .lrc: {saved_lyrics}")
+            got = (await plugin.get_lyrics(lid, {"id": hit2}))["data"]
+            check(got["synced"] and got["lines"][1] == {"t": 62.25, "text": "Goodbye"} and got["source"] == "Lyrics file",
+                  "and read back from it")
+            check(not (await plugin.save_lyrics(lid, hit2))["ok"], "a track with lyrics isn't looked up again")
+            batch = (await plugin.find_lyrics(lid, new_hits))["data"]
+            check(batch == {"found": 0, "total": 2}, f"an album's tracks without lyrics looked up: {batch}")
+            os.remove(lrc)
+            await plugin.find_missing_lyrics(lid)
+            await library.lyrics_task
+            lst = next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["status"]["lyrics"]
+            check(not lst["running"] and lst["found"] == 1 and os.path.exists(lrc), f"every missing lyric, in the background: {lst}")
+
+            tiles = {t["id"]: t for t in next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["tabs"]}
+            check(tiles["albums"]["group"] == "yours" and tiles["genres"]["group"] == "explore"
+                  and tiles["folders"]["group"] == "files" and tiles["albums"]["subtitle"].endswith("albums")
+                  and len(tiles["albums"]["art"]) >= 1, f"Browse's tiles: what's in each, grouped: {tiles}")
         finally:
-            mbmod.API, mbmod.CAA, mbmod.SPACING = real_mb
+            mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE = real_mb
             await mb_runner.cleanup()
         check(not (await plugin.get_tags(sid, "track", "nope"))["ok"], "a track that isn't there")
 

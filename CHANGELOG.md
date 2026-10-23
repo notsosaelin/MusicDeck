@@ -3,6 +3,22 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.6.0
+
+**Browse, organized**
+- Grouped: **Your music** (albums, artists, composers, your library) as large tiles showing your own
+  covers or artists' pictures and how many there are; then **Explore** (genres, years, charts, moods,
+  countries...) and **On this Deck** (folders) as compact tiles with an icon and a count.
+
+**Local files**
+- **Artists' pictures:** find one online (Deezer's public catalogue, for the artist of exactly that name;
+  no account), set your own, or remove it. They show on the Artists page, the artist's page and Browse.
+  "Find missing artwork" now finds artists' pictures as well as album covers.
+- **Lyrics kept with your music:** "Save lyrics to file" on a track, "Find lyrics" on an album, and
+  "Find missing lyrics" for the whole library (Decky → MusicDeck → the source's menu). What the lyrics
+  sites have is saved beside each track as an `.lrc` (synced when they are), so it works offline and in
+  other players. Tracks that have lyrics already are left alone.
+
 ## 0.5.2
 
 - The media center has the same five tabs for every source: **Now Playing, Home, Browse, Search,
