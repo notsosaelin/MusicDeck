@@ -28,6 +28,8 @@ import aiohttp
 from .. import lyrics, models, pictures, tagging
 from ..background import spawn
 from ..musicbrainz import MusicBrainz
+from ..pictures import plain
+from ..watch import FolderWatcher
 from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
@@ -75,11 +77,22 @@ MAX_ART_BYTES = 15 * 1024 * 1024
 ARTIST = "artist-"  # an artist's picture's key among the albums' (album keys are hex: no clash)
 UNKNOWN = "Unknown artist"
 LYRICS_PACE = 0.5  # seconds between lyrics look-ups for many tracks, to be gentle with LRCLIB
+RECHECK_SECONDS = 3600  # a scan for new music this often, for what the folder watcher can't see
+#: What happens when new albums arrive (the source's dialog): covers and artists' pictures; MusicBrainz
+#: tags ("off", "sure": only an unmistakable match, only filling empty fields, "ask": a list to review);
+#: lyrics; and where lyrics are kept ("musicdeck": in MusicDeck's own folder, "beside": an .lrc next
+#: to each song, the way Navidrome, Jellyfin, Plex and foobar2000 look for them).
+DEFAULTS = {"auto_art": True, "auto_tags": "ask", "auto_lyrics": False, "lyrics_place": "musicdeck"}
+TAG_MODES = ("off", "sure", "ask")
+LYRICS_PLACES = ("musicdeck", "beside")
 
 
 def _lrc(found: dict[str, Any], t: dict[str, Any]) -> str:
     """Lyrics as an .lrc file: timed lines when they're synced, with the song's names at the top."""
-    head = [f"[ar:{t['artist'] or t['albumartist']}]", f"[ti:{t['title']}]", f"[al:{t['album']}]"]
+    # [ar:] [ti:] [al:] [length:]: players such as Poweramp check them against the song
+    minutes, seconds = divmod(int(t.get("duration") or 0), 60)
+    head = [f"[ar:{t['artist'] or t['albumartist']}]", f"[ti:{t['title']}]", f"[al:{t['album']}]",
+            f"[length:{minutes:02d}:{seconds:02d}]" if t.get("duration") else "[length:]"]
     lines = []
     for line in found["lines"]:
         if found.get("synced") and line.get("t") is not None:
@@ -93,6 +106,7 @@ def _lrc(found: dict[str, Any], t: dict[str, Any]) -> str:
 def _write_text(path: str, text: str) -> None:
     """Writes beside the music through a hidden copy, so a crash never leaves half a file."""
     directory, name = os.path.split(path)
+    os.makedirs(directory, exist_ok=True)
     temp = os.path.join(directory, f".{name}{tagging.TEMP_SUFFIX}")
     try:
         with open(temp, "w", encoding="utf-8") as f:
@@ -365,7 +379,7 @@ def find_folder_cover(directory: str) -> Optional[str]:
 class LocalService(MusicService):
     """Recursively scans one or more folders and indexes their tags.
 
-    config: {"paths": ["/home/deck/Music", ...]}
+    config: {"paths": ["/home/deck/Music", ...], plus what happens when new music arrives: DEFAULTS}
     """
 
     type = "local"
@@ -405,8 +419,37 @@ class LocalService(MusicService):
         self.lyrics_progress = {"running": False, "done": 0, "total": 0, "found": 0}
         # Browse's tiles (counts, covers), made again when the library or its pictures change
         self._browse_cache: Optional[list[dict[str, Any]]] = None
+        # lyrics kept in MusicDeck rather than beside the songs: <track id>.lrc
+        self.lyrics_dir = os.path.join(runtime_dir, f"local-{instance_id}-lyrics")
+        # new albums MusicBrainz may know, for the user to look at ("Ask me"): {album key: {title, artist, at}}
+        self.review_path = os.path.join(runtime_dir, f"local-{instance_id}-review.json")
+        self.review: dict[str, dict[str, Any]] = {}
+        # new music: the folders watched, a scan now and then, and the new albums' queue
+        self.watcher: Optional[FolderWatcher] = None
+        self.recheck: Optional[asyncio.Task[None]] = None
+        self.new_tracks: set[str] = set()
+        # the tracks of the albums being got ready (lyrics are only looked up for these)
+        self.new_since: set[str] = set()
+        self.import_queue: list[str] = []
+        self.import_task: Optional[asyncio.Task[None]] = None
+        self.import_progress = {"running": False, "done": 0, "total": 0}
+        # set by the plugin: a short note to the user (a toast), e.g. what a new album got
+        self.announce: Optional[Any] = None
         self.scan_task: Optional[asyncio.Task[None]] = None
         self.scan_progress = {"scanning": False, "found": 0, "last_scan": 0.0, "error": ""}
+
+    @classmethod
+    def prepare_config(cls, config: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:
+        """What happens to new music, as one of the choices there are (DEFAULTS for what's missing)."""
+        config = dict(config)
+        for key, default in DEFAULTS.items():
+            value = config.get(key, default)
+            allowed = TAG_MODES if key == "auto_tags" else LYRICS_PLACES if key == "lyrics_place" else None
+            config[key] = value if (value in allowed if allowed else isinstance(value, bool)) else default
+        return config
+
+    def option(self, key: str) -> Any:
+        return self.config.get(key, DEFAULTS[key])
 
     @property
     def roots(self) -> list[str]:
@@ -436,22 +479,42 @@ class LocalService(MusicService):
                               if os.path.splitext(n)[1].lower() in ART_TYPES}
         except OSError:
             self.album_art = {}
+        try:
+            with open(self.review_path, "r", encoding="utf-8") as f:
+                review = json.load(f)
+            self.review = review if isinstance(review, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.review = {}
         self.rescan()
+        self.watcher = FolderWatcher(self.roots, self.rescan)
+        try:
+            self.watcher.start()
+        except OSError:
+            self.watcher.stop()
+        self.recheck = spawn(self._recheck(), "checking for new music")
+
+    async def _recheck(self) -> None:
+        while True:
+            await asyncio.sleep(RECHECK_SECONDS)
+            self.rescan()
 
     async def stop(self) -> None:
-        for task in (self.scan_task, self.art_task, self.lyrics_task):
+        if self.watcher:
+            self.watcher.stop()
+        for task in (self.scan_task, self.art_task, self.lyrics_task, self.import_task, self.recheck):
             if task:
                 task.cancel()
         if self.http:
             await self.http.close()
 
     def remove(self) -> None:
-        for path in (self.index_path, self.favourites_path, self.plays_path, self.history_path):
+        for path in (self.index_path, self.favourites_path, self.plays_path, self.history_path, self.review_path):
             try:
                 os.remove(path)
             except OSError:
                 pass
         shutil.rmtree(self.art_dir, ignore_errors=True)
+        shutil.rmtree(self.lyrics_dir, ignore_errors=True)
 
     async def test(self) -> str:
         if not self.roots:
@@ -463,7 +526,8 @@ class LocalService(MusicService):
 
     def status(self) -> dict[str, Any]:
         return {**self.scan_progress, "tracks": len(self.tracks), "art": dict(self.art_progress),
-                "lyrics": dict(self.lyrics_progress)}
+                "lyrics": dict(self.lyrics_progress), "importing": dict(self.import_progress),
+                "review": len(self.review), "watching": bool(self.watcher and self.watcher.available)}
 
     # --- scanning ---
 
@@ -483,9 +547,12 @@ class LocalService(MusicService):
             raise
         finally:
             self.scan_progress["scanning"] = False
+        self._queue_new_albums()
 
     def _scan_blocking(self) -> None:
         previous = {t["path"]: t for t in self.tracks.values()}
+        # a library's very first scan is all "new": only what arrives after it is new music
+        first = not previous
         tracks: dict[str, dict[str, Any]] = {}
         playlist_files: list[str] = []
         for root in self.roots:
@@ -525,11 +592,127 @@ class LocalService(MusicService):
                 playlists[_hash(path)] = {"path": path,
                                           "title": os.path.splitext(os.path.basename(path))[0],
                                           "tracks": entries}
+        if not first:
+            self.new_tracks |= {tid for tid, t in tracks.items() if t["path"] not in previous}
         self.tracks = tracks
         self.playlists = playlists
         self._changed()
         self.folder_covers = {}
         self._save_index()
+
+    # --- new music ---
+
+    def _queue_new_albums(self) -> None:
+        """The albums of the tracks that just arrived, queued to get ready (covers, tags, lyrics)."""
+        new = {tid for tid in self.new_tracks if tid in self.tracks}
+        self.new_tracks = set()
+        if not new or not (self.option("auto_art") or self.option("auto_tags") != "off" or self.option("auto_lyrics")):
+            return
+        albums = self._albums()
+        keys = [k for k, items in albums.items() if any(tid in new for tid, _ in items)]
+        self.import_queue += [k for k in keys if k not in self.import_queue]
+        self.new_since |= new
+        if not (self.import_task and not self.import_task.done()):
+            self.import_task = spawn(self._import(), "getting new music ready")
+
+    async def _import(self) -> None:
+        done = {"albums": 0, "covers": 0, "pictures": 0, "tagged": 0, "review": 0, "lyrics": 0}
+        self.import_progress.update(running=True, done=0, total=len(self.import_queue))
+        try:
+            while self.import_queue:
+                key = self.import_queue.pop(0)
+                self.import_progress["total"] = self.import_progress["done"] + len(self.import_queue) + 1
+                if key in self._albums():
+                    try:
+                        await self._import_album(key, done)
+                    except ServiceError:
+                        pass  # offline, or a site that can't answer: Find missing artwork and Look up still can
+                    done["albums"] += 1
+                self.import_progress["done"] += 1
+        finally:
+            self.import_progress["running"] = False
+            self.new_since = set()
+        if done["albums"] and self.announce:
+            self.announce(self._import_note(done))
+
+    async def _import_album(self, key: str, done: dict[str, int]) -> None:
+        items = self._albums()[key]
+        new = self.new_since
+        whole = all(tid in new for tid, _ in items)  # a new album, not a track added to one
+        owner = self._album_owner(items)
+        if self.option("auto_art"):
+            if items[0][1]["album"] and not await self._has_art(key) and await self.find_album_art(key):
+                done["covers"] += 1
+            artist = _hash(owner.lower())
+            if owner not in (VARIOUS, UNKNOWN) and ARTIST + artist not in self.album_art \
+                    and await self.find_artist_art(artist):
+                done["pictures"] += 1
+        mode = self.option("auto_tags")
+        if mode != "off" and whole and items[0][1]["album"]:
+            key = await self._import_tags(key, mode, done)
+        if self.option("auto_lyrics") and key in self._albums():
+            for tid, _ in self._albums()[key]:
+                if tid in new:
+                    try:
+                        if await self._save_lyrics(tid):
+                            done["lyrics"] += 1
+                    except ServiceError:
+                        pass
+                    await asyncio.sleep(LYRICS_PACE)
+
+    async def _import_tags(self, key: str, mode: str, done: dict[str, int]) -> str:
+        """"sure": a match there's no doubt about fills in what the files leave empty; "ask": an album
+        MusicBrainz knows goes on the list to review. Returns the album's key (filling in can change it)."""
+        items = self._albums()[key]
+        album = items[0][1]["album"]
+        owner = self._album_owner(items)
+        releases = [r for r in await self.lookup(key) if plain(r["title"]) == plain(album)]
+        if not releases:
+            return key
+        if mode == "ask":
+            self.review[key] = {"title": album, "artist": owner, "at": time.time()}
+            self._save_review()
+            done["review"] += 1
+            return key
+        sure = [r for r in releases if r["tracks"] == len(items) and r["score"] >= 95
+                and (owner == VARIOUS or plain(r["artist"]) == plain(owner))]
+        # every likely release the same record (pressings of one release group), or no doubt at all
+        if not sure or len({r["group"] or r["id"] for r in sure}) != 1:
+            return key
+        plan = await self._lookup_plan(key, sure[0]["id"])
+        # only what the files leave empty: nothing the user (or their tagger) wrote is changed
+        album_changes = {f: new for f, (old, new) in plan["album"].items() if not old}
+        edits = [(tid, {**album_changes, **{f: new for f, (old, new) in plan["tracks"].get(tid, {}).items() if not old}})
+                 for tid, _ in items]
+        edits = [(tid, c) for tid, c in edits if c]
+        if not edits:
+            return key
+        result = await self._write_tags(edits)
+        done["tagged"] += 1
+        return result.get("album_id") or key
+
+    @staticmethod
+    def _import_note(done: dict[str, int]) -> str:
+        """"2 new albums: 2 covers, lyrics for 18 tracks, 1 to review"."""
+        parts = [models.count(done["covers"], "cover") if done["covers"] else "",
+                 models.count(done["pictures"], "artist picture") if done["pictures"] else "",
+                 f"{models.count(done['tagged'], 'album')} tagged" if done["tagged"] else "",
+                 f"lyrics for {models.count(done['lyrics'], 'track')}" if done["lyrics"] else "",
+                 f"{done['review']} to review" if done["review"] else ""]
+        found = ", ".join(x for x in parts if x)
+        head = f"{models.count(done['albums'], 'new album')} ready"
+        return f"{head}: {found}" if found else head
+
+    def _save_review(self) -> None:
+        self._browse_cache = None
+        tmp = self.review_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self.review, f)
+        os.replace(tmp, self.review_path)
+
+    async def dismiss_review(self, album_id: str) -> None:
+        if self.review.pop(album_id, None):
+            self._save_review()
 
     @staticmethod
     def _parse_playlist(path: str, by_path: dict[str, str]) -> list[str]:
@@ -731,6 +914,11 @@ class LocalService(MusicService):
             "folders": (models.count(len(self._open_folder("")["collections"]), "folder"), []),
         }
         tabs = []
+        if self.review:
+            reviewed = [k for k in self.review if k in albums]
+            tabs.append({"id": "review", "title": "To review", "group": "yours",
+                         "subtitle": models.count(len(reviewed), "album"),
+                         "art": [self._art_id(*albums[k][0]) for k in reviewed[:4]]})
         for tab in super().center_tabs():
             if tab["id"] == "composers" and not composers:
                 continue
@@ -743,6 +931,14 @@ class LocalService(MusicService):
             sections = [s for s in await self.home() if not models.is_categories(s)]
             favourites = self._open_list("favourites")["tracks"]
             return sections + ([models.section("Favourite tracks", [], favourites, display="grid")] if favourites else [])
+        if tab_id == "review":
+            albums = self._albums()
+            keys = [k for k in self.review if k in albums]
+            if not keys:
+                return [models.notice("Nothing to review")]
+            return [models.notice("MusicBrainz may know these new albums. Y on one, then Look up on MusicBrainz, "
+                                  "shows what it would change before anything is written."),
+                    models.section("To review", self._album_collections([(k, albums[k]) for k in keys]), display="grid")]
         if tab_id in ("albums", "artists", "composers"):
             page = self._open_list(tab_id)
             return [models.section(page["title"], page["collections"], display="grid")]
@@ -993,7 +1189,7 @@ class LocalService(MusicService):
                            "mixed": len(values) > 0})
         album = self._album_key(items[0][1])
         return {"fields": fields, "files": len(items), "undo": any(tid in self.history for tid, _ in items),
-                "own_art": album in self.album_art, "album_id": album}
+                "own_art": album in self.album_art, "album_id": album, "review": album in self.review}
 
     async def edit_tags(self, kind: str, id: str, changes: dict[str, Any]) -> dict[str, Any]:
         """Writes the changes to the files; returns {"changed", "album_id"} (the album's id changes with
@@ -1005,6 +1201,8 @@ class LocalService(MusicService):
             raise ServiceError(str(e))
         if not changes:
             raise ServiceError("Nothing to change")
+        if kind == "album" and self.review.pop(id, None):
+            self._save_review()
         return await self._write_tags([(tid, changes) for tid, _ in self._target(kind, id)])
 
     async def undo_tags(self, kind: str, id: str) -> dict[str, Any]:
@@ -1104,6 +1302,8 @@ class LocalService(MusicService):
     async def apply_lookup(self, album_id: str, release_id: str) -> dict[str, Any]:
         """Writes a release's details to the album's files; finds its cover too when the album has none."""
         plan = await self._lookup_plan(album_id, release_id)
+        if self.review.pop(album_id, None):
+            self._save_review()
         album_changes = {f: new for f, (_, new) in plan["album"].items()}
         edits = [(tid, {**album_changes, **{f: new for f, (_, new) in plan["tracks"].get(tid, {}).items()}})
                  for tid, _ in self._target("album", album_id)]
@@ -1289,16 +1489,29 @@ class LocalService(MusicService):
     def _sidecar(t: dict[str, Any]) -> str:
         return os.path.splitext(t["path"])[0] + ".lrc"
 
+    def _kept_lyrics(self, tid: str) -> str:
+        """Where MusicDeck keeps a track's lyrics when they aren't beside the songs."""
+        return os.path.join(self.lyrics_dir, tid + ".lrc")
+
+    def _read_kept(self, tid: str) -> Optional[dict[str, Any]]:
+        try:
+            with open(self._kept_lyrics(tid), "r", encoding="utf-8") as f:
+                return lyrics.parse_lrc(f.read(), "Saved lyrics")
+        except OSError:
+            return None
+
     async def _save_lyrics(self, tid: str) -> Optional[bool]:
-        """Looks a track's lyrics up and keeps them as an .lrc beside it: True when saved, False when the
-        sites have none, None when it has lyrics already (a file, or in its tags)."""
+        """Looks a track's lyrics up and keeps them (in MusicDeck, or as an .lrc beside the song, as the
+        source is set): True when saved, False when the sites have none, None when it has lyrics already
+        (a file beside it, its tags, or kept by MusicDeck)."""
         t = self.tracks[tid]
-        if await asyncio.to_thread(read_lyrics, t["path"]):
+        if await asyncio.to_thread(read_lyrics, t["path"]) or os.path.exists(self._kept_lyrics(tid)):
             return None
         found = await lyrics.lookup(self._http(), self._track(tid, t))
         if not found:
             return False
-        await asyncio.to_thread(_write_text, self._sidecar(t), _lrc(found, t))
+        target = self._sidecar(t) if self.option("lyrics_place") == "beside" else self._kept_lyrics(tid)
+        await asyncio.to_thread(_write_text, target, _lrc(found, t))
         return True
 
     async def save_lyrics(self, track_id: str) -> bool:
@@ -1417,8 +1630,11 @@ class LocalService(MusicService):
         os.replace(tmp, self.plays_path)
 
     async def lyrics(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """The song's own (an .lrc beside it, then its tags), then those MusicDeck kept for it."""
         t = self.tracks.get(track["id"])
-        return await asyncio.to_thread(read_lyrics, t["path"]) if t else None
+        if not t:
+            return None
+        return await asyncio.to_thread(read_lyrics, t["path"]) or await asyncio.to_thread(self._read_kept, track["id"])
 
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
         """Same artist and same genre first, then the rest of the library, all shuffled."""

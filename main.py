@@ -173,6 +173,8 @@ class Plugin:
         instance = cls(service["id"], service["config"], decky.DECKY_PLUGIN_RUNTIME_DIR)
         # lets a service persist config it changes itself (rotated tokens, favourite stations)
         instance.save_config = lambda config, sid=service["id"]: self._persist_config(sid, config)
+        # a short note for the user from the source (what new albums got), shown as a toast
+        instance.announce = lambda text, sid=service["id"]: spawn(decky.emit("source_note", sid, text), "source note")
         try:
             await instance.start()
         except Exception:
@@ -783,6 +785,11 @@ class Plugin:
         async def start(s: MusicService) -> None:
             s.find_missing_lyrics()
         return await self._managed(instance_id, "tags", start)
+
+    @_when_ready
+    async def dismiss_review(self, instance_id: str, album_id: str) -> dict[str, Any]:
+        """Takes a new album off the list to review (the source's "Ask me" for MusicBrainz tags)."""
+        return await self._managed(instance_id, "tags", lambda s: s.dismiss_review(album_id))
 
     @_when_ready
     async def find_missing_art(self, instance_id: str) -> dict[str, Any]:

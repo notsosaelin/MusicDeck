@@ -26,6 +26,7 @@ import {
   albumArt,
   applyLookup,
   artistArt,
+  dismissReview,
   findLyrics,
   getTags,
   lookupAlbum,
@@ -37,7 +38,7 @@ import {
 import { View, invalidateBrowserCache, navigation, setStack } from "../nav";
 import { notify } from "../notify";
 import { hasFeature } from "../player";
-import { pluginState } from "../store";
+import { pluginState, refreshState } from "../store";
 import { DialogActions } from "./common";
 import { centerNav } from "./media/pages";
 
@@ -422,7 +423,7 @@ async function clearAlbumArt(instanceId: string, album: Collection) {
   notify(album.title, "Back to the files' own artwork");
 }
 
-/** Lyrics for every track of an album without them, kept beside each as an .lrc. */
+/** Lyrics for every track of an album without them, kept as the source is set. */
 async function findAlbumLyrics(instanceId: string, album: Collection) {
   notify(album.title, "Looking for lyrics…");
   const r = await findLyrics(instanceId, album.id);
@@ -438,11 +439,11 @@ async function findAlbumLyrics(instanceId: string, album: Collection) {
   );
 }
 
-/** A track's lyrics, from the lyrics sites, kept beside it as an .lrc (synced when they are). */
+/** A track's lyrics, from the lyrics sites, kept (in MusicDeck, or beside it as an .lrc, as the source is set). */
 export async function saveTrackLyrics(instanceId: string, trackId: string, title: string) {
   const r = await saveLyrics(instanceId, trackId);
   if (!r.ok) return notify(title, r.error);
-  notify(title, r.data ? "Lyrics saved to a file beside the track" : "No lyrics found for it");
+  notify(title, r.data ? "Lyrics saved" : "No lyrics found for it");
 }
 
 async function artistPicture(instanceId: string, artist: Collection, action: "set" | "find" | "clear") {
@@ -457,6 +458,12 @@ async function artistPicture(instanceId: string, artist: Collection, action: "se
   if (action === "find" && !r.data) return notify(artist.title, "No picture found for them");
   invalidateBrowserCache();
   notify(artist.title, action === "clear" ? "Picture removed" : action === "find" ? "Picture found" : "Picture set");
+}
+
+async function dismissFromReview(instanceId: string, album: Collection) {
+  await dismissReview(instanceId, album.id);
+  invalidateBrowserCache();
+  await refreshState();
 }
 
 /** A local artist's menu items: their picture (an artist with one has an art id, "a:..."). */
@@ -511,6 +518,13 @@ export function albumManageItems(instanceId: string, album: Collection, info: Ta
         Find artwork online
       </MenuItem>,
     );
+    if (info?.review) {
+      items.push(
+        <MenuItem key="dismiss" onSelected={() => dismissFromReview(instanceId, album)}>
+          Remove from To review
+        </MenuItem>,
+      );
+    }
     if (info?.own_art) {
       items.push(
         <MenuItem key="art-clear" onSelected={() => clearAlbumArt(instanceId, album)}>

@@ -3,6 +3,24 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.7.0
+
+**New music gets ready by itself (local files)**
+- Albums copied into your music folders are noticed as they arrive (also hourly, and at start-up), and
+  each new one gets ready as you've set the source (its Edit dialog, "When new music arrives"):
+  - **Covers and artist pictures:** on.
+  - **Tags from MusicBrainz:** **Ask me** (default): new albums MusicBrainz knows wait under Browse →
+    **To review**; Y → Look up on MusicBrainz shows what would change, and nothing is written until you
+    apply. **Only when sure**: a match with no doubt fills in only fields your files leave empty. Or off.
+  - **Lyrics:** off unless you turn it on.
+- A note says what each batch got ("2 new albums ready: 2 covers, 1 to review").
+- A library's first scan isn't treated as new music.
+
+**Lyrics kept your way**
+- Lyrics are kept **in MusicDeck** by default, so your music folders stay exactly as they are. Or choose
+  **beside the songs**: an `.lrc` named like each song, the format Navidrome, Jellyfin, Plex, foobar2000
+  and Poweramp read, with the song's names and length at the top.
+
 ## 0.6.2
 
 - Browse's "Your music" tiles are wider than tall, so Explore shows below them without scrolling as far;

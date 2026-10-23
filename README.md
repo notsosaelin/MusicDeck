@@ -27,9 +27,15 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   pick after seeing exactly what would change, and give albums and artists pictures: one of your own, an
   album's cover from the Cover Art Archive, an artist's picture from Deezer's public catalogue (no account),
   or every missing one at once (Decky → MusicDeck → the source's menu → Find missing artwork). Pictures are
-  kept in MusicDeck. Lyrics found online can be kept beside a track as an `.lrc` (synced when they are), for
-  an album at once, or for the whole library (Find missing lyrics): they then work offline and in other
-  players. Your music folders only change when you edit tags or save lyrics.
+  kept in MusicDeck. Lyrics found online can be kept for a track, an album, or the whole library (Find
+  missing lyrics), synced when they are: in MusicDeck, or as the same-named `.lrc` beside each song that
+  Navidrome, Jellyfin, Plex and foobar2000 read too.
+- **New music gets ready by itself:** albums copied into your folders are noticed as they arrive (and
+  checked for hourly, and at start-up). Each new album gets its cover and artist picture; MusicBrainz tags
+  are **Ask me** by default (new albums it knows wait under Browse → To review, and nothing is written
+  until you look), or **Only when sure** (an unmistakable match fills in only empty fields), or off; and
+  lyrics if you want them. A note says what each batch got. Your music folders only change when you edit
+  tags, or choose to keep lyrics beside the songs.
 - **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with the
   same five tabs for every source: Now Playing, Home, Browse, Search and Settings. Browse holds what each
   source has besides its Home: your own music as large tiles with its covers and counts, then the ways in (YouTube Music's New, Charts, Moods and Genres; radio's Genres,

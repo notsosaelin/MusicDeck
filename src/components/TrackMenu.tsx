@@ -239,7 +239,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
         <MenuItem onSelected={() => editTags(instanceId, "track", track.id, track.title)}>Edit tags</MenuItem>
       )}
       {hasFeature(instanceId, "tags") && (
-        <MenuItem onSelected={() => saveTrackLyrics(instanceId, track.id, track.title)}>Save lyrics to file</MenuItem>
+        <MenuItem onSelected={() => saveTrackLyrics(instanceId, track.id, track.title)}>Save lyrics</MenuItem>
       )}
       {ctx.playlistId && (
         <MenuItem

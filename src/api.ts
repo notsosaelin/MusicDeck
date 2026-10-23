@@ -292,6 +292,8 @@ export interface TagInfo {
   undo: boolean;
   own_art: boolean;
   album_id: string;
+  /** a new album on the list to review (the source's "Ask me" for MusicBrainz tags) */
+  review: boolean;
 }
 export interface TagResult {
   changed: number;
@@ -348,6 +350,7 @@ export const findLyrics = callable<[id: string, albumId: string], Result<{ found
   "find_lyrics",
 );
 export const findMissingLyrics = callable<[id: string], Result<null>>("find_missing_lyrics");
+export const dismissReview = callable<[id: string, albumId: string], Result<null>>("dismiss_review");
 
 /** A new playlist on the source itself (feature "playlists"), holding these tracks. */
 export const createServicePlaylist = callable<[id: string, name: string, trackIds: string[]], Result<Collection>>(

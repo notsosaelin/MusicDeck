@@ -1,4 +1,4 @@
-import { definePlugin, routerHook } from "@decky/api";
+import { addEventListener, definePlugin, removeEventListener, routerHook } from "@decky/api";
 import { quickAccessMenuClasses, showModal, staticClasses } from "@decky/ui";
 import { FaMusic } from "react-icons/fa";
 import * as api from "./api";
@@ -7,7 +7,15 @@ import { MediaCenter } from "./components/media/MediaCenter";
 import { showTrackMenu } from "./components/TrackMenu";
 import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
-import { PLAYER_ROUTE, centerTab, navigation, openMediaCenter, panelTab, reopenMediaCenterIfShowing } from "./nav";
+import {
+  PLAYER_ROUTE,
+  centerTab,
+  invalidateBrowserCache,
+  navigation,
+  openMediaCenter,
+  panelTab,
+  reopenMediaCenterIfShowing,
+} from "./nav";
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
@@ -51,6 +59,14 @@ export default definePlugin(() => {
   reopenMediaCenterIfShowing();
   const unwatchGames = watchGames();
   const unwatchCast = watchCastStatus();
+  // a source's own news (local files: what new albums got): a toast, and lists that show it again
+  const sourceNote = (instanceId: string, text: string) => {
+    const name = pluginState.get()?.services.find((s) => s.id === instanceId)?.name ?? "MusicDeck";
+    invalidateBrowserCache();
+    refreshState().catch(() => {});
+    notify(name, text);
+  };
+  addEventListener("source_note", sourceNote);
   const unpatchQam = installQamPatch(
     <MusicPanel />,
     // Native tabs pass a pre-styled element; a bare string renders unstyled
@@ -101,6 +117,7 @@ export default definePlugin(() => {
       routerHook.removeRoute(PLAYER_ROUTE);
       unwatchGames();
       unwatchCast();
+      removeEventListener("source_note", sourceNote);
       setSleepTimer(null);
       releaseToastHooks();
       player.destroy();

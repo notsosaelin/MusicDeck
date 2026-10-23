@@ -323,6 +323,24 @@ async def run():
 
         async def fake_mb(request):
             mb_calls.append((request.path, dict(request.query), request.headers.get("User-Agent", "")))
+            if request.path == "/ws/2/release/" and ('"New Arrival"' in request.query.get("query", "")
+                                                      or '"Sure Thing"' in request.query.get("query", "")):
+                name = "New Arrival" if "New Arrival" in request.query["query"] else "Sure Thing"
+                rid = "rel3" if name == "New Arrival" else "rel4"
+                return mbweb.json_response({"releases": [
+                    {"id": rid, "title": name, "score": 100, "artist-credit": [{"name": "Singer One"}],
+                     "media": [{"track-count": 2}], "release-group": {"id": "rg-" + rid}}]})
+            if request.path in ("/ws/2/release/rel3", "/ws/2/release/rel4"):
+                rid = request.path.rsplit("/", 1)[1]
+                return mbweb.json_response({
+                    "id": rid, "title": "New Arrival" if rid == "rel3" else "Sure Thing", "date": "2021",
+                    "artist-credit": [{"name": "Singer One"}],
+                    "release-group": {"id": "rg-" + rid, "first-release-date": "2021", "genres": [{"name": "pop", "count": 1}]},
+                    "media": [{"position": 1, "tracks": [
+                        {"position": 1, "title": "Arrival Song", "artist-credit": [{"name": "Singer One"}]},
+                        {"position": 2, "title": "Second Song", "artist-credit": [{"name": "Singer One"}]}]}]})
+            if request.path in ("/release/rel3/front-500", "/release/rel4/front-500"):
+                return mbweb.Response(body=JPEG, content_type="image/jpeg")
             if request.path == "/ws/2/release/":
                 return mbweb.json_response({"releases": [
                     {"id": "rel2", "title": "Hits 1999", "score": 100, "date": "1999", "media": [{"track-count": 12, "format": "CD"}]},
@@ -340,6 +358,8 @@ async def run():
             if request.path == "/pic/real.jpg":
                 return mbweb.Response(body=JPEG, content_type="image/jpeg")
             if request.path == "/lrclib/get":
+                if request.query.get("track_name") == "arrival song":
+                    return mbweb.json_response({"plainLyrics": "here I am"})
                 if request.query.get("track_name") == "Hit 2":
                     return mbweb.json_response({"syncedLyrics": "[00:01.50]Hello road\n[01:02.25]Goodbye"})
                 return mbweb.Response(status=404)
@@ -423,13 +443,21 @@ async def run():
 
             hit2 = next(tid for tid, t in library.tracks.items() if t["title"] == "Hit 2")
             saved_lyrics = await plugin.save_lyrics(lid, hit2)
-            lrc = os.path.splitext(library.tracks[hit2]["path"])[0] + ".lrc"
-            check(saved_lyrics["data"] is True and open(lrc, encoding="utf-8").read()
-                  == "[ar:Singer Two]\n[ti:Hit 2]\n[al:Hits 1999]\n[00:01.50]Hello road\n[01:02.25]Goodbye\n",
-                  f"lyrics kept beside the track as a synced .lrc: {saved_lyrics}")
+            beside = os.path.splitext(library.tracks[hit2]["path"])[0] + ".lrc"
+            kept = os.path.join(library.lyrics_dir, hit2 + ".lrc")
+            check(saved_lyrics["data"] is True and not os.path.exists(beside) and open(kept, encoding="utf-8").read()
+                  == "[ar:Singer Two]\n[ti:Hit 2]\n[al:Hits 1999]\n[length:00:01]\n[00:01.50]Hello road\n[01:02.25]Goodbye\n",
+                  f"lyrics kept in MusicDeck, the music folder left as it was: {saved_lyrics}")
             got = (await plugin.get_lyrics(lid, {"id": hit2}))["data"]
-            check(got["synced"] and got["lines"][1] == {"t": 62.25, "text": "Goodbye"} and got["source"] == "Lyrics file",
-                  "and read back from it")
+            check(got["synced"] and got["lines"][1] == {"t": 62.25, "text": "Goodbye"} and got["source"] == "Saved lyrics",
+                  "and read back from there")
+            os.remove(kept)
+            library.config["lyrics_place"] = "beside"
+            await plugin.save_lyrics(lid, hit2)
+            lrc = beside
+            got = (await plugin.get_lyrics(lid, {"id": hit2}))["data"]
+            check(os.path.exists(beside) and got["source"] == "Lyrics file",
+                  "or, set so, beside the song as the same-named .lrc other players read")
             check(not (await plugin.save_lyrics(lid, hit2))["ok"], "a track with lyrics isn't looked up again")
             batch = (await plugin.find_lyrics(lid, new_hits))["data"]
             check(batch == {"found": 0, "total": 2}, f"an album's tracks without lyrics looked up: {batch}")
@@ -439,10 +467,59 @@ async def run():
             lst = next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["status"]["lyrics"]
             check(not lst["running"] and lst["found"] == 1 and os.path.exists(lrc), f"every missing lyric, in the background: {lst}")
 
+            library.config["lyrics_place"] = "musicdeck"
             tiles = {t["id"]: t for t in next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["tabs"]}
             check(tiles["albums"]["group"] == "yours" and tiles["genres"]["group"] == "explore"
                   and tiles["folders"]["group"] == "files" and tiles["albums"]["subtitle"].endswith("albums")
                   and len(tiles["albums"]["art"]) >= 1, f"Browse's tiles: what's in each, grouped: {tiles}")
+
+            print("local library: new music")
+            check(library.config["auto_tags"] == "ask" and library.config["auto_art"] is True
+                  and library.config["auto_lyrics"] is False and library.config["lyrics_place"] == "musicdeck",
+                  f"new music: covers, Ask me for tags, no lyrics, kept in MusicDeck, unless set otherwise: {library.config}")
+            check(type(library).prepare_config({"auto_tags": "always", "lyrics_place": "/etc", "auto_art": "yes"}, None)
+                  == {"auto_tags": "ask", "lyrics_place": "musicdeck", "auto_art": True, "auto_lyrics": False},
+                  "odd choices fall back to the defaults")
+            check(library.import_progress["total"] == 0 or all(not t["album"] for t in library.tracks.values() if t["path"].endswith(".mp3")),
+                  "a library's first scan isn't new music")
+            emitted.clear()
+            arrive = os.path.join(lib2, "New Arrival")
+            for n, title in ((1, "arrival song"), (2, "second song")):
+                make_wav(os.path.join(arrive, f"0{n} {title}.wav"), title, "Singer One", "New Arrival", n)
+            library.rescan()
+            await library.scan_task
+            await library.import_task
+            arrival = next(k for k, v in library._albums().items() if v[0][1]["album"] == "New Arrival")
+            check(arrival in library.album_art and arrival in library.review and "source_note" in emitted,
+                  f"a new album gets its cover, goes on the list to review, and the user is told: {library.review}")
+            check(all(library.tracks[tid]["title"] in ("arrival song", "second song") for tid, _ in library._albums()[arrival]),
+                  "Ask me writes nothing")
+            review_tab = await plugin.center_tab(lid, "review")
+            tiles = {t["id"]: t for t in next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["tabs"]}
+            check(tiles["review"]["subtitle"] == "1 album" and review_tab["data"][1]["items"][0]["id"] == arrival
+                  and (await plugin.get_tags(lid, "album", arrival))["data"]["review"],
+                  "on Browse as To review, and its menu knows")
+            await plugin.dismiss_review(lid, arrival)
+            check(arrival not in library.review
+                  and "review" not in {t["id"] for t in next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["tabs"]},
+                  "dismissed, and the tile goes")
+
+            library.config.update(auto_tags="sure", auto_lyrics=True)
+            sure_dir = os.path.join(lib2, "Sure Thing")
+            for n, title in ((1, "arrival song"), (2, "second song")):
+                make_wav(os.path.join(sure_dir, f"0{n} {title}.wav"), title, "Singer One", "Sure Thing", n)
+            library.rescan()
+            await library.scan_task
+            await library.import_task
+            sure = next(k for k, v in library._albums().items() if v[0][1]["album"] == "Sure Thing")
+            sure_tracks = [library.tracks[tid] for tid, _ in library._albums()[sure]]
+            check(all(t["year"] == "2021" and t["genres"] == ["Pop"] for t in sure_tracks)
+                  and [t["title"] for t in sure_tracks] == ["arrival song", "second song"],
+                  f"Only when sure: what was empty is filled in, nothing written over: {[(t['title'], t['year']) for t in sure_tracks]}")
+            check(os.path.exists(os.path.join(library.lyrics_dir, library._albums()[sure][0][0] + ".lrc"))
+                  and not any(n.endswith(".lrc") for n in os.listdir(sure_dir)),
+                  "and its lyrics found, kept in MusicDeck")
+            library.config.update(auto_tags="ask", auto_lyrics=False)
         finally:
             mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE = real_mb
             await mb_runner.cleanup()

@@ -79,6 +79,21 @@ source (`MusicService.remove`).
   `[ti:]`, `[al:]`, then timed lines when synced), written through a hidden copy; tracks with lyrics already
   (a file, or in their tags) are skipped. For an album at once, or every track in the background
   (`status.lyrics`), half a second apart.
+- **New music** (`watch.py`, `_queue_new_albums`, `_import`): inotify watches every folder under the
+  roots (through ctypes; new folders watched as they appear), and a change rescans once the folders have
+  been quiet for 30 s; a scan also runs hourly and at start-up for what wasn't seen (an SD card filled
+  elsewhere, the watch limit reached). Tracks whose paths weren't in the index before are new (none on a
+  library's first scan); their albums are queued. Per album, as the source is set (`DEFAULTS`, in the
+  source's dialog): covers and the album artist's picture (`auto_art`); MusicBrainz (`auto_tags`):
+  "ask" puts an album MusicBrainz has by that title on the review list (`local-<id>-review.json`, Browse's
+  To review; looking it up and applying, editing its tags or dismissing it takes it off), "sure" applies
+  only when every likely release (same title, artist and track count, score 95+) is one release group,
+  and only to empty fields; lyrics for its new tracks (`auto_lyrics`). The source then announces a
+  summary (`announce` → the `source_note` event → a toast).
+- **Where lyrics are kept** (`lyrics_place`): in `local-<id>-lyrics/<track id>.lrc` (default), or beside
+  the song as the same-named `.lrc`, the convention Navidrome (`LyricsPriority`), Jellyfin, Plex,
+  foobar2000 and Poweramp read; `[ar:] [ti:] [al:] [length:]` head the file. Reading order: an `.lrc`
+  beside the song, its tags, MusicDeck's own, then the lyrics sites.
 - **Browse tiles**: `center_tabs` adds what's in each section (counts) and a few covers or artists'
   pictures for its tile, cached until the library or its pictures change.
 - **Art**: embedded pictures (extracted to `art-cache/`) or `cover.jpg`-style files next to the music.

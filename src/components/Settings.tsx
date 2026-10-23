@@ -125,9 +125,14 @@ const describeStatus = (s: ServiceInfo): string => {
           ? `Finding artwork… ${s.status.art.done} of ${s.status.art.total}`
           : "Finding artwork…";
       if (s.status.lyrics?.running) return `Finding lyrics… ${s.status.lyrics.done} of ${s.status.lyrics.total}`;
+      if (s.status.importing?.running)
+        return `Getting new music ready… ${s.status.importing.done} of ${s.status.importing.total}`;
       if (s.status.error) return `Scan failed: ${s.status.error}`;
       const n = s.status.tracks ?? 0;
-      return `${n} track${n === 1 ? "" : "s"}`;
+      const review = s.status.review ?? 0;
+      return (
+        `${n} track${n === 1 ? "" : "s"}` + (review ? ` · ${review} new album${review === 1 ? "" : "s"} to review` : "")
+      );
     }
     default:
       return "";

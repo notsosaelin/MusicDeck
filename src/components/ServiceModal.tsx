@@ -82,6 +82,58 @@ const LocalFields: FC<{
   );
 };
 
+/** What happens when albums are copied into the folders (local.py DEFAULTS): nothing written unasked. */
+const NewMusicFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+}> = ({ draft, setConfig }) => {
+  const c = draft.config;
+  const set = (patch: Record<string, any>) => setConfig({ ...c, ...patch });
+  return (
+    <Field
+      label="When new music arrives"
+      hint="New albums are noticed as they're copied in. Album covers and artist pictures are kept in MusicDeck, so your folders don't change unless a choice below writes to them."
+    >
+      <ToggleField
+        label="Find covers and artist pictures"
+        checked={c.auto_art ?? true}
+        onChange={(auto_art) => set({ auto_art })}
+      />
+      <DropdownItem
+        layout="below"
+        label="Tags from MusicBrainz"
+        rgOptions={[
+          { data: "ask", label: "Ask me (a list to review)" },
+          { data: "sure", label: "Only when sure (fill in empty fields)" },
+          { data: "off", label: "Off" },
+        ]}
+        selectedOption={c.auto_tags ?? "ask"}
+        onChange={(o) => set({ auto_tags: o.data })}
+      />
+      <ToggleField
+        label="Find lyrics"
+        checked={c.auto_lyrics ?? false}
+        onChange={(auto_lyrics) => set({ auto_lyrics })}
+      />
+      <DropdownItem
+        layout="below"
+        label="Keep lyrics"
+        description={
+          (c.lyrics_place ?? "musicdeck") === "beside"
+            ? "As an .lrc named like each song, in its folder: Navidrome, Jellyfin, Plex and foobar2000 read these too"
+            : "In MusicDeck's own folder: your music folders stay as they are"
+        }
+        rgOptions={[
+          { data: "musicdeck", label: "In MusicDeck" },
+          { data: "beside", label: "Beside the songs (.lrc)" },
+        ]}
+        selectedOption={c.lyrics_place ?? "musicdeck"}
+        onChange={(o) => set({ lyrics_place: o.data })}
+      />
+    </Field>
+  );
+};
+
 // Countries offered for radio's "Popular near you" (ISO codes; names come from the browser's own list)
 // prettier-ignore
 const RADIO_COUNTRIES = [
@@ -547,6 +599,7 @@ export const ServiceModal: FC<{
       <DialogHeader>{existing ? `Edit ${existing.name}` : `Add ${typeName}`}</DialogHeader>
       <DialogBody>
         {type === "local" && <LocalFields draft={draft} setConfig={setConfig} />}
+        {type === "local" && <NewMusicFields draft={draft} setConfig={setConfig} />}
         {type === "subsonic" && (
           <ServerFields
             draft={draft}
