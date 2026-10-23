@@ -13,7 +13,6 @@ import {
   MenuItem,
   MenuSeparator,
   ModalRoot,
-  Navigation,
   PanelSection,
   PanelSectionRow,
   TextField,
@@ -66,7 +65,7 @@ import { player } from "../player";
 import { pluginState, refreshState, useStore } from "../store";
 import { invalidateBrowserCache } from "../nav";
 import { ACCENT, DialogActions } from "./common";
-import { linkLastfm } from "../signIn";
+import { browseThenReturn, linkLastfm, readClipboard } from "../signIn";
 import { ServiceModal } from "./ServiceModal";
 
 const TYPE_ICONS: Record<string, ReactNode> = {
@@ -164,7 +163,7 @@ const BackupRows: FC = () => {
             Back up
           </DialogButton>
           <DialogButton style={{ minWidth: 0, flex: 1 }} onClick={restore}>
-            Restore…
+            Restore
           </DialogButton>
         </Focusable>
       </Field>
@@ -249,7 +248,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
     showContextMenu(
       <Menu label={service.name}>
         {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
-        <MenuItem onSelected={edit}>Edit…</MenuItem>
+        <MenuItem onSelected={edit}>Edit</MenuItem>
         {service.type === "local" || service.type === "steam" ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
             Rescan library
@@ -260,7 +259,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
         {service.type === "youtube" && <MenuItem onSelected={updateYoutube}>Update YouTube support</MenuItem>}
         <MenuSeparator />
         <MenuItem tone="destructive" onSelected={remove}>
-          Remove…
+          Remove
         </MenuItem>
       </Menu>,
       e?.currentTarget ?? window,
@@ -345,9 +344,27 @@ const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
   );
 };
 
+/** A ListenBrainz user token, as its settings page shows it */
+const LISTENBRAINZ_TOKEN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+/** A Last.fm API key or shared secret */
+const LASTFM_KEY = /\b[0-9a-f]{32}\b/i;
+
 /** Linking ListenBrainz: the user token from listenbrainz.org's settings page. */
-const ListenBrainzModal: FC<{ closeModal?: () => void }> = ({ closeModal }) => {
-  const [token, setToken] = useState("");
+const ListenBrainzModal: FC<{ closeModal?: () => void; initialToken?: string }> = ({
+  closeModal,
+  initialToken = "",
+}) => {
+  const [token, setToken] = useState(initialToken);
+  // the dialog would sit over the browser: it closes, and comes back as it was (with a token copied
+  // on the page, pasted) when the browser does
+  const getToken = () => {
+    closeModal?.();
+    browseThenReturn(LISTENBRAINZ_TOKEN_PAGE, async () => {
+      const copied = token ? null : (await readClipboard())?.match(LISTENBRAINZ_TOKEN)?.[0];
+      if (copied) notify("ListenBrainz", "Token pasted from the clipboard");
+      showModal(<ListenBrainzModal initialToken={copied ?? token} />);
+    });
+  };
   const [busy, setBusy] = useState(false);
   const link = async () => {
     setBusy(true);
@@ -363,10 +380,7 @@ const ListenBrainzModal: FC<{ closeModal?: () => void }> = ({ closeModal }) => {
       <DialogHeader>Link ListenBrainz</DialogHeader>
       <DialogBody>
         <TextField bIsPassword value={token} placeholder="User token" onChange={(e) => setToken(e.target.value)} />
-        <DialogButton
-          style={{ marginTop: 8 }}
-          onClick={() => Navigation.NavigateToExternalWeb(LISTENBRAINZ_TOKEN_PAGE)}
-        >
+        <DialogButton style={{ marginTop: 8 }} onClick={getToken}>
           Get your token
         </DialogButton>
       </DialogBody>
@@ -397,7 +411,7 @@ const ListenBrainzRow: FC<{ user: string; pending: number }> = ({ user, pending 
           style={{ minWidth: 0, width: "auto", padding: "8px 18px" }}
           onClick={() => (user ? unlink() : showModal(<ListenBrainzModal />))}
         >
-          {user ? "Unlink" : "Link…"}
+          {user ? "Unlink" : "Link"}
         </DialogButton>
       </Field>
     </PanelSectionRow>
@@ -408,9 +422,31 @@ const ListenBrainzRow: FC<{ user: string; pending: number }> = ({ user, pending 
  * Linking Last.fm: the user's own API account (Last.fm wants one per app, and there's no MusicDeck one
  * to share), then their approval on Last.fm's page. With an account given before, only the approval.
  */
-const LastfmModal: FC<{ hasKey: boolean; closeModal?: () => void }> = ({ hasKey, closeModal }) => {
-  const [key, setKey] = useState("");
-  const [secret, setSecret] = useState("");
+const LastfmModal: FC<{ hasKey: boolean; closeModal?: () => void; initialKey?: string; initialSecret?: string }> = ({
+  hasKey,
+  closeModal,
+  initialKey = "",
+  initialSecret = "",
+}) => {
+  const [key, setKey] = useState(initialKey);
+  const [secret, setSecret] = useState(initialSecret);
+  // as ListenBrainz's: out of the browser's way, back as it was; a key or secret copied on the page
+  // fills the first empty field
+  const createAccount = () => {
+    closeModal?.();
+    browseThenReturn(LASTFM_API_ACCOUNT_PAGE, async () => {
+      const copied = (await readClipboard())?.match(LASTFM_KEY)?.[0];
+      const fill = copied && copied !== key && copied !== secret ? (!key ? "key" : !secret ? "secret" : null) : null;
+      if (fill) notify("Last.fm", `${fill === "key" ? "API key" : "Shared secret"} pasted from the clipboard`);
+      showModal(
+        <LastfmModal
+          hasKey={hasKey}
+          initialKey={fill === "key" ? copied! : key}
+          initialSecret={fill === "secret" ? copied! : secret}
+        />,
+      );
+    });
+  };
   const ready = hasKey ? !key.trim() || !!secret.trim() : !!key.trim() && !!secret.trim();
   return (
     <ModalRoot closeModal={closeModal} onCancel={closeModal}>
@@ -432,10 +468,7 @@ const LastfmModal: FC<{ hasKey: boolean; closeModal?: () => void }> = ({ hasKey,
           placeholder={hasKey ? "Shared secret (same as before)" : "Shared secret"}
           onChange={(e) => setSecret(e.target.value)}
         />
-        <DialogButton
-          style={{ marginTop: 8 }}
-          onClick={() => Navigation.NavigateToExternalWeb(LASTFM_API_ACCOUNT_PAGE)}
-        >
+        <DialogButton style={{ marginTop: 8 }} onClick={createAccount}>
           Create an API account
         </DialogButton>
       </DialogBody>
@@ -472,7 +505,7 @@ const LastfmRow: FC<{ lastfm: PluginState["lastfm"] }> = ({ lastfm }) => {
             await refreshState();
           }}
         >
-          {user ? "Unlink" : "Link…"}
+          {user ? "Unlink" : "Link"}
         </DialogButton>
       </Field>
     </PanelSectionRow>

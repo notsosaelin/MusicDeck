@@ -74,7 +74,7 @@ async function showPlaylistPicker(item: Item, parent: EventTarget) {
   }
   showContextMenu(
     <Menu label="Add to playlist">
-      {!server && <MenuItem onSelected={() => newPlaylist(item)}>New playlist…</MenuItem>}
+      {!server && <MenuItem onSelected={() => newPlaylist(item)}>New playlist</MenuItem>}
       {!server && playlists.length > 0 && <MenuSeparator />}
       {playlists.map((p) => (
         <MenuItem
@@ -124,7 +124,7 @@ function queueItems(position: number, startMoving: () => void) {
   const next = position > current ? current + 1 : current;
   return [
     <MenuItem key="move" onSelected={startMoving}>
-      Move…
+      Move
     </MenuItem>,
     position !== current && position !== next && (
       <MenuItem key="next" onSelected={() => player.move(position, next)}>
@@ -224,7 +224,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
           {track.starred ? "Remove from favourites" : "Add to favourites"}
         </MenuItem>
       )}
-      <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist…</MenuItem>
+      <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist</MenuItem>
       {ctx.playlistId && (
         <MenuItem
           tone="destructive"
@@ -239,7 +239,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
       {isCurrent && <MenuSeparator />}
       {isCurrent && (
         <MenuItem onSelected={() => showSleepMenu(target)}>
-          {sleepTimerLabel() ? `Sleep timer · ${sleepTimerLabel()}` : "Sleep timer…"}
+          {sleepTimerLabel() ? `Sleep timer · ${sleepTimerLabel()}` : "Sleep timer"}
         </MenuItem>
       )}
 
@@ -341,9 +341,9 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
             )
           }
         >
-          Rename…
+          Rename
         </MenuItem>
-        <MenuItem onSelected={() => pickArtwork(c)}>Set artwork…</MenuItem>
+        <MenuItem onSelected={() => pickArtwork(c)}>Set artwork</MenuItem>
         {c.art?.startsWith("mdart:") && (
           <MenuItem
             onSelected={async () => {
@@ -376,7 +376,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
             )
           }
         >
-          Delete…
+          Delete
         </MenuItem>
       </Menu>,
       target,

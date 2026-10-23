@@ -233,7 +233,7 @@ interface RowActions {
  * native Quick Access lists. Extra actions are bound to controller buttons and shown in the footer.
  */
 /**
- * Move mode for a row (the Queue's "Move…"): up and down on the d-pad carry it along, A or B puts it
+ * Move mode for a row (the Queue's "Move"): up and down on the d-pad carry it along, A or B puts it
  * down. The list keeps its rows in place and redraws their content (moving the focused element itself
  * would lose Steam's focus), then steps the focus to the row now showing the moved track.
  */

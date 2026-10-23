@@ -22,7 +22,7 @@ export function confirmClearQueue() {
 }
 
 /**
- * The queue in the order it plays (shuffled or not). Y → Move… picks a track up for the d-pad.
+ * The queue in the order it plays (shuffled or not). Y → Move picks a track up for the d-pad.
  * `titled`: with its "Up next · n tracks" heading (Now playing's switch says it already).
  */
 export const Queue: FC<{ titled?: boolean }> = ({ titled = true }) => {
