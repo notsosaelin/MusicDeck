@@ -1049,7 +1049,8 @@ export const FittedGrid: FC<{
       const first = g.children[0] as HTMLElement | undefined;
       if (!rows.length || !first) return setFit(null);
       const pitch = rows.length > 1 ? rows[1] - rows[0] : first.offsetHeight + gap;
-      const head = (g.parentElement?.offsetTop ?? 0) - b.offsetTop;
+      // the title above the rows (the block is the rows' frame's offsetParent: its top is the title's height)
+      const head = g.parentElement?.offsetTop ?? 0;
       const room = scroller.clientHeight - TAB_BAR - 8 - head - 24;
       const fits = Math.max(1, Math.floor(room / pitch));
       setFit({ rows: fits, pitch, total: rows.length, spare: Math.max(0, room - fits * pitch) });

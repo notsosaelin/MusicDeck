@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.13.6
+
+- **Show all grids fit the screen:** the grid worked out the room under its title wrongly and showed one
+  row more than fits, the last cut off at the bottom even when focused. It shows only the rows that fit,
+  whole, and slides the rest in.
+
 ## 0.13.5
 
 - **Genre pages fixed:** a genre's grid opened pushed down the screen, its albums cut off at the bottom
