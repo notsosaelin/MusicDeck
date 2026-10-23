@@ -78,11 +78,18 @@ const LiveBar: FC = () => (
  * The lines next to the cover. A station shows the song it's playing when it says (song, artist,
  * station); otherwise the station, where it is and its genres, like any track's title/artist/album.
  */
-function cardText(item: QueueItem | undefined, song: OnAir | null): { title: string; subtitle: string[] } {
+function cardText(
+  item: QueueItem | undefined,
+  song: OnAir | null,
+  castingTo: string | null,
+): { title: string; subtitle: string[] } {
   if (!item) return { title: "Nothing playing", subtitle: [] };
   const { title, artist, album } = item.track;
-  if (song?.title) return { title: song.title, subtitle: [song.artist, title] };
-  return { title, subtitle: [artist, album] };
+  const lines = song?.title
+    ? { title: song.title, subtitle: [song.artist, title] }
+    : { title, subtitle: [artist, album] };
+  // casting: where the music is, in place of the last line, so the player keeps its height
+  return castingTo ? { ...lines, subtitle: [lines.subtitle[0], `On ${castingTo}`] } : lines;
 }
 
 let volumeSaveTimer: number | undefined;
@@ -126,7 +133,7 @@ export const NowPlaying: FC = () => {
             <RowText
               size="large"
               scroll="always"
-              {...cardText(item, song)}
+              {...cardText(item, song, state.castingTo?.name ?? null)}
               badge={item?.track.starred && <FaHeart style={{ color: ACCENT, fontSize: 12, flexShrink: 0 }} />}
             />
           </div>
@@ -183,8 +190,7 @@ export const NowPlaying: FC = () => {
           >
             <SliderField
               icon={volumeIcon}
-              // casting: the device's own volume, and where the music is
-              label={state.castingTo ? state.castingTo.name : undefined}
+              // casting, the device's own volume (its name is on the card, not a row of its own here)
               value={Math.round(state.volume * 100)}
               min={0}
               max={100}
@@ -216,7 +222,7 @@ const MiniProgress: FC = () => {
 };
 
 /**
- * What's playing, in one row above Library, Search and Queue (the mini player music apps keep
+ * What's playing, in one row above Library and Search (the mini player music apps keep
  * above their content): cover, title and artist, play/pause and next, and a thin progress line.
  * The row opens the Now Playing tab.
  */
@@ -225,7 +231,7 @@ export const MiniPlayer: FC<{ onOpen: () => void }> = ({ onOpen }) => {
   const item = state.queue[state.index];
   const song = useOnAir(item, state.playing);
   if (!item) return null;
-  const { title, subtitle } = cardText(item, song);
+  const { title, subtitle } = cardText(item, song, state.castingTo?.name ?? null);
   return (
     <PanelSection>
       <PanelSectionRow>

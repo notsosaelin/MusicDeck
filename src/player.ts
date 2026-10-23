@@ -125,6 +125,11 @@ class Deck {
     return this.element;
   }
 
+  /** Makes its element now if it hasn't one (a method, not a bare read of `audio`: bundlers drop those). */
+  build(): HTMLAudioElement {
+    return this.audio;
+  }
+
   /** It has an element now (without making one). */
   get built(): boolean {
     return !!this.element;
@@ -257,7 +262,7 @@ export class Player {
 
   constructor() {
     // the device's stand-in isn't an element, and casting talks to it directly: listen from the start
-    void this.castDeck.audio;
+    this.castDeck.build();
     this.remote.onVolume = (volume) => this.state.update({ volume });
     this.stallWatch = window.setInterval(() => this.checkStall(), 2000);
   }
@@ -675,6 +680,7 @@ export class Player {
     this.decks.forEach((d) => d.empty());
     this.remote.reset(started.data.volume);
     this.remote.loop = this.state.get().repeat === "one";
+    this.castDeck.build(); // listening to the device before it says anything
     this.deck = this.castDeck;
     onCastStatus((status) => this.onCastStatus(status));
     this.state.update({
