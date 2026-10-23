@@ -29,11 +29,11 @@ def main() -> None:
     part = sys.argv[1] if len(sys.argv) > 1 else "patch"
     if part not in ("major", "minor", "patch"):
         sys.exit("usage: bump.py [patch|minor|major]")
-    text = PACKAGE.read_text(encoding="utf-8")
+    text = PACKAGE.read_bytes().decode("utf-8")  # bytes: the file keeps its own line endings
     old = json.loads(text)["version"]
     new = bump(old, part)
     # only the version line changes, so the file keeps its layout
-    PACKAGE.write_text(re.sub(r'("version":\s*")[^"]+(")', rf"\g<1>{new}\g<2>", text, count=1), encoding="utf-8")
+    PACKAGE.write_bytes(re.sub(r'("version":\s*")[^"]+(")', rf"\g<1>{new}\g<2>", text, count=1).encode("utf-8"))
     print(new)
 
 
