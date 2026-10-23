@@ -32,6 +32,9 @@ LEADING_CREDIT = re.compile(r"^\s*[^:：]{1,25}[:：]\s*\S")
 LENGTH_SLACK = 3
 NETEASE_TRIES = 3
 KARAOKE = re.compile(r"instrumental|karaoke|伴奏", re.I)
+# LRCLIB slows to a crawl when it's struggling (it answers 503 when it's down): give up on it soon, so
+# Now Playing moves on to its visualizer instead of looking for lyrics for long
+LRCLIB_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
 
 def parse_lrc(text: str, source: str) -> Optional[dict[str, Any]]:
@@ -88,13 +91,13 @@ async def _ask_lrclib(session: aiohttp.ClientSession, track: dict[str, Any]) -> 
     headers = {"User-Agent": USER_AGENT}
     try:
         # /get is an exact match (title, artist, album, ±2s duration); /search is the fuzzy fallback
-        async with session.get(f"{LRCLIB}/get", params=params, headers=headers) as resp:
+        async with session.get(f"{LRCLIB}/get", params=params, headers=headers, timeout=LRCLIB_TIMEOUT) as resp:
             if resp.status not in (200, 404):  # 404: no exact match
                 raise ServiceError(f"LRCLIB answered {resp.status}")
             found = await resp.json() if resp.status == 200 else None
         if not found:
             q = {"track_name": track["title"], "artist_name": track["artist"]}
-            async with session.get(f"{LRCLIB}/search", params=q, headers=headers) as resp:
+            async with session.get(f"{LRCLIB}/search", params=q, headers=headers, timeout=LRCLIB_TIMEOUT) as resp:
                 if resp.status != 200:
                     raise ServiceError(f"LRCLIB answered {resp.status}")
                 results = await resp.json()

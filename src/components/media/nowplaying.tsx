@@ -213,7 +213,7 @@ const FRAME_MS = 1000 / 30;
  * middle, from the music as it's heard (low notes left, high right). It settles to a line when paused,
  * and draws only while it shows.
  */
-export const Visualizer: FC<{ height: number }> = ({ height }) => {
+export const Visualizer: FC<{ height: number; caption: string }> = ({ height, caption }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const el = canvas.current;
@@ -262,7 +262,7 @@ export const Visualizer: FC<{ height: number }> = ({ height }) => {
   return (
     <div style={{ height, display: "flex", flexDirection: "column", justifyContent: "center", gap: 14 }}>
       <canvas ref={canvas} style={{ width: "100%", height: Math.min(130, height * 0.4) }} />
-      <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>No lyrics for this track</div>
+      <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>{caption}</div>
     </div>
   );
 };

@@ -482,9 +482,15 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   />
                 ) : side === "setlist" ? (
                   <SetlistPanel />
-                ) : lyrics === null && kind === "music" && !state.castingTo && height > 0 ? (
-                  // no lyrics: the music, drawn
-                  <Visualizer height={height} />
+                ) : (lyrics === null || (lyrics && "error" in lyrics)) &&
+                  kind === "music" &&
+                  !state.castingTo &&
+                  height > 0 ? (
+                  // no lyrics, or the lyrics sites didn't answer (LRCLIB's 503s): the music, drawn
+                  <Visualizer
+                    height={height}
+                    caption={lyrics === null ? "No lyrics for this track" : "Lyrics aren't available right now"}
+                  />
                 ) : message ? (
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>
                 ) : lyrics && !("error" in lyrics) && height > 0 ? (

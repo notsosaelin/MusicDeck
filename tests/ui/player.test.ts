@@ -219,6 +219,47 @@ describe("transport", () => {
   });
 });
 
+describe("audio elements", () => {
+  const built = (p: Player) => ((p as any).decks as { built: boolean }[]).filter((d) => d.built).length;
+
+  test("are made for playing, and let go of entirely when the queue is cleared", async () => {
+    player.playList("src", tracks("a"), 0);
+    await settle();
+    assert.ok(built(player) > 0);
+    player.clear();
+    assert.equal(built(player), 0, "a cleared player keeps no element");
+    player.playList("src", tracks("b"), 0);
+    await settle();
+    assert.equal(playing(), "b");
+    assert.equal(audio().paused, false, "and plays again on new ones");
+  });
+
+  test("let go of while paused, play picks up from the same second on new ones", async () => {
+    player.playList("src", tracks("a", "b"), 0);
+    await settle();
+    player.toggle();
+    audio().currentTime = 73;
+    player.position.update({ current: 73 });
+    (player as any).releaseAudio();
+    assert.equal(built(player), 0);
+    calls.length = 0;
+    player.toggle();
+    await settle();
+    (audio() as unknown as EventTarget).dispatchEvent(new Event("loadedmetadata")); // as a real element does
+    assert.equal(playing(), "a");
+    assert.equal(audio().paused, false);
+    assert.equal(audio().currentTime, 73);
+  });
+
+  test("an unloaded player keeps none", async () => {
+    const old = new Player();
+    old.playList("src", tracks("a"), 0);
+    await settle();
+    old.destroy();
+    assert.equal(built(old), 0);
+  });
+});
+
 test("a player whose plugin copy unloaded stays silent, whatever its old buttons do", async () => {
   const old = new Player();
   old.playList("src", tracks("a", "b"), 0);

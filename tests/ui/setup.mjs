@@ -56,6 +56,8 @@ globalThis.AudioContext = class {
   createAnalyser = () => node({ fftSize: 256, getByteFrequencyData() {} });
   createMediaElementSource = () => node();
   resume() {}
-  close() {}
+  close() {
+    return Promise.resolve();
+  }
 };
 globalThis.MediaError = { MEDIA_ERR_ABORTED: 1 };

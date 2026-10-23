@@ -32,6 +32,8 @@ const STALL_TIMEOUT_MS = 12_000;
 const PROGRESS_SAVE_MS = 15_000;
 /** A live stream paused longer than this rejoins the broadcast on play instead of resuming the buffer. */
 const LIVE_REJOIN_MS = 30_000;
+/** Paused this long, the player lets go of its audio elements and graph; play builds them again */
+const IDLE_RELEASE_MS = 10 * 60_000;
 /** A stream link this close to running out (seconds) counts as gone when resuming */
 const EXPIRY_MARGIN_S = 60;
 /** How long before a track ends the next one is loaded on the idle deck (more when crossfading). */
@@ -80,7 +82,8 @@ export interface Position {
 /**
  * One of the player's two audio elements. One plays; the other is idle, or holds the next track loaded
  * ahead of time, so it can start the moment the current one ends (gapless) or fade in over it
- * (crossfade).
+ * (crossfade). The element is made when it's first needed and let go of entirely by release(): no
+ * element outlives the music it was for (see Player.releaseAudio).
  */
 class Deck {
   /** hls.js instance while an HLS source (SoundCloud, TIDAL DASH, some radio) is attached */
@@ -96,11 +99,35 @@ class Deck {
   /** When its stream's link stops working (Unix seconds), for links signed for a while (SoundCloud's) */
   expires?: number;
 
-  /** `audio` is an element, or while casting a RemoteAudio standing in for one */
-  constructor(readonly audio: HTMLAudioElement = new Audio()) {
-    // Required for the Web Audio graph to read samples from the loopback stream server
-    this.audio.crossOrigin = "anonymous";
-    this.audio.preload = "auto";
+  private element?: HTMLAudioElement;
+  /** Ends the player's listeners on the element when it's let go of */
+  private listening?: AbortController;
+
+  /**
+   * `make` builds its element (an <audio>, or while casting a RemoteAudio standing in for one) when
+   * it's first needed; `wire` hooks the player's listeners to it, until the element is let go of.
+   */
+  constructor(
+    private readonly make: () => HTMLAudioElement,
+    private readonly wire: (deck: Deck, audio: HTMLAudioElement, signal: AbortSignal) => void,
+  ) {}
+
+  get audio(): HTMLAudioElement {
+    if (!this.element) {
+      const audio = this.make();
+      // Required for the Web Audio graph to read samples from the loopback stream server
+      audio.crossOrigin = "anonymous";
+      audio.preload = "auto";
+      this.element = audio;
+      this.listening = new AbortController();
+      this.wire(this, audio, this.listening.signal);
+    }
+    return this.element;
+  }
+
+  /** It has an element now (without making one). */
+  get built(): boolean {
+    return !!this.element;
   }
 
   detachHls() {
@@ -116,13 +143,25 @@ class Deck {
     this.preloaded = undefined;
     this.expires = undefined;
     this.detachHls();
-    this.audio.pause();
-    this.audio.removeAttribute("src");
-    this.audio.load();
+    if (this.element) {
+      this.element.pause();
+      this.element.removeAttribute("src");
+      this.element.load();
+    }
     if (this.fader) {
       this.fader.gain.cancelScheduledValues(0);
       this.fader.gain.value = 1;
     }
+  }
+
+  /** Empties it and lets go of its element and its part of the graph, listeners and all. */
+  release() {
+    this.empty();
+    this.listening?.abort();
+    this.listening = undefined;
+    this.element = undefined;
+    this.leveller = this.fader = undefined;
+    this.switching = false;
   }
 }
 
@@ -148,10 +187,25 @@ export class Player {
   });
   readonly position = new Store<Position>({ current: 0, duration: 0 });
 
-  private readonly decks = [new Deck(), new Deck()];
+  /** Its elements match the player's volume and repeat as they're made */
+  private readonly newElement = () => {
+    const audio = new Audio();
+    audio.volume = this.casting ? this.localVolume : this.state.get().volume;
+    audio.loop = this.state.get().repeat === "one";
+    return audio;
+  };
+  private readonly decks = [
+    new Deck(this.newElement, (deck, audio, signal) => this.listen(deck, audio, signal)),
+    new Deck(this.newElement, (deck, audio, signal) => this.listen(deck, audio, signal)),
+  ];
   /** While casting, the "deck" that plays: the device, behind an element-like RemoteAudio */
   private readonly remote = new RemoteAudio();
-  private readonly castDeck = new Deck(this.remote as unknown as HTMLAudioElement);
+  private readonly castDeck = new Deck(
+    () => this.remote as unknown as HTMLAudioElement,
+    (deck, audio, signal) => this.listen(deck, audio, signal),
+  );
+  /** When paused this long, the player lets go of its elements and graph (rebuilt on play) */
+  private idleRelease?: number;
   /** The Deck's own volume, put back when casting ends */
   private localVolume = 0.8;
   /** The deck that's playing */
@@ -202,7 +256,8 @@ export class Player {
   private lastProgress = { time: 0, at: 0 };
 
   constructor() {
-    [...this.decks, this.castDeck].forEach((deck) => this.listen(deck));
+    // the device's stand-in isn't an element, and casting talks to it directly: listen from the start
+    void this.castDeck.audio;
     this.remote.onVolume = (volume) => this.state.update({ volume });
     this.stallWatch = window.setInterval(() => this.checkStall(), 2000);
   }
@@ -226,19 +281,20 @@ export class Player {
   }
 
   /** Events from the idle deck (preloading) or the one fading out don't describe what's playing. */
-  private listen(deck: Deck) {
-    const audio = deck.audio;
+  private listen(deck: Deck, audio: HTMLAudioElement, signal: AbortSignal) {
     const on = (name: string, handler: () => void) =>
       // an unloaded player's elements say nothing: it would save its queue over the new copy's
-      audio.addEventListener(name, () => deck === this.deck && !this.destroyed && handler());
+      audio.addEventListener(name, () => deck === this.deck && !this.destroyed && handler(), { signal });
     on("playing", () => {
       dlog("audio playing", { at: audio.currentTime });
+      window.clearTimeout(this.idleRelease);
       this.applySpeed();
       this.state.update({ playing: true, loading: false });
       this.onPlaying();
     });
     on("pause", () => {
       dlog("audio pause", { at: audio.currentTime, ended: audio.ended });
+      this.releaseWhenIdle();
       this.livePausedAt = Date.now();
       this.state.update({ playing: false });
       this.persistSession();
@@ -273,20 +329,25 @@ export class Player {
       dlog("audio ended", { at: audio.currentTime, duration: audio.duration });
       this.onEnded();
     });
-    audio.addEventListener("error", () => {
-      const err = audio.error;
-      if (deck !== this.deck) {
-        // a track loaded ahead of time that won't play: drop it, it's loaded normally when its turn comes
-        if (deck.preloaded && !deck.switching) deck.empty();
-        return;
-      }
-      dlog("audio error", { code: err?.code, message: err?.message, hls: !!deck.hls, switching: deck.switching });
-      // Tearing down the previous source (switching tracks, hls.js detaching) makes the element
-      // report an error that isn't about the new track; acting on it skipped good songs. With HLS
-      // attached, hls.js reports real failures itself, with proper fatal flags.
-      if (deck.switching || deck.hls || err?.code === MediaError.MEDIA_ERR_ABORTED) return;
-      this.recover(`media error ${err?.code ?? ""} ${err?.message ?? ""}`.trim());
-    });
+    audio.addEventListener(
+      "error",
+      () => {
+        const err = audio.error;
+        if (this.destroyed) return;
+        if (deck !== this.deck) {
+          // a track loaded ahead of time that won't play: drop it, it's loaded normally when its turn comes
+          if (deck.preloaded && !deck.switching) deck.empty();
+          return;
+        }
+        dlog("audio error", { code: err?.code, message: err?.message, hls: !!deck.hls, switching: deck.switching });
+        // Tearing down the previous source (switching tracks, hls.js detaching) makes the element
+        // report an error that isn't about the new track; acting on it skipped good songs. With HLS
+        // attached, hls.js reports real failures itself, with proper fatal flags.
+        if (deck.switching || deck.hls || err?.code === MediaError.MEDIA_ERR_ABORTED) return;
+        this.recover(`media error ${err?.code ?? ""} ${err?.message ?? ""}`.trim());
+      },
+      { signal },
+    );
   }
 
   /**
@@ -303,10 +364,42 @@ export class Player {
     window.clearInterval(this.sessionTimer);
     window.clearInterval(this.stallWatch);
     if (this.casting) void this.stopCasting();
-    this.cancelFade();
-    this.decks.forEach((d) => d.empty());
-    this.ctx?.close();
+    this.releaseAudio();
+    this.castDeck.release();
     this.state.update({ playing: false, loading: false });
+  }
+
+  /** Where the current track is: its element's time, or where it was when the element was let go of. */
+  private get heldAt(): number {
+    return this.deck.built ? this.audio.currentTime || 0 : this.position.get().current;
+  }
+
+  /**
+   * Lets go of the audio elements and the graph they feed, entirely: their streams, listeners and
+   * decoders, nothing kept. When the queue is cleared, when the plugin unloads, and after
+   * IDLE_RELEASE_MS paused; play builds them again (Deck.audio, ensureGraph).
+   */
+  private releaseAudio() {
+    window.clearTimeout(this.idleRelease);
+    this.cancelFade();
+    this.decks.forEach((d) => d.release());
+    if (!this.casting) this.deck = this.decks[0];
+    void this.ctx?.close().catch(() => {});
+    this.ctx = this.preamp = this.ducker = this.analyser = undefined;
+    this.filters = [];
+  }
+
+  /** Paused: after IDLE_RELEASE_MS still paused, let go of the elements (where it was is kept). */
+  private releaseWhenIdle() {
+    window.clearTimeout(this.idleRelease);
+    if (this.casting || this.destroyed) return;
+    this.idleRelease = window.setTimeout(() => {
+      if (this.casting || (this.deck.built && !this.audio.paused)) return;
+      this.position.update({ current: this.heldAt });
+      this.persistSession();
+      dlog("released idle audio", { at: this.position.get().current });
+      this.releaseAudio();
+    }, IDLE_RELEASE_MS);
   }
 
   /** Changes whenever the queue is replaced or cleared (see queueGeneration). */
@@ -441,8 +534,8 @@ export class Player {
     saveSession({ queue: [], index: -1, position: 0 }).catch(() => {});
     this.loadToken++;
     this.queueGeneration++;
-    this.cancelFade();
-    [...this.decks, this.castDeck].forEach((d) => d.empty());
+    this.castDeck.empty();
+    this.releaseAudio();
     this.order = [];
     this.state.update({ queue: [], index: -1, playing: false, loading: false });
     this.position.set({ current: 0, duration: 0 });
@@ -456,9 +549,14 @@ export class Player {
   // --- transport ---
 
   toggle() {
-    dlog("toggle", { paused: this.audio.paused });
+    dlog("toggle", { paused: !this.deck.built || this.audio.paused, released: !this.deck.built });
     if (this.state.get().index < 0) return;
     this.cancelFade();
+    // let go of while paused (releaseAudio): built again, from where it was
+    if (!this.deck.built && this.current) {
+      this.state.update({ loading: true });
+      return void this.prepare(this.state.get().index, true, this.current.track.live ? 0 : this.position.get().current);
+    }
     if (!this.audio.paused) return this.audio.pause();
     // a live stream resumed after a while would play stale buffered audio (or stall): rejoin it now
     if (this.current?.track.live && Date.now() - this.livePausedAt > LIVE_REJOIN_MS) {
@@ -497,21 +595,23 @@ export class Player {
   }
 
   previous() {
-    dlog("previous", { from: this.state.get().index, at: this.audio.currentTime });
+    dlog("previous", { from: this.state.get().index, at: this.heldAt });
     // Restart the track if we're more than a few seconds in, like every hardware player
     // (a live stream can't restart: previous is the previous station)
-    if (this.audio.currentTime > 3 && !this.current?.track.live) {
+    if (this.heldAt > 3 && !this.current?.track.live) {
       this.seek(0);
       return;
     }
     const pos = this.order.indexOf(this.state.get().index);
     if (pos > 0) this.load(this.order[pos - 1]);
-    else this.audio.currentTime = 0;
+    else this.seek(0);
   }
 
   seek(seconds: number) {
     if (!Number.isFinite(seconds)) return;
     this.cancelFade();
+    // let go of while paused: play picks up from here
+    if (!this.deck.built) return this.position.update({ current: Math.max(0, seconds) });
     this.audio.currentTime = seconds;
   }
 
@@ -528,7 +628,7 @@ export class Player {
   /** Back or ahead by `seconds` (talk's skip buttons), within the track. */
   skipBy(seconds: number) {
     const { duration } = this.position.get();
-    const to = Math.max(0, this.audio.currentTime + seconds);
+    const to = Math.max(0, this.heldAt + seconds);
     this.seek(duration ? Math.min(to, duration - 1) : to);
   }
 
@@ -545,6 +645,7 @@ export class Player {
     const talk = !!item && !this.casting && hasFeature(item.instanceId, "progress");
     const rate = talk ? this.state.get().speed : 1;
     for (const deck of this.decks) {
+      if (!deck.built) continue;
       deck.audio.preservesPitch = true;
       if (deck.audio.playbackRate !== rate) deck.audio.playbackRate = rate;
     }
@@ -552,8 +653,11 @@ export class Player {
 
   setVolume(volume: number) {
     if (!Number.isFinite(volume)) return;
-    for (const deck of this.casting ? [this.castDeck] : this.decks) deck.audio.volume = Math.min(1, Math.max(0, volume));
-    this.state.update({ volume: this.audio.volume });
+    const v = Math.min(1, Math.max(0, volume));
+    // elements made later take it from the state (newElement)
+    for (const deck of this.casting ? [this.castDeck] : this.decks)
+      if (deck.built || this.casting) deck.audio.volume = v;
+    this.state.update({ volume: v });
   }
 
   // --- casting ---
@@ -562,8 +666,8 @@ export class Player {
   async castTo(device: CastDevice): Promise<string | null> {
     const started = await castStart(device.id).catch((e) => ({ ok: false as const, error: String(e) }));
     if (!started.ok) return started.error;
-    const wasPlaying = !this.audio.paused;
-    const at = this.audio.currentTime || this.position.get().current;
+    const wasPlaying = this.deck.built && !this.audio.paused;
+    const at = this.heldAt;
     dlog("cast start", { kind: started.data.kind, at, wasPlaying });
     if (!this.casting) this.localVolume = this.state.get().volume;
     this.cancelFade();
@@ -597,7 +701,7 @@ export class Player {
     onCastStatus(undefined);
     this.remote.detach();
     this.deck = this.decks[0];
-    for (const deck of this.decks) deck.audio.volume = this.localVolume;
+    for (const deck of this.decks) if (deck.built) deck.audio.volume = this.localVolume;
     this.state.update({ castingTo: null, playing: false, loading: false, volume: this.localVolume });
   }
 
@@ -620,7 +724,7 @@ export class Player {
   cycleRepeat() {
     const modes: RepeatMode[] = ["off", "all", "one"];
     const repeat = modes[(modes.indexOf(this.state.get().repeat) + 1) % modes.length];
-    for (const deck of [...this.decks, this.castDeck]) deck.audio.loop = repeat === "one";
+    for (const deck of [...this.decks, this.castDeck]) if (deck.built) deck.audio.loop = repeat === "one";
     this.state.update({ repeat });
   }
 
@@ -957,7 +1061,7 @@ export class Player {
     }
     if (!this.sessionTimer) {
       this.sessionTimer = window.setInterval(
-        () => !this.audio.paused && this.persistSession(),
+        () => this.deck.built && !this.audio.paused && this.persistSession(),
         SESSION_SAVE_INTERVAL_MS,
       );
     }
@@ -1005,7 +1109,7 @@ export class Player {
   private persistSession() {
     const { queue, index } = this.state.get();
     if (!queue.length || this.destroyed) return;
-    saveSession({ queue, index, position: this.audio.currentTime || 0 }).catch(() => {});
+    saveSession({ queue, index, position: this.heldAt }).catch(() => {});
   }
 
   /** Append tracks similar to the current one. `advance` moves on to the first of them. */
@@ -1063,6 +1167,7 @@ export class Player {
   /** Lowers the volume to silence over `seconds`, pauses, then restores the volume for next time. */
   async fadeOutAndPause(seconds: number) {
     this.cancelFade();
+    if (!this.deck.built) return;
     const volume = this.audio.volume;
     const steps = Math.max(1, Math.round(seconds * 10));
     for (let i = 1; i <= steps && !this.audio.paused; i++) {
@@ -1105,6 +1210,7 @@ export class Player {
   }
 
   private checkStall() {
+    if (!this.deck.built) return;
     const t = this.audio.currentTime;
     if (this.audio.paused || this.audio.ended || !this.current) {
       this.lastProgress = { time: t, at: Date.now() };
