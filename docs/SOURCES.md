@@ -57,6 +57,21 @@ source (`MusicService.remove`).
   for the Info panel.
 - **Plays**: with "Report plays" on, each listen (`scrobble` with `submission`) counts in
   `local-<id>-plays.json` ({track id: {count, last}}), on the Deck only.
+- **Tag editing** (feature `tags`, `tagging.py`): a track's fields, or those an album's tracks share
+  (one they differ on shows as mixed and stays per file unless changed). Written to a dot-file copy
+  beside the file that then replaces it (the scan skips dot-files); "year" also updates an
+  `originaldate` the file has. What each key held before is kept per file in
+  `local-<id>-tag-history.json` for one undo. No edits while a scan runs; the index is re-read for the
+  files edited, and an album renamed as a whole keeps its own picture.
+- **MusicBrainz** (`musicbrainz.py`, only when asked): releases searched by album and artist ("Various
+  artists" left out), those with the album's track count first; a release's title, album artist, first
+  year, top genres, label, and track titles, artists and numbers (per disc). Track by track only when
+  the counts match. Applying finds the release's cover when the album has none. One request a second.
+- **Artwork** (feature `artwork`): albums' own pictures in `local-<id>-art/<album key>.<ext>`, shown before
+  folder covers and embedded art; art ids carry the picture's time (`t:<track>.<mtime>`) so a new one
+  isn't taken from the browser's cache. Found covers come from the Cover Art Archive (500 px), only for
+  a match whose title is the album's. "Find missing artwork" goes through every named album without a
+  picture in the background (`status.art`).
 - **Art**: embedded pictures (extracted to `art-cache/`) or `cover.jpg`-style files next to the music.
 - **Lyrics**: `.lrc` next to the file, embedded lyric tags, then the lyrics sites (see below).
 - **Playlists**: `.m3u`/`.m3u8` files in the library (relative paths resolved against the playlist).

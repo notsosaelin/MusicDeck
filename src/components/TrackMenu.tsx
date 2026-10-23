@@ -1,10 +1,12 @@
 import { openFilePicker } from "@decky/api";
+import { ReactNode } from "react";
 import { ConfirmModal, Menu, MenuItem, MenuSeparator, showContextMenu, showModal } from "@decky/ui";
 import {
   Collection,
   Track,
   addToPlaylist,
   createPlaylist,
+  createServicePlaylist,
   getUserPlaylists,
   isLocalPlaylist,
   localPlaylists,
@@ -15,6 +17,7 @@ import {
   playlistRename,
   playlistSetArt,
   saveAsPlaylist,
+  getTags,
   setPlayed,
   star,
 } from "../api";
@@ -25,6 +28,7 @@ import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../game
 import { hasFeature, player } from "../player";
 import { pluginState } from "../store";
 import { NameModal } from "./NameModal";
+import { albumManageItems, editTags } from "./TagEditor";
 
 type Item = { instanceId: string; track: Track };
 
@@ -41,13 +45,19 @@ export async function toggleStar(instanceId: string, track: Track) {
   notify(starred ? "Added to favourites" : "Removed from favourites", track.title, { instanceId, track });
 }
 
-function newPlaylist(item: Item) {
+/** A new playlist with the track in it: on the source when it keeps playlists, else MusicDeck's own. */
+function newPlaylist(item: Item, server: boolean) {
   showModal(
     <NameModal
       title="New playlist"
       action="Create"
       onSubmit={async (name) => {
-        await createPlaylist(item.instanceId, name, [item.track]);
+        if (server) {
+          const made = await createServicePlaylist(item.instanceId, name, [item.track.id]);
+          if (!made.ok) return notify("Couldn't make the playlist", made.error, item);
+        } else {
+          await createPlaylist(item.instanceId, name, [item.track]);
+        }
         invalidateBrowserCache();
         notify(`Added to ${name}`, item.track.title, item);
       }}
@@ -74,8 +84,8 @@ async function showPlaylistPicker(item: Item, parent: EventTarget) {
   }
   showContextMenu(
     <Menu label="Add to playlist">
-      {!server && <MenuItem onSelected={() => newPlaylist(item)}>New playlist</MenuItem>}
-      {!server && playlists.length > 0 && <MenuSeparator />}
+      <MenuItem onSelected={() => newPlaylist(item, server)}>New playlist</MenuItem>
+      {playlists.length > 0 && <MenuSeparator />}
       {playlists.map((p) => (
         <MenuItem
           key={p.id}
@@ -225,6 +235,9 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
         </MenuItem>
       )}
       <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist</MenuItem>
+      {hasFeature(instanceId, "tags") && (
+        <MenuItem onSelected={() => editTags(instanceId, "track", track.id, track.title)}>Edit tags</MenuItem>
+      )}
       {ctx.playlistId && (
         <MenuItem
           tone="destructive"
@@ -384,14 +397,23 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
     return;
   }
   if (c.kind === "playlist" || c.kind === "album") {
-    showContextMenu(
-      <Menu label={c.title}>
-        {gameMusicItem(instanceId, c)}
-        {!hasFeature(instanceId, "playlists") && (
-          <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
-        )}
-      </Menu>,
-      target,
-    );
+    const show = (manage: ReactNode[]) =>
+      showContextMenu(
+        <Menu label={c.title}>
+          {gameMusicItem(instanceId, c)}
+          {!hasFeature(instanceId, "playlists") && (
+            <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
+          )}
+          {manage.length > 0 && <MenuSeparator />}
+          {manage}
+        </Menu>,
+        target,
+      );
+    // a local album: its tags and picture too (whether it has a picture of its own decides "Use the files'")
+    if (c.kind === "album" && (hasFeature(instanceId, "tags") || hasFeature(instanceId, "artwork"))) {
+      getTags(instanceId, "album", c.id).then((r) => show(albumManageItems(instanceId, c, r.ok ? r.data : null)));
+    } else {
+      show([]);
+    }
   }
 }

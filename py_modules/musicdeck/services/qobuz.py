@@ -416,6 +416,14 @@ class QobuzService(MusicService):
     async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> None:
         await self._get("playlist/addTracks", playlist_id=playlist_id, track_ids=",".join(track_ids))
 
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        created = await self._get("playlist/create", name=name, is_public="false", is_collaborative="false")
+        if not (created or {}).get("id"):
+            raise ServiceError("Qobuz didn't make the playlist")
+        if track_ids:
+            await self.add_to_playlist(str(created["id"]), track_ids)
+        return self._playlist({**created, "tracks_count": len(track_ids)})
+
     # --- media ---
 
     async def stream(self, track_id: str) -> StreamSource:

@@ -134,7 +134,10 @@ export const trackActions = (instanceId: string, track: Track, ctx: MenuContext 
 export const canSave = (instanceId: string, c: Collection) =>
   (c.kind === "playlist" || c.kind === "album") && !isLocalPlaylist(c.id) && !hasFeature(instanceId, "playlists");
 export const hasCollectionMenu = (instanceId: string, c: Collection) =>
-  isLocalPlaylist(c.id) || canSave(instanceId, c) || (!!runningGame.get() && canPlayWithGame(c));
+  isLocalPlaylist(c.id) ||
+  canSave(instanceId, c) ||
+  (!!runningGame.get() && canPlayWithGame(c)) ||
+  (c.kind === "album" && hasFeature(instanceId, "tags"));
 
 /**
  * Plays an album or playlist straight from its row (X). Uses the page if it's been opened already;

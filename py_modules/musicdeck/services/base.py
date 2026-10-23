@@ -255,6 +255,10 @@ class MusicService:
     async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> None:
         raise NotImplementedError
 
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        """A new playlist on the service, named `name`, holding `track_ids`: its Collection."""
+        raise NotImplementedError
+
     async def save_progress(self, track: dict[str, Any], position: float, duration: float) -> None:
         """How far a long track got (reported every few seconds while it plays, and when paused)."""
         raise NotImplementedError

@@ -236,8 +236,131 @@ async def run():
         await restarted.scan_task
         check(restarted.plays[piece["id"]]["count"] == 2, "play counts are kept on the Deck")
         await restarted.stop()
+
+        print("local library: tags and artwork")
+        from aiohttp import web as mbweb
+        from musicdeck import musicbrainz as mbmod
+        # an MP3 (MPEG-1 layer III frames of silence), to write through EasyID3 as well as raw ID3 in WAV
+        mp3_dir = os.path.join(lib2, "Loose")
+        os.makedirs(mp3_dir, exist_ok=True)
+        frame = bytes.fromhex("fffb9064") + bytes(413)
+        with open(os.path.join(mp3_dir, "untitled.mp3"), "wb") as f:
+            f.write(frame * 20)
+        library.rescan()
+        await library.scan_task
+        loose = next(tid for tid, t in library.tracks.items() if t["path"].endswith("untitled.mp3"))
+        fields = (await plugin.get_tags(lid, "track", loose))["data"]
+        check([f["field"] for f in fields["fields"]][:4] == ["title", "artist", "album", "albumartist"]
+              and fields["fields"][0]["value"] == "untitled" and not fields["undo"], f"a track's fields: {fields}")
+        edited = await plugin.set_tags(lid, "track", loose, {"title": "Found", "artist": "Someone", "album": "Loose Ends",
+                                                             "track": "3", "year": "2001", "genre": "Pop; Rock"})
+        t = library.tracks[loose]
+        check(edited["ok"] and t["title"] == "Found" and t["artist"] == "Someone" and t["track"] == 3
+              and t["year"] == "2001" and t["genres"] == ["Pop", "Rock"], f"MP3 tags written and read back: {edited} {t}")
+        check(not any(n.startswith(".") for n in os.listdir(mp3_dir)), "no copy left beside the file")
+        check(not (await plugin.set_tags(lid, "track", loose, {"year": "nineteen"}))["ok"]
+              and not (await plugin.set_tags(lid, "track", loose, {"track": "-1"}))["ok"]
+              and not (await plugin.set_tags(lid, "track", loose, {}))["ok"], "bad years, numbers and empty edits refused")
+        check((await plugin.get_tags(lid, "track", loose))["data"]["undo"], "the edit can be undone")
+        await plugin.undo_tags(lid, "track", loose)
+        t = library.tracks[loose]
+        check(t["title"] == "untitled" and t["artist"] == "" and t["year"] == "" and t["genres"] == []
+              and not (await plugin.get_tags(lid, "track", loose))["data"]["undo"], f"undone, as it was: {t}")
+        check(not (await plugin.undo_tags(lid, "track", loose))["ok"], "nothing more to undo")
+
+        albums = (await plugin.open_collection(lid, "list", "albums"))["data"]["collections"]
+        works = next(a for a in albums if a["title"] == "Works")
+        album_fields = (await plugin.get_tags(lid, "album", works["id"]))["data"]
+        check([f["field"] for f in album_fields["fields"]] == ["album", "albumartist", "year", "genre", "label"]
+              and album_fields["files"] == 1, f"an album's shared fields: {album_fields}")
+        hits_fields = {f["field"]: f for f in (await plugin.get_tags(lid, "album", hits[0]["id"]))["data"]["fields"]}
+        check(hits_fields["genre"]["mixed"] and not hits_fields["album"]["mixed"] and hits_fields["album"]["value"] == "Hits 1999",
+              "tracks that differ show as mixed")
+        png = os.path.join(tmp, "cover.png")
+        with open(png, "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n" + bytes(32))
+        check((await plugin.album_art(lid, works["id"], "set", png))["ok"], "a picture picked for an album")
+        piece = (await plugin.search(lid, "piece"))["data"]["tracks"][0]
+        check("." in piece["art"].split(":", 1)[1], f"its art id changes, so it isn't shown from the cache: {piece['art']}")
+        src = await library.art(piece["art"])
+        check(src.path and src.path.endswith(".png") and library.art_dir in src.path, "the album's own picture comes first")
+        check(not (await plugin.album_art(lid, works["id"], "set", os.path.join(tmp, "x.txt")))["ok"], "only pictures")
+        renamed = (await plugin.set_tags(lid, "album", works["id"], {"album": "Collected Works", "year": "1986"}))["data"]
+        check(renamed["album_id"] != works["id"] and renamed["album_id"] in library.album_art
+              and works["id"] not in library.album_art, "a renamed album keeps its picture")
+        piece_t = library.tracks[piece["id"]]
+        check(piece_t["album"] == "Collected Works" and piece_t["year"] == "1986" and piece_t["title"] == "Piece",
+              f"an album edit writes its files (WAV, raw ID3; the original year too): {piece_t}")
+        await plugin.album_art(lid, renamed["album_id"], "clear")
+        check(renamed["album_id"] not in library.album_art and not os.listdir(library.art_dir), "and lets it go")
+
+        mb_calls = []
+        mb_release = {"id": "rel1", "title": "Hits 1999", "date": "2004", "artist-credit": [{"name": "Various Artists"}],
+                      "release-group": {"id": "rg1", "first-release-date": "1999-03-01", "genres": [{"name": "pop", "count": 3}]},
+                      "label-info": [{"label": {"name": "Hit Label"}}],
+                      "media": [{"position": 1, "format": "CD", "tracks": [
+                          {"position": 1, "title": "Hit One", "artist-credit": [{"name": "Singer One"}]},
+                          {"position": 2, "title": "Hit 2", "artist-credit": [{"name": "Singer Two"}]}]},
+                                {"position": 2, "format": "CD", "tracks": [
+                          {"position": 1, "title": "Hit 3", "artist-credit": [{"name": "Singer One"}]}]}]}
+
+        async def fake_mb(request):
+            mb_calls.append((request.path, dict(request.query), request.headers.get("User-Agent", "")))
+            if request.path == "/ws/2/release/":
+                return mbweb.json_response({"releases": [
+                    {"id": "rel2", "title": "Hits 1999", "score": 100, "date": "1999", "media": [{"track-count": 12, "format": "CD"}]},
+                    {"id": "rel1", "title": "Hits 1999", "score": 95, "date": "2004", "release-group": {"id": "rg1"},
+                     "artist-credit": [{"name": "Various Artists"}], "media": [{"track-count": 2}, {"track-count": 1}]}]})
+            if request.path == "/ws/2/release/rel1":
+                return mbweb.json_response(mb_release)
+            if request.path == "/release/rel1/front-500":
+                return mbweb.Response(body=JPEG, content_type="image/jpeg")
+            return mbweb.Response(status=404)
+        mb_app = mbweb.Application()
+        mb_app.router.add_route("*", "/{path:.*}", fake_mb)
+        mb_runner = mbweb.AppRunner(mb_app)
+        await mb_runner.setup()
+        mb_site = mbweb.TCPSite(mb_runner, "127.0.0.1", 0)
+        await mb_site.start()
+        mb_base = f"http://127.0.0.1:{mb_site._server.sockets[0].getsockname()[1]}"
+        real_mb = (mbmod.API, mbmod.CAA, mbmod.SPACING)
+        mbmod.API, mbmod.CAA, mbmod.SPACING = mb_base + "/ws/2", mb_base, 0
+        try:
+            found = (await plugin.lookup_album(lid, hits[0]["id"]))["data"]
+            check([r["id"] for r in found] == ["rel1", "rel2"] and found[0]["tracks"] == 3 and found[0]["group"] == "rg1",
+                  f"releases with the album's track count first: {found}")
+            check("artist:" not in mb_calls[0][1]["query"] and mb_calls[0][2].startswith("MusicDeck/"),
+                  f"a compilation isn't searched by 'Various artists'; the app names itself: {mb_calls[0]}")
+            preview = (await plugin.lookup_changes(lid, hits[0]["id"], "rel1"))["data"]
+            album_changes = {c[0]: (c[1], c[2]) for c in preview["album"]}
+            check(preview["matched"] and album_changes.get("Album artist") == ("", "Various Artists")
+                  and album_changes.get("Label") == ("", "Hit Label") and album_changes.get("Genre") == ("Pop; Dance", "Pop")
+                  and "Year" not in album_changes and "Album" not in album_changes,
+                  f"what would change for the album (its first year already right): {preview['album']}")
+            check(preview["tracks"] == [["01 song.wav", [["Title", "Hit 1", "Hit One"]]], ["03 song.wav", [["Track", "3", "1"]]]],
+                  f"and track by track, in disc order (numbered on each disc): {preview['tracks']}")
+            applied = (await plugin.apply_lookup(lid, hits[0]["id"], "rel1"))["data"]
+            new_hits = applied["album_id"]
+            check(applied["changed"] == 3 and applied.get("art") and new_hits in library.album_art,
+                  f"applied to every file, and the missing cover found: {applied}")
+            hit_tracks = (await plugin.open_collection(lid, "album", new_hits))["data"]["tracks"]
+            check([t["title"] for t in hit_tracks] == ["Hit One", "Hit 2", "Hit 3"]
+                  and all(library.tracks[t["id"]]["albumartist"] == "Various Artists" for t in hit_tracks),
+                  "the album now as MusicBrainz has it")
+            await plugin.album_art(lid, new_hits, "clear")
+            mb_calls.clear()
+            await plugin.find_missing_art(lid)
+            await library.art_task
+            st = next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["status"]["art"]
+            check(not st["running"] and st["total"] >= 1 and st["found"] == 1 and new_hits in library.album_art,
+                  f"missing artwork found in the background: {st}")
+        finally:
+            mbmod.API, mbmod.CAA, mbmod.SPACING = real_mb
+            await mb_runner.cleanup()
+        check(not (await plugin.get_tags(sid, "track", "nope"))["ok"], "a track that isn't there")
+
         await plugin.remove_service(lid)
-        check(not os.path.exists(library.plays_path), "and go with the source")
+        check(not os.path.exists(library.plays_path) and not os.path.exists(library.art_dir), "and go with the source")
 
         print("stream server")
         base, key = state["server"]["base"], state["server"]["key"]
@@ -547,6 +670,11 @@ async def run():
                 return emweb.json_response({"Id": "al1", "Name": "Album", "AlbumArtist": "A", "ImageTags": {}})
             if request.path == "/Items/al1":  # the Jellyfin path: Emby doesn't have it
                 return emweb.Response(status=404)
+            if request.path == "/Playlists" and request.method == "POST":
+                return emweb.json_response({"Id": "p2"})
+            if request.path == "/Users/eu/Items/p2":
+                return emweb.json_response({"Id": "p2", "Name": request.query.get("Name", "Road trip"), "Type": "Playlist",
+                                            "ChildCount": 1, "ImageTags": {}})
             if request.path == "/Items":
                 if request.query.get("ParentId") == "al1":
                     return emweb.json_response({"Items": [{"Id": "t1", "Name": "Song", "Type": "Audio", "AlbumId": "al1",
@@ -585,6 +713,12 @@ async def run():
             lists = await plugin.instances[eid].user_playlists()
             check([p["id"] for p in lists] == ["p1"] and not any("MediaTypes" in c[2] for c in emby_calls),
                   "playlists aren't filtered by media type (Emby would return everything)")
+            made = await plugin.create_service_playlist(eid, "  Road trip ", ["t1"])
+            create = next(c for c in emby_calls if c[:2] == ("POST", "/Playlists"))
+            check(made["ok"] and made["data"]["id"] == "p2" and made["data"]["kind"] == "playlist"
+                  and create[2].get("Name") == "Road trip" and create[2].get("Ids") == "t1" and create[2].get("UserId") == "eu"
+                  and create[2].get("MediaType") == "Audio", f"a new playlist on the server, with the track: {create}")
+            check(not (await plugin.create_service_playlist(eid, "   ", ["t1"]))["ok"], "a playlist needs a name")
             await plugin.instances[eid].star("t1", True)
             await plugin.instances[eid].star("t1", False)
             check([c[:2] for c in emby_calls[-2:]] == [("POST", "/Users/eu/FavoriteItems/t1"), ("DELETE", "/Users/eu/FavoriteItems/t1")],
@@ -666,6 +800,8 @@ async def run():
                 return meta([px_track("11", rating=10.0), px_track("12")])
             if path == "/library/metadata/11/nearest":
                 return pxweb.Response(status=403)  # sonic analysis needs Plex Pass
+            if path == "/playlists" and request.method == "POST":
+                return meta([{"ratingKey": "42", "type": "playlist", "title": request.query.get("title"), "leafCount": 2}])
             if path == "/playlists":
                 return meta([items["40"], {"ratingKey": "41", "type": "playlist", "title": "Smart", "smart": True}])
             if path == "/playlists/40/items":
@@ -766,6 +902,11 @@ async def run():
             await inst.add_to_playlist("40", ["11", "12"])
             check(px_calls[-1][2].get("uri") == "server://m1/com.plexapp.plugins.library/library/metadata/11,12",
                   "adding to a playlist names this server")
+            made = (await plugin.create_service_playlist(pid, "Road trip", ["11", "12"]))["data"]
+            check(made["id"] == "42" and made["title"] == "Road trip" and px_calls[-1][2].get("type") == "audio"
+                  and px_calls[-1][2].get("smart") == "0"
+                  and px_calls[-1][2].get("uri") == "server://m1/com.plexapp.plugins.library/library/metadata/11,12",
+                  f"a new Plex playlist made with its tracks: {px_calls[-1]}")
             before = len(px_calls)
             found = (await plugin.search(pid, "mix"))["data"]
             check(all(c[1] != "/hubs/search" for c in px_calls[before:]) and any(c[2].get("title") == "mix" for c in px_calls[before:])
@@ -2026,7 +2167,8 @@ async def run():
             ("search", plugin.search(gone, "q")), ("stream_info", plugin.stream_info(gone, "1")),
             ("forget_stream", plugin.forget_stream(gone, "1")), ("star", plugin.star(gone, "1", True)),
             ("radio", plugin.radio(gone, track)), ("user_playlists", plugin.user_playlists(gone)),
-            ("add_to_playlist", plugin.add_to_playlist(gone, "p", ["1"])), ("lyrics", plugin.get_lyrics(gone, track)),
+            ("add_to_playlist", plugin.add_to_playlist(gone, "p", ["1"])),
+            ("create_service_playlist", plugin.create_service_playlist(gone, "x", ["1"])), ("lyrics", plugin.get_lyrics(gone, track)),
             ("on_air", plugin.on_air(gone, "1")), ("test", plugin.test_service(gone)), ("rescan", plugin.rescan(gone)),
             ("steam_library", plugin.steam_library(gone, [], None)), ("youtube_update", plugin.youtube_update(gone)),
             ("set_active", plugin.set_active_service(gone)), ("remove", plugin.remove_service(gone)),

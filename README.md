@@ -22,6 +22,11 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   composers, all from the files' tags. MusicDeck counts plays on the Deck for Recently played, Most played and
   Not played yet; star ratings in the files make Top rated. Now Playing's Info shows the file's format
   (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays.
+- **Library manager for your files:** edit a track's or a whole album's tags (**Y** → Edit tags; the last
+  edit to each file can be undone), fill them in from a [MusicBrainz](https://musicbrainz.org) release you
+  pick after seeing exactly what would change, and give an album artwork: a picture of your own, its cover
+  from the Cover Art Archive, or every missing cover at once (Decky → MusicDeck → the source's menu →
+  Find missing artwork). Artwork is kept in MusicDeck; your music folders only change when you edit tags.
 - **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with tabs
   made for each source: Now Playing, then the source's own (YouTube Music's New, Charts, Moods and Genres;
   radio's Genres, Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists,
@@ -40,8 +45,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   controls stay on the Deck.
 - **Jump back in:** each source's home starts with the albums and playlists you played last, and an empty
   search shows your recent searches.
-- **MusicDeck playlists** for every source, stored on the device, with custom artwork. Save any playlist or
-  album from a source as your own.
+- **Playlists:** Navidrome, Jellyfin, Emby, Plex, Qobuz, Spotify and TIDAL keep yours on the service: add
+  to them, or make a new one from any track. Every other source gets **MusicDeck playlists**, stored on the
+  device, with custom artwork. Save any playlist or album from a source as your own.
 - **Downloads:** download a MusicDeck playlist and it plays with no connection (and no data used), from
   your own servers, SoundCloud, YouTube, Bandcamp, podcasts and the Live Music Archive. Each song is kept
   once however many playlists hold it, and goes when the last one lets it go.
@@ -66,7 +72,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 | Source | Account | What you get |
 | --- | --- | --- |
-| Local files | — | Recursive scan; albums, artists, genres, years, composers and folders from the tags; artwork, `.lrc`/embedded lyrics, ReplayGain, `.m3u` playlists, favourites, star ratings, play counts kept on the Deck, format and quality, radio |
+| Local files | — | Recursive scan; albums, artists, genres, years, composers and folders from the tags; artwork, `.lrc`/embedded lyrics, ReplayGain, `.m3u` playlists, favourites, star ratings, play counts kept on the Deck, format and quality, radio; tag editing, MusicBrainz look-ups, custom and found artwork |
 | Steam soundtracks | Your Steam account | Every soundtrack you own, from every Steam library (SD cards too); the running game's soundtrack first; install the rest with Steam's own dialog; one copy when a soundtrack ships MP3 and FLAC; composers, favourites, lyrics, radio |
 | Navidrome / Subsonic | Your server | Favourites, play reports, lyrics, similar-song radio, queue sync across devices, add to server playlists, ReplayGain |
 | Jellyfin | Your server | Sign in with Quick Connect (no typing), favourites, play reports, lyrics, Instant Mix radio, add to playlists, original-quality audio |

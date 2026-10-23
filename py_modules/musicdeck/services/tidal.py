@@ -437,6 +437,14 @@ class TidalService(MusicService):
                             data={"trackIds": ",".join(track_ids), "onDupes": "SKIP", "onArtifactNotFound": "SKIP"},
                             headers={"If-None-Match": headers.get("ETag", "")})
 
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        created = await self._request("POST", f"users/{self._user()}/playlists", data={"title": name, "description": ""})
+        if not (created or {}).get("uuid"):
+            raise ServiceError("TIDAL didn't make the playlist")
+        if track_ids:
+            await self.add_to_playlist(created["uuid"], track_ids)
+        return self._playlist(created)
+
     # --- media ---
 
     async def stream(self, track_id: str) -> StreamSource:

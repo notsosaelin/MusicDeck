@@ -530,6 +530,15 @@ class PlexService(MusicService):
         uri = f"server://{self.config.get('server')}/{LIBRARY}/library/metadata/{keys}"
         await self._request("PUT", f"/playlists/{_rating_key(playlist_id)}/items", uri=uri)
 
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        keys = ",".join(_rating_key(t) for t in track_ids)
+        uri = f"server://{self.config.get('server')}/{LIBRARY}/library/metadata/{keys}"
+        data = await self._request("POST", "/playlists", type="audio", title=name, smart=0, uri=uri)
+        found = ((data or {}).get("MediaContainer") or {}).get("Metadata") or []
+        if not found:
+            raise ServiceError("Plex didn't make the playlist")
+        return self._playlist(found[0])
+
 
 class PlexLink(SignIn):
     """A Plex PIN that becomes an account token once approved: either a four-character `code` the

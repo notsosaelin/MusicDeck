@@ -23,7 +23,7 @@ export interface Track {
   live?: boolean;
 }
 
-export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse";
+export type Feature = "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork";
 
 export interface LyricLine {
   /** seconds; null for unsynced lyrics */
@@ -269,6 +269,69 @@ export const getRadio = callable<[id: string, track: Track], Result<Track[]>>("r
 export const getUserPlaylists = callable<[id: string], Result<Collection[]>>("user_playlists");
 export const addToPlaylist = callable<[id: string, playlistId: string, trackIds: string[]], Result<null>>(
   "add_to_playlist",
+);
+/** Managing a library (local files): its tags (feature "tags") and albums' own pictures ("artwork"). */
+export type TagKind = "track" | "album";
+export interface TagField {
+  field: string;
+  label: string;
+  value: string;
+  /** an album's tracks differ on it: left as each has it unless changed */
+  mixed: boolean;
+}
+export interface TagInfo {
+  fields: TagField[];
+  files: number;
+  undo: boolean;
+  own_art: boolean;
+  album_id: string;
+}
+export interface TagResult {
+  changed: number;
+  failed: number;
+  error: string;
+  /** the album's id now (it changes with its name or artist) */
+  album_id: string;
+  art?: boolean;
+}
+export interface Release {
+  id: string;
+  group: string;
+  title: string;
+  artist: string;
+  year: string;
+  country: string;
+  tracks: number;
+  format: string;
+  score: number;
+}
+/** [label, before, after] */
+export type Change = [string, string, string];
+export interface LookupChanges {
+  release: { id: string; title: string; artist: string; year: string; label: string; genre: string };
+  album: Change[];
+  tracks: [string, Change[]][];
+  matched: boolean;
+}
+export const getTags = callable<[id: string, kind: TagKind, itemId: string], Result<TagInfo>>("get_tags");
+export const setTags = callable<[id: string, kind: TagKind, itemId: string, changes: Record<string, string>], Result<TagResult>>(
+  "set_tags",
+);
+export const undoTags = callable<[id: string, kind: TagKind, itemId: string], Result<TagResult>>("undo_tags");
+export const lookupAlbum = callable<[id: string, albumId: string], Result<Release[]>>("lookup_album");
+export const lookupChanges = callable<[id: string, albumId: string, releaseId: string], Result<LookupChanges>>(
+  "lookup_changes",
+);
+export const applyLookup = callable<[id: string, albumId: string, releaseId: string], Result<TagResult>>("apply_lookup");
+export const albumArt = callable<
+  [id: string, albumId: string, action: "set" | "find" | "clear", imagePath?: string],
+  Result<boolean | null>
+>("album_art");
+export const findMissingArt = callable<[id: string], Result<null>>("find_missing_art");
+
+/** A new playlist on the source itself (feature "playlists"), holding these tracks. */
+export const createServicePlaylist = callable<[id: string, name: string, trackIds: string[]], Result<Collection>>(
+  "create_service_playlist",
 );
 export const saveSession = callable<[session: Session], void>("save_session");
 export const loadSession = callable<[], Session | null>("load_session");

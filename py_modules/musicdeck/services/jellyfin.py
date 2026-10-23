@@ -372,6 +372,14 @@ class JellyfinService(MusicService):
         await self._request("POST", f"/Playlists/{playlist_id}/Items",
                             params={"ids": ",".join(track_ids), "userId": self.config.get("user_id")})
 
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        # in the query, which Emby and Jellyfin both read
+        created = await self._request("POST", "/Playlists", params={
+            "Name": name, "Ids": ",".join(track_ids), "UserId": self.config.get("user_id"), "MediaType": "Audio"})
+        if not (created or {}).get("Id"):
+            raise ServiceError(f"{self.display_name} didn't make the playlist")
+        return self._playlist(await self._item(created["Id"]))
+
 
 class JellyfinQuickConnect(SignIn):
     """Jellyfin's Quick Connect: the server issues a code, the user approves it in a Jellyfin app

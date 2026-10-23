@@ -641,6 +641,16 @@ class SpotifyService(MusicService):
                         body={"uris": [f"spotify:track:{t}" for t in track_ids]})
         self.cache.drop(lambda k: playlist_id in k or "rootlist" in k)
 
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        me = self.config.get("username") or (await self._get("/me")).get("id")
+        created = await self._api("POST", f"/users/{me}/playlists", body={"name": name, "public": False})
+        if not (created or {}).get("id"):
+            raise ServiceError("Spotify didn't make the playlist")
+        if track_ids:
+            await self.add_to_playlist(created["id"], track_ids)
+        self.cache.drop(lambda k: "rootlist" in k or "/me/playlists" in k)
+        return self._playlist(created)
+
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
         """Recommendations where Spotify still allows them; otherwise the artist's top tracks plus
         more from the same album, shuffled, so the music keeps going."""

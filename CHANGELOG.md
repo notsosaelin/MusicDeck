@@ -3,6 +3,24 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.5.0
+
+**Local files: a library manager**
+- **Edit tags** of a track, or of a whole album at once (fields its tracks differ on show as Mixed and stay
+  as each file has them unless you change them). The last edit to each file can be undone.
+- **Look up on MusicBrainz:** pick the release your album is, see exactly what would change (album
+  artist, year, genres, label, track titles and numbers), then apply. Track by track only when the
+  release has as many tracks as your album.
+- **Artwork:** set a picture of your own for an album, find its cover on the Cover Art Archive, or find
+  every missing cover at once (Decky → MusicDeck → the source's menu → Find missing artwork). Kept in
+  MusicDeck, so your music folders aren't touched, and "Use the files' artwork" goes back.
+- Files are never written in place: each edit goes to a copy that replaces the file in one step.
+- Hidden files (macOS's `._` leftovers) are no longer counted as music.
+
+**Playlists**
+- Navidrome, Jellyfin, Emby, Plex, Qobuz, Spotify and TIDAL can make a **new playlist** on the service from
+  any track (Add to playlist → New playlist), not only add to ones already there.
+
 ## 0.4.2
 
 - Moving between Now playing and the other tabs in the Quick Access panel (L1/R1, or A on a tab) no longer

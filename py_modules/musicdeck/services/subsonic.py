@@ -307,3 +307,14 @@ class SubsonicService(MusicService):
 
     async def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> None:
         await self._call("updatePlaylist", playlistId=playlist_id, songIdToAdd=track_ids)
+
+    async def create_playlist(self, name: str, track_ids: list[str]) -> dict[str, Any]:
+        created = (await self._call("createPlaylist", name=name, songId=track_ids)).get("playlist")
+        if not created:
+            # servers before API 1.14 answer with nothing: the newest of that name is it
+            found = [p for p in (await self._call("getPlaylists")).get("playlists", {}).get("playlist", [])
+                     if p.get("name") == name]
+            if not found:
+                raise ServiceError("The server didn't make the playlist")
+            created = max(found, key=lambda p: p.get("created", ""))
+        return self._playlist(created)

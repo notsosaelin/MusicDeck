@@ -4,7 +4,13 @@ genres, year, rating, label, compilation), lengths, quality (format, bit depth, 
 ReplayGain and embedded art are read with mutagen and cached in an index (local-<id>.json), so a
 rescan only re-reads files whose size or modification time changed. Files are served straight from
 disk by the stream server. Favourites (local-<id>-favourites.json) and play counts
-(local-<id>-plays.json) are kept on the Deck; nothing leaves it except LRCLIB lyrics lookups.
+(local-<id>-plays.json) are kept on the Deck.
+
+Managing the library: tags are edited in the files themselves (tagging.py: written to a copy that then
+replaces the file; each file's last edit can be undone, from local-<id>-tag-history.json), and filled in
+from a MusicBrainz release the user picks. Album artwork set by the user, or found on the Cover Art
+Archive, is kept in local-<id>-art/ (the music folders aren't touched) and shown before the files' own.
+Nothing leaves the Deck except LRCLIB lyrics lookups and the MusicBrainz look-ups the user asks for.
 """
 import asyncio
 import hashlib
@@ -15,7 +21,14 @@ import re
 import time
 from typing import Any, Optional
 
-from .. import lyrics, models
+import shutil
+
+import aiohttp
+
+from .. import lyrics, models, tagging
+from ..background import spawn
+from ..musicbrainz import MusicBrainz
+from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
 
 try:
@@ -57,6 +70,8 @@ LOSSLESS = {"FLAC", "ALAC", "WAV"}
 VARIOUS = "Various artists"
 SHELF = 20  # tracks or albums in a Home row
 LIST_MAX = 100  # tracks in a played or rated list
+ART_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_ART_BYTES = 15 * 1024 * 1024
 
 
 def _first(tags: Any, key: str) -> str:
@@ -322,7 +337,8 @@ class LocalService(MusicService):
     type = "local"
     display_name = "Local files"
     # scrobble: plays counted on the Deck (Most played, Recently played), when "Report plays" is on
-    features = frozenset({"star", "lyrics", "radio", "scrobble"})
+    # tags: edited in the files, and looked up on MusicBrainz; artwork: albums' own pictures, set or found
+    features = frozenset({"star", "lyrics", "radio", "scrobble", "tags", "artwork"})
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
@@ -339,6 +355,18 @@ class LocalService(MusicService):
         # the tracks grouped into albums, made again when the tracks change
         self._albums_cache: Optional[dict[str, list[tuple[str, dict[str, Any]]]]] = None
         self.folder_covers: dict[str, Optional[str]] = {}
+        # albums' own pictures, set by the user or found on the Cover Art Archive: {album key: file name}
+        self.art_dir = os.path.join(runtime_dir, f"local-{instance_id}-art")
+        self.album_art: dict[str, str] = {}
+        # each file's last tag edit, to undo it: {track id: {"keys": {key: values before}, "at"}}
+        self.history_path = os.path.join(runtime_dir, f"local-{instance_id}-tag-history.json")
+        self.history: dict[str, dict[str, Any]] = {}
+        # one edit at a time, and none while a scan runs (it would put back what it read before)
+        self.edit_lock = asyncio.Lock()
+        self.mb: Optional[MusicBrainz] = None
+        self.http: Optional[aiohttp.ClientSession] = None
+        self.art_task: Optional[asyncio.Task[None]] = None
+        self.art_progress = {"running": False, "done": 0, "total": 0, "found": 0}
         self.scan_task: Optional[asyncio.Task[None]] = None
         self.scan_progress = {"scanning": False, "found": 0, "last_scan": 0.0, "error": ""}
 
@@ -359,18 +387,33 @@ class LocalService(MusicService):
             self.plays = {k: v for k, v in plays.items() if isinstance(v, dict)} if isinstance(plays, dict) else {}
         except (FileNotFoundError, json.JSONDecodeError):
             self.plays = {}
+        try:
+            with open(self.history_path, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            self.history = history if isinstance(history, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.history = {}
+        try:
+            self.album_art = {os.path.splitext(n)[0]: n for n in os.listdir(self.art_dir)
+                              if os.path.splitext(n)[1].lower() in ART_TYPES}
+        except OSError:
+            self.album_art = {}
         self.rescan()
 
     async def stop(self) -> None:
-        if self.scan_task:
-            self.scan_task.cancel()
+        for task in (self.scan_task, self.art_task):
+            if task:
+                task.cancel()
+        if self.http:
+            await self.http.close()
 
     def remove(self) -> None:
-        for path in (self.index_path, self.favourites_path, self.plays_path):
+        for path in (self.index_path, self.favourites_path, self.plays_path, self.history_path):
             try:
                 os.remove(path)
             except OSError:
                 pass
+        shutil.rmtree(self.art_dir, ignore_errors=True)
 
     async def test(self) -> str:
         if not self.roots:
@@ -381,7 +424,7 @@ class LocalService(MusicService):
         return f"{models.count(len(self.tracks), 'track')} indexed"
 
     def status(self) -> dict[str, Any]:
-        return {**self.scan_progress, "tracks": len(self.tracks)}
+        return {**self.scan_progress, "tracks": len(self.tracks), "art": dict(self.art_progress)}
 
     # --- scanning ---
 
@@ -411,6 +454,9 @@ class LocalService(MusicService):
             for directory, dirnames, filenames in os.walk(root):
                 dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
                 for name in sorted(filenames):
+                    # hidden files: macOS's "._" shadows, and a copy being tag-edited (tagging.py)
+                    if name.startswith(".") or tagging.is_temp(name):
+                        continue
                     ext = os.path.splitext(name)[1].lower()
                     path = os.path.join(directory, name)
                     if ext in PLAYLIST_EXTENSIONS:
@@ -530,9 +576,20 @@ class LocalService(MusicService):
         self._albums_cache = albums
         return albums
 
+    def _art_id(self, tid: str, t: dict[str, Any]) -> str:
+        """t:<track id>, with a version when its album has a picture of its own (a new one is a new id,
+        so the browser doesn't show the old one from its cache)."""
+        own = self.album_art.get(self._album_key(t))
+        if not own:
+            return f"t:{tid}"
+        try:
+            return f"t:{tid}.{int(os.path.getmtime(os.path.join(self.art_dir, own)))}"
+        except OSError:
+            return f"t:{tid}"
+
     def _track(self, tid: str, t: dict[str, Any]) -> dict[str, Any]:
         return models.track(tid, t["title"], t["artist"] or t["albumartist"], t["album"], t["duration"],
-                            art=f"t:{tid}", album_id=self._album_key(t),
+                            art=self._art_id(tid, t), album_id=self._album_key(t),
                             artist_id=_hash((t["albumartist"] or t["artist"] or "Unknown artist").lower()),
                             starred=tid in self.favourites, gain=t.get("rg"))
 
@@ -540,7 +597,7 @@ class LocalService(MusicService):
         tid, t = items[0]
         title = t["album"] or os.path.basename(self._album_folder(t))
         subtitle = self._album_owner(items) + (f" · {t['year']}" if t["year"] else "")
-        return models.collection(key, "album", title, subtitle, art=f"t:{tid}")
+        return models.collection(key, "album", title, subtitle, art=self._art_id(tid, t))
 
     def _album_collections(self, albums: list[tuple[str, list[tuple[str, dict[str, Any]]]]]) -> list[dict[str, Any]]:
         return [self._album_collection(k, v) for k, v in albums]
@@ -820,6 +877,278 @@ class LocalService(MusicService):
                 return os.path.relpath(directory, os.path.dirname(root))
         return directory
 
+    # --- managing the library: tags ---
+
+    def _target(self, kind: str, id: str) -> list[tuple[str, dict[str, Any]]]:
+        """The files a tag edit is for: one track, or an album's tracks."""
+        if kind == "track" and id in self.tracks:
+            return [(id, self.tracks[id])]
+        if kind == "album" and id in self._albums():
+            return list(self._albums()[id])
+        raise ServiceError("That's no longer in the library")
+
+    @staticmethod
+    def _field_value(t: dict[str, Any], field: str) -> str:
+        if field == "track":
+            return str(t["track"] or "")
+        if field == "disc":
+            return str(t["disc"] or "")
+        if field == "genre":
+            return "; ".join(t.get("genres") or ([t["genre"]] if t["genre"] else []))
+        return str(t.get(field) or "")
+
+    async def tag_fields(self, kind: str, id: str) -> dict[str, Any]:
+        """What the tag editor shows: {"fields": [{"field", "label", "value", "mixed"}], "files", "undo",
+        "own_art"}. An album shows the fields its tracks share; one its tracks differ on is "mixed"."""
+        items = self._target(kind, id)
+        names = tagging.ALBUM_FIELDS if kind == "album" else tuple(f for f, _ in tagging.FIELDS)
+        fields = []
+        for field, label in tagging.FIELDS:
+            if field not in names:
+                continue
+            values = {self._field_value(t, field) for _, t in items}
+            fields.append({"field": field, "label": label, "value": values.pop() if len(values) == 1 else "",
+                           "mixed": len(values) > 0})
+        album = self._album_key(items[0][1])
+        return {"fields": fields, "files": len(items), "undo": any(tid in self.history for tid, _ in items),
+                "own_art": album in self.album_art, "album_id": album}
+
+    async def edit_tags(self, kind: str, id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        """Writes the changes to the files; returns {"changed", "album_id"} (the album's id changes with
+        its name or artist)."""
+        try:
+            changes = tagging.clean(changes, tagging.ALBUM_FIELDS if kind == "album"
+                                    else tuple(f for f, _ in tagging.FIELDS))
+        except tagging.TagError as e:
+            raise ServiceError(str(e))
+        if not changes:
+            raise ServiceError("Nothing to change")
+        return await self._write_tags([(tid, changes) for tid, _ in self._target(kind, id)])
+
+    async def undo_tags(self, kind: str, id: str) -> dict[str, Any]:
+        """Puts back what the last edit of each file changed."""
+        undoable = [tid for tid, _ in self._target(kind, id) if tid in self.history]
+        if not undoable:
+            raise ServiceError("Nothing to undo")
+        return await self._write_tags([(tid, None) for tid in undoable])
+
+    async def _write_tags(self, edits: list[tuple[str, Optional[dict[str, Any]]]]) -> dict[str, Any]:
+        """Each (track id, changes) written, or (track id, None) undone; the index, history and the
+        album's picture follow."""
+        if self.scan_progress["scanning"]:
+            raise ServiceError("The library is being scanned; try again when it's done")
+        async with self.edit_lock:
+            old_albums = {self._album_key(self.tracks[tid]) for tid, _ in edits if tid in self.tracks}
+            changed, errors = 0, []
+            for tid, changes in edits:
+                t = self.tracks.get(tid)
+                if not t:
+                    continue
+                try:
+                    if changes is None:
+                        await asyncio.to_thread(tagging.write_raw, t["path"], self.history[tid]["keys"])
+                        self.history.pop(tid, None)
+                    else:
+                        before = await asyncio.to_thread(tagging.write, t["path"], changes)
+                        self.history[tid] = {"keys": before, "at": time.time()}
+                except tagging.TagError as e:
+                    errors.append(str(e))
+                    continue
+                await asyncio.to_thread(self._reread, tid)
+                changed += 1
+            self._albums_cache = None
+            new_albums = {self._album_key(self.tracks[tid]) for tid, _ in edits if tid in self.tracks}
+            # an album renamed as a whole keeps its picture
+            if len(old_albums) == 1 and len(new_albums) == 1 and old_albums != new_albums:
+                self._move_art(old_albums.pop(), next(iter(new_albums)))
+            await asyncio.to_thread(self._save_after_edit)
+        if not changed:
+            raise ServiceError(errors[0] if errors else "Nothing was changed")
+        return {"changed": changed, "failed": len(errors), "error": errors[0] if errors else "",
+                "album_id": next(iter(new_albums)) if len(new_albums) == 1 else ""}
+
+    def _reread(self, tid: str) -> None:
+        t = self.tracks[tid]
+        try:
+            st = os.stat(t["path"])
+        except OSError:
+            return
+        self.tracks[tid] = {"path": t["path"], "mtime": st.st_mtime, "size": st.st_size,
+                            "added": t.get("added", t["mtime"]), **read_tags(t["path"])}
+
+    def _save_after_edit(self) -> None:
+        self._save_index()
+        tmp = self.history_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self.history, f)
+        os.replace(tmp, self.history_path)
+
+    # --- managing the library: MusicBrainz ---
+
+    def _musicbrainz(self) -> MusicBrainz:
+        if self.mb is None:
+            self.http = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls()),
+                                              timeout=aiohttp.ClientTimeout(total=20))
+            self.mb = MusicBrainz(self.http)
+        return self.mb
+
+    async def lookup(self, album_id: str) -> list[dict[str, Any]]:
+        """MusicBrainz releases that may be this album, best first."""
+        items = self._target("album", album_id)
+        first = items[0][1]
+        album = first["album"] or os.path.basename(self._album_folder(first))
+        owner = self._album_owner(items)
+        return await self._musicbrainz().search("" if owner == VARIOUS else owner, album, len(items))
+
+    async def lookup_changes(self, album_id: str, release_id: str) -> dict[str, Any]:
+        """What taking a release's details would change: {"release", "album": [[label, old, new]],
+        "tracks": [[file, [[label, old, new]]]], "matched"}. Track by track only when the release has as
+        many tracks as the album (matched in disc and track order); else the album's details only."""
+        plan = await self._lookup_plan(album_id, release_id)
+        labels = dict(tagging.FIELDS)
+        album = [[labels[f], old, new] for f, (old, new) in plan["album"].items()]
+        tracks = [[os.path.basename(self.tracks[tid]["path"]), [[labels[f], old, new] for f, (old, new) in c.items()]]
+                  for tid, c in plan["tracks"].items() if c]
+        r = plan["release"]
+        return {"release": {k: r[k] for k in ("id", "title", "artist", "year", "label")} | {"genre": "; ".join(r["genres"])},
+                "album": album, "tracks": tracks, "matched": plan["matched"]}
+
+    async def apply_lookup(self, album_id: str, release_id: str) -> dict[str, Any]:
+        """Writes a release's details to the album's files; finds its cover too when the album has none."""
+        plan = await self._lookup_plan(album_id, release_id)
+        album_changes = {f: new for f, (_, new) in plan["album"].items()}
+        edits = [(tid, {**album_changes, **{f: new for f, (_, new) in plan["tracks"].get(tid, {}).items()}})
+                 for tid, _ in self._target("album", album_id)]
+        edits = [(tid, c) for tid, c in edits if c]
+        result = await self._write_tags(edits) if edits else {"changed": 0, "album_id": album_id}
+        new_album = result.get("album_id") or album_id
+        if new_album in self._albums() and not await self._has_art(new_album):
+            cover = await self._musicbrainz().cover(release_id, plan["release"]["group"])
+            if cover:
+                self._save_art(new_album, *cover)
+                result["art"] = True
+        return result
+
+    async def _lookup_plan(self, album_id: str, release_id: str) -> dict[str, Any]:
+        items = self._target("album", album_id)
+        r = await self._musicbrainz().release(release_id)
+        first = items[0][1]
+        wanted = {"album": r["title"], "albumartist": r["artist"], "year": r["year"],
+                  "genre": "; ".join(r["genres"]), "label": r["label"]}
+        album: dict[str, tuple[str, str]] = {}
+        for field, new in wanted.items():
+            # only what MusicBrainz knows, and only what differs from every track
+            if new and any(self._field_value(t, field) != new for _, t in items):
+                album[field] = (self._field_value(first, field), new)
+        matched = len(r["tracks"]) == len(items)
+        tracks: dict[str, dict[str, tuple[str, str]]] = {}
+        if matched:
+            for (tid, t), rt in zip(items, r["tracks"]):
+                change = {}
+                for field, new in (("title", rt["title"]), ("artist", rt["artist"]), ("track", str(rt["track"])),
+                                   ("disc", str(rt["disc"]) if r["discs"] > 1 else "")):
+                    if new and self._field_value(t, field) != new:
+                        change[field] = (self._field_value(t, field), new)
+                tracks[tid] = change
+        return {"release": r, "album": album, "tracks": tracks, "matched": matched}
+
+    # --- managing the library: artwork ---
+
+    async def _has_art(self, album_id: str) -> bool:
+        """The album has a picture: its own, a cover file in its folder, or one in its first file."""
+        if album_id in self.album_art:
+            return True
+        first = self._albums()[album_id][0][1]
+        directory = os.path.dirname(first["path"])
+        if directory not in self.folder_covers:
+            self.folder_covers[directory] = await asyncio.to_thread(find_folder_cover, directory)
+        if self.folder_covers[directory]:
+            return True
+        return await asyncio.to_thread(extract_embedded_art, first["path"]) is not None
+
+    def _save_art(self, album_id: str, data: bytes, ext: str) -> None:
+        os.makedirs(self.art_dir, exist_ok=True)
+        self._remove_art(album_id)
+        name = album_id + (".jpg" if ext == ".jpeg" else ext)
+        tmp = os.path.join(self.art_dir, name + ".tmp")
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, os.path.join(self.art_dir, name))
+        self.album_art[album_id] = name
+
+    def _remove_art(self, album_id: str) -> None:
+        name = self.album_art.pop(album_id, None)
+        if name:
+            try:
+                os.remove(os.path.join(self.art_dir, name))
+            except OSError:
+                pass
+
+    def _move_art(self, old: str, new: str) -> None:
+        name = self.album_art.get(old)
+        if not name or new in self.album_art:
+            return
+        target = new + os.path.splitext(name)[1]
+        try:
+            os.replace(os.path.join(self.art_dir, name), os.path.join(self.art_dir, target))
+        except OSError:
+            return
+        del self.album_art[old]
+        self.album_art[new] = target
+
+    async def set_album_art(self, album_id: str, image_path: str) -> None:
+        """A picture the user picked becomes the album's own (a copy, so the original can move)."""
+        self._target("album", album_id)
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext not in ART_TYPES:
+            raise ServiceError("Pick a JPG, PNG, WebP or GIF image")
+        try:
+            if os.path.getsize(image_path) > MAX_ART_BYTES:
+                raise ServiceError("That image is too large (15 MB max)")
+            data = await asyncio.to_thread(lambda: open(image_path, "rb").read())
+        except OSError as e:
+            raise ServiceError(f"Couldn't read the image: {e.strerror or e}")
+        self._save_art(album_id, data, ext)
+
+    async def clear_album_art(self, album_id: str) -> None:
+        """Back to the files' own picture (or none)."""
+        self._remove_art(album_id)
+
+    async def find_album_art(self, album_id: str) -> bool:
+        """The album's cover from the Cover Art Archive, by its name and artist."""
+        items = self._target("album", album_id)
+        first = items[0][1]
+        if not first["album"]:
+            raise ServiceError("Name the album first (Edit tags) to look for its cover")
+        owner = self._album_owner(items)
+        cover = await self._musicbrainz().find_cover("" if owner == VARIOUS else owner, first["album"])
+        if not cover:
+            return False
+        self._save_art(album_id, *cover)
+        return True
+
+    def find_missing_art(self) -> None:
+        """Looks for a cover for every named album without a picture, in the background (status "art")."""
+        if self.art_task and not self.art_task.done():
+            return
+        self.art_progress.update(running=True, done=0, total=0, found=0)
+        self.art_task = spawn(self._find_missing_art(), "finding missing artwork")
+
+    async def _find_missing_art(self) -> None:
+        try:
+            missing = [k for k, v in list(self._albums().items()) if v[0][1]["album"] and not await self._has_art(k)]
+            self.art_progress["total"] = len(missing)
+            for key in missing:
+                if key in self._albums():
+                    try:
+                        if await self.find_album_art(key):
+                            self.art_progress["found"] += 1
+                    except ServiceError:
+                        pass  # one album MusicBrainz can't answer for doesn't stop the rest
+                self.art_progress["done"] += 1
+        finally:
+            self.art_progress["running"] = False
+
     # --- media ---
 
     async def stream(self, track_id: str) -> StreamSource:
@@ -830,9 +1159,13 @@ class LocalService(MusicService):
 
     async def art(self, art_id: str) -> StreamSource:
         kind, _, tid = art_id.partition(":")
-        t = self.tracks.get(tid) if kind == "t" else None
+        t = self.tracks.get(tid.partition(".")[0]) if kind == "t" else None
         if not t:
             raise ServiceError("Art not found")
+        tid = tid.partition(".")[0]
+        own = self.album_art.get(self._album_key(t))
+        if own and os.path.isfile(os.path.join(self.art_dir, own)):
+            return StreamSource(path=os.path.join(self.art_dir, own))
         cached = os.path.join(self.art_cache, tid)
         if os.path.isfile(cached + ".mime"):
             with open(cached + ".mime", "r") as f:

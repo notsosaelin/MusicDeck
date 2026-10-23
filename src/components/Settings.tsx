@@ -42,6 +42,7 @@ import { SiAudiobookshelf, SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-ico
 import {
   DownloadStatus,
   exportBackup,
+  findMissingArt,
   Feature,
   importBackup,
   GameMusic,
@@ -118,6 +119,8 @@ const describeStatus = (s: ServiceInfo): string => {
       return parts(s.config.username, host(s.config.url));
     case "local": {
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;
+      if (s.status.art?.running)
+        return s.status.art.total ? `Finding artwork… ${s.status.art.done} of ${s.status.art.total}` : "Finding artwork…";
       if (s.status.error) return `Scan failed: ${s.status.error}`;
       const n = s.status.tracks ?? 0;
       return `${n} track${n === 1 ? "" : "s"}`;
@@ -233,6 +236,11 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
     await refreshState();
   };
   const makeActive = () => switchSource(service.id);
+  const findArt = async () => {
+    const r = await findMissingArt(service.id);
+    if (!r.ok) return notify(service.name, r.error);
+    await refreshState();
+  };
   const remove = () =>
     showModal(
       <ConfirmModal
@@ -257,6 +265,11 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
           <MenuItem onSelected={test}>Test connection</MenuItem>
         )}
         {service.type === "youtube" && <MenuItem onSelected={updateYoutube}>Update YouTube support</MenuItem>}
+        {service.features.includes("artwork") && (
+          <MenuItem onSelected={findArt} disabled={!!service.status.art?.running || !!service.status.scanning}>
+            Find missing artwork
+          </MenuItem>
+        )}
         <MenuSeparator />
         <MenuItem tone="destructive" onSelected={remove}>
           Remove
@@ -642,9 +655,20 @@ export const Settings: FC = () => {
 
   useEffect(() => {
     refreshState();
-    // keep scan progress fresh while this page is open
-    const timer = window.setInterval(() => {
-      if (pluginState.get()?.services.some((s) => s.status.scanning)) refreshState();
+    // keep scan and artwork progress fresh while this page is open, and say when artwork is done
+    const finding = new Set<string>();
+    const timer = window.setInterval(async () => {
+      const busy = pluginState.get()?.services.some((s) => s.status.scanning || s.status.art?.running);
+      if (!busy && !finding.size) return;
+      const state = await refreshState();
+      for (const s of state.services) {
+        if (s.status.art?.running) finding.add(s.id);
+        else if (finding.delete(s.id)) {
+          invalidateBrowserCache();
+          const { found = 0, total = 0 } = s.status.art ?? {};
+          notify(s.name, total ? `Found ${found} of ${total} missing covers` : "No albums were missing artwork");
+        }
+      }
     }, 1500);
     return () => window.clearInterval(timer);
   }, []);

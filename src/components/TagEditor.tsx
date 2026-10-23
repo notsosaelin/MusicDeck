@@ -1,0 +1,378 @@
+import { openFilePicker } from "@decky/api";
+import {
+  DialogBody,
+  DialogButton,
+  DialogHeader,
+  Field,
+  Focusable,
+  MenuItem,
+  MenuSeparator,
+  ModalRoot,
+  Spinner,
+  TextField,
+  showModal,
+} from "@decky/ui";
+import { FC, ReactNode, useEffect, useRef, useState } from "react";
+import {
+  Collection,
+  LookupChanges,
+  Release,
+  TagInfo,
+  TagKind,
+  TagResult,
+  albumArt,
+  applyLookup,
+  getTags,
+  lookupAlbum,
+  lookupChanges,
+  setTags,
+  undoTags,
+} from "../api";
+import { View, invalidateBrowserCache, navigation, setStack } from "../nav";
+import { notify } from "../notify";
+import { hasFeature } from "../player";
+import { pluginState } from "../store";
+import { DialogActions } from "./common";
+import { centerNav } from "./media/pages";
+
+// FileSelectionType.FILE from @decky/api (a const enum, which isolated builds can't import)
+const SELECT_FILE = 0;
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif"];
+const NUMERIC = new Set(["track", "disc", "year"]);
+
+/**
+ * An album renamed (or given another artist) has another id: open pages of it, in the panel and the
+ * media center, show it under its new one rather than "no longer in the library".
+ */
+function retargetAlbum(oldId: string, newId: string, title?: string) {
+  if (!newId || newId === oldId) return;
+  const retarget = (views: View[]) =>
+    views.map((v) =>
+      v.type === "collection" && v.collection.kind === "album" && v.collection.id === oldId
+        ? { ...v, collection: { ...v.collection, id: newId, title: title ?? v.collection.title } }
+        : v,
+    );
+  const { stacks } = navigation.get();
+  setStack("library", retarget(stacks.library));
+  setStack("search", retarget(stacks.search));
+  const center = centerNav.get();
+  centerNav.set(Object.fromEntries(Object.entries(center).map(([k, views]) => [k, retarget(views)])));
+}
+
+/** "Saved", or how much was, and why the rest wasn't. */
+function reportSaved(what: string, r: TagResult) {
+  if (r.failed) notify(what, `${r.changed} of ${r.changed + r.failed} files saved: ${r.error}`);
+  else notify(what, r.changed === 1 ? "Tags saved" : `Tags saved to ${r.changed} files`);
+}
+
+const Loading: FC = () => (
+  <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+    <Spinner style={{ width: 32, height: 32 }} />
+  </div>
+);
+
+/** Editing a track's tags, or what an album's tracks share. Only fields changed are written. */
+const TagModal: FC<{ closeModal?: () => void; instanceId: string; kind: TagKind; id: string; title: string }> = ({
+  closeModal,
+  instanceId,
+  kind,
+  id,
+  title,
+}) => {
+  const [info, setInfo] = useState<TagInfo | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const busy = useRef(false);
+  useEffect(() => {
+    getTags(instanceId, kind, id).then((r) => {
+      if (!r.ok) {
+        notify(title, r.error);
+        closeModal?.();
+        return;
+      }
+      setInfo(r.data);
+      setValues(Object.fromEntries(r.data.fields.map((f) => [f.field, f.value])));
+    });
+  }, []);
+  const changes = info
+    ? Object.fromEntries(info.fields.filter((f) => values[f.field] !== f.value).map((f) => [f.field, values[f.field]]))
+    : {};
+  const run = async (work: () => Promise<{ ok: true; data: TagResult } | { ok: false; error: string }>) => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      const r = await work();
+      if (!r.ok) return notify(title, r.error);
+      invalidateBrowserCache();
+      if (kind === "album") retargetAlbum(id, r.data.album_id, values.album || undefined);
+      reportSaved(title, r.data);
+      closeModal?.();
+    } finally {
+      busy.current = false;
+    }
+  };
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogHeader>{kind === "album" ? `Edit album · ${title}` : `Edit tags · ${title}`}</DialogHeader>
+      <DialogBody>
+        {!info ? (
+          <Loading />
+        ) : (
+          <>
+            {kind === "album" && (
+              <div style={{ fontSize: 13, opacity: 0.6, marginBottom: 8 }}>
+                Written to all {info.files} files. Fields marked Mixed stay as each file has them unless you
+                change them.
+              </div>
+            )}
+            {info.fields.map((f) => (
+              <TextField
+                key={f.field}
+                label={f.label}
+                value={values[f.field] ?? ""}
+                placeholder={f.mixed ? "Mixed" : f.field === "genre" ? "Several separated by ;" : undefined}
+                mustBeNumeric={NUMERIC.has(f.field) || undefined}
+                onChange={(e) => setValues({ ...values, [f.field]: e.target.value })}
+              />
+            ))}
+          </>
+        )}
+      </DialogBody>
+      {info?.undo && (
+        <div style={{ display: "flex", justifyContent: "flex-start", padding: "0 0 8px" }}>
+          <DialogButton style={{ width: "auto", minWidth: 0, padding: "0 20px" }} onClick={() => run(() => undoTags(instanceId, kind, id))}>
+            Undo last edit
+          </DialogButton>
+        </div>
+      )}
+      <DialogActions
+        primary="Save"
+        onPrimary={() => run(() => setTags(instanceId, kind, id, changes))}
+        primaryDisabled={!info || Object.keys(changes).length === 0}
+        onCancel={closeModal}
+      />
+    </ModalRoot>
+  );
+};
+
+export const editTags = (instanceId: string, kind: TagKind, id: string, title: string) =>
+  showModal(<TagModal instanceId={instanceId} kind={kind} id={id} title={title} />);
+
+/** One line of a release: what tells two pressings apart. */
+const releaseLine = (r: Release, files: number) =>
+  [
+    r.artist,
+    r.year,
+    r.country,
+    r.format,
+    `${r.tracks} tracks${r.tracks !== files ? ` (yours: ${files})` : ""}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+/** MusicBrainz's releases that may be the album; picking one shows what it would change. */
+const LookupModal: FC<{ closeModal?: () => void; instanceId: string; album: Collection; files: number }> = ({
+  closeModal,
+  instanceId,
+  album,
+  files,
+}) => {
+  const [releases, setReleases] = useState<Release[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    lookupAlbum(instanceId, album.id).then((r) => (r.ok ? setReleases(r.data) : setError(r.error)));
+  }, []);
+  const pick = (r: Release) => {
+    closeModal?.();
+    showModal(<PreviewModal instanceId={instanceId} album={album} release={r} files={files} />);
+  };
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogHeader>Look up · {album.title}</DialogHeader>
+      <DialogBody>
+        {error ? (
+          <div style={{ opacity: 0.7 }}>{error}</div>
+        ) : !releases ? (
+          <Loading />
+        ) : releases.length === 0 ? (
+          <div style={{ opacity: 0.7 }}>MusicBrainz has nothing by that name. Fix the album's name or artist first.</div>
+        ) : (
+          <Focusable flow-children="column">
+            {releases.map((r) => (
+              <Field
+                key={r.id}
+                focusable
+                highlightOnFocus
+                label={r.title}
+                description={releaseLine(r, files)}
+                onActivate={() => pick(r)}
+                onClick={() => pick(r)}
+                onOKActionDescription="See changes"
+              />
+            ))}
+          </Focusable>
+        )}
+      </DialogBody>
+      <DialogActions primary="Close" onPrimary={() => closeModal?.()} onCancel={closeModal} />
+    </ModalRoot>
+  );
+};
+
+const ChangeLine: FC<{ change: [string, string, string] }> = ({ change: [label, before, after] }) => (
+  <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+    <span style={{ opacity: 0.6 }}>{label}: </span>
+    <span style={{ opacity: 0.6, textDecoration: before ? "line-through" : undefined }}>{before || "empty"}</span>
+    {" → "}
+    {after}
+  </div>
+);
+
+const Heading: FC<{ children: ReactNode }> = ({ children }) => (
+  <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.6, textTransform: "uppercase", margin: "14px 0 4px" }}>
+    {children}
+  </div>
+);
+
+/** What a release would change, before anything is written. */
+const PreviewModal: FC<{
+  closeModal?: () => void;
+  instanceId: string;
+  album: Collection;
+  release: Release;
+  files: number;
+}> = ({ closeModal, instanceId, album, release, files }) => {
+  const [changes, setChanges] = useState<LookupChanges | null>(null);
+  const [error, setError] = useState("");
+  const busy = useRef(false);
+  useEffect(() => {
+    lookupChanges(instanceId, album.id, release.id).then((r) => (r.ok ? setChanges(r.data) : setError(r.error)));
+  }, []);
+  const nothing = changes && changes.album.length === 0 && changes.tracks.length === 0;
+  const apply = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      const r = await applyLookup(instanceId, album.id, release.id);
+      if (!r.ok) return notify(album.title, r.error);
+      invalidateBrowserCache();
+      retargetAlbum(album.id, r.data.album_id, changes?.release.title);
+      if (r.data.changed) reportSaved(changes?.release.title ?? album.title, r.data);
+      if (r.data.art) notify(changes?.release.title ?? album.title, "Cover found");
+      closeModal?.();
+    } finally {
+      busy.current = false;
+    }
+  };
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogHeader>{release.title}</DialogHeader>
+      <DialogBody>
+        {error ? (
+          <div style={{ opacity: 0.7 }}>{error}</div>
+        ) : !changes ? (
+          <Loading />
+        ) : nothing ? (
+          <div style={{ opacity: 0.7 }}>Your files already say what this release does.</div>
+        ) : (
+          <Focusable flow-children="column" noFocusRing>
+            {changes.album.length > 0 && <Heading>Album</Heading>}
+            {changes.album.map((c, i) => (
+              <ChangeLine key={i} change={c} />
+            ))}
+            {changes.tracks.length > 0 && <Heading>Tracks</Heading>}
+            {changes.tracks.map(([file, list]) => (
+              <div key={file} style={{ marginBottom: 6 }}>
+                <div style={{ fontSize: 13, opacity: 0.5 }}>{file}</div>
+                {list.map((c, i) => (
+                  <ChangeLine key={i} change={c} />
+                ))}
+              </div>
+            ))}
+            {!changes.matched && (
+              <div style={{ fontSize: 13, opacity: 0.6, marginTop: 12 }}>
+                The release has {release.tracks} tracks and the album {files}, so only the album's details change;
+                each track stays as it is.
+              </div>
+            )}
+          </Focusable>
+        )}
+      </DialogBody>
+      <DialogActions
+        primary="Apply"
+        onPrimary={apply}
+        primaryDisabled={!changes || !!nothing}
+        onCancel={closeModal}
+      />
+    </ModalRoot>
+  );
+};
+
+async function pickAlbumArt(instanceId: string, album: Collection) {
+  const home = pluginState.get()?.user_home || "/home";
+  let path: string;
+  try {
+    path = (await openFilePicker(SELECT_FILE, home, true, true, undefined, IMAGE_EXTENSIONS)).realpath;
+  } catch {
+    return; // picker cancelled
+  }
+  const r = await albumArt(instanceId, album.id, "set", path);
+  if (!r.ok) return notify("Couldn't set artwork", r.error);
+  invalidateBrowserCache();
+  notify(album.title, "Artwork set");
+}
+
+async function findAlbumArt(instanceId: string, album: Collection) {
+  notify(album.title, "Looking for its cover…");
+  const r = await albumArt(instanceId, album.id, "find");
+  if (!r.ok) return notify(album.title, r.error);
+  if (!r.data) return notify(album.title, "No cover found on the Cover Art Archive");
+  invalidateBrowserCache();
+  notify(album.title, "Cover found");
+}
+
+async function clearAlbumArt(instanceId: string, album: Collection) {
+  await albumArt(instanceId, album.id, "clear");
+  invalidateBrowserCache();
+  notify(album.title, "Back to the files' own artwork");
+}
+
+/**
+ * A local album's menu items for managing it: its tags, MusicBrainz, its picture. `info` (getTags) says
+ * whether it has a picture of its own to take away.
+ */
+export function albumManageItems(instanceId: string, album: Collection, info: TagInfo | null): ReactNode[] {
+  const items: ReactNode[] = [];
+  if (hasFeature(instanceId, "tags")) {
+    items.push(
+      <MenuItem key="tags" onSelected={() => editTags(instanceId, "album", album.id, album.title)}>
+        Edit album tags
+      </MenuItem>,
+      <MenuItem
+        key="lookup"
+        onSelected={() =>
+          showModal(<LookupModal instanceId={instanceId} album={album} files={info?.files ?? 0} />)
+        }
+      >
+        Look up on MusicBrainz
+      </MenuItem>,
+    );
+  }
+  if (hasFeature(instanceId, "artwork")) {
+    items.push(
+      <MenuSeparator key="art-sep" />,
+      <MenuItem key="art-set" onSelected={() => pickAlbumArt(instanceId, album)}>
+        Set artwork
+      </MenuItem>,
+      <MenuItem key="art-find" onSelected={() => findAlbumArt(instanceId, album)}>
+        Find artwork online
+      </MenuItem>,
+    );
+    if (info?.own_art) {
+      items.push(
+        <MenuItem key="art-clear" onSelected={() => clearAlbumArt(instanceId, album)}>
+          Use the files' artwork
+        </MenuItem>,
+      );
+    }
+  }
+  return items;
+}

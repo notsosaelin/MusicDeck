@@ -692,6 +692,75 @@ class Plugin:
     async def add_to_playlist(self, instance_id: str, playlist_id: str, track_ids: list[str]) -> dict[str, Any]:
         return await _result(self._call(instance_id, lambda s: s.add_to_playlist(playlist_id, track_ids)))
 
+    @_when_ready
+    async def create_service_playlist(self, instance_id: str, name: str, track_ids: list[str]) -> dict[str, Any]:
+        """A new playlist on the source itself (feature "playlists"), with these tracks in it."""
+        name = (name or "").strip()[:100] if isinstance(name, str) else ""
+        if not name:
+            return {"ok": False, "error": "A playlist needs a name"}
+        if not isinstance(track_ids, list) or not all(isinstance(t, str) for t in track_ids):
+            return {"ok": False, "error": "No tracks"}
+        return await _result(self._call(instance_id, lambda s: s.create_playlist(name, track_ids)))
+
+    # --- managing a library (local files: features "tags" and "artwork") ---
+
+    async def _managed(self, instance_id: str, feature: str, work) -> dict[str, Any]:
+        async def run():
+            instance = self._instance(instance_id)
+            if feature not in instance.features:
+                raise ServiceError("Not supported by this source")
+            return await work(instance)
+        return await _result(run())
+
+    @_when_ready
+    async def get_tags(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
+        """The tag editor's fields for a track or an album (`kind`)."""
+        return await self._managed(instance_id, "tags", lambda s: s.tag_fields(kind, item_id))
+
+    @_when_ready
+    async def set_tags(self, instance_id: str, kind: str, item_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        result = await self._managed(instance_id, "tags", lambda s: s.edit_tags(kind, item_id, changes))
+        if result["ok"]:
+            await _announce_change()
+        return result
+
+    @_when_ready
+    async def undo_tags(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
+        return await self._managed(instance_id, "tags", lambda s: s.undo_tags(kind, item_id))
+
+    @_when_ready
+    async def lookup_album(self, instance_id: str, album_id: str) -> dict[str, Any]:
+        """MusicBrainz releases that may be this album."""
+        return await self._managed(instance_id, "tags", lambda s: s.lookup(album_id))
+
+    @_when_ready
+    async def lookup_changes(self, instance_id: str, album_id: str, release_id: str) -> dict[str, Any]:
+        return await self._managed(instance_id, "tags", lambda s: s.lookup_changes(album_id, release_id))
+
+    @_when_ready
+    async def apply_lookup(self, instance_id: str, album_id: str, release_id: str) -> dict[str, Any]:
+        return await self._managed(instance_id, "tags", lambda s: s.apply_lookup(album_id, release_id))
+
+    @_when_ready
+    async def album_art(self, instance_id: str, album_id: str, action: str, image_path: str = "") -> dict[str, Any]:
+        """An album's own picture: "set" (a file the user picked), "find" (the Cover Art Archive), "clear"."""
+        async def act(s: MusicService) -> Any:
+            if action == "set":
+                return await s.set_album_art(album_id, image_path)
+            if action == "find":
+                return await s.find_album_art(album_id)
+            if action == "clear":
+                return await s.clear_album_art(album_id)
+            raise ServiceError("Unknown artwork action")
+        return await self._managed(instance_id, "artwork", act)
+
+    @_when_ready
+    async def find_missing_art(self, instance_id: str) -> dict[str, Any]:
+        """Looks for every named album without a picture in the background (progress in status "art")."""
+        async def start(s: MusicService) -> None:
+            s.find_missing_art()
+        return await self._managed(instance_id, "artwork", start)
+
     # --- session (queue) persistence ---
 
     def _session_path(self) -> str:
