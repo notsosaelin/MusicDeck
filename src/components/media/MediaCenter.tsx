@@ -42,6 +42,7 @@ import {
 import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
 import { useOnAir } from "../NowPlaying";
 import {
+  AllPage,
   CollectionPage,
   QueueList,
   SearchPage,
@@ -49,6 +50,7 @@ import {
   TabPage,
   cardKey,
   sectionKey,
+  allKey,
   centerNav,
   centerStack,
   focusKeyFor,
@@ -624,18 +626,21 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
 };
 
 /**
- * The window's whole height (the tallest it's been since the media center opened) and whether it's now much shorter than
- * that, which is the on-screen keyboard taking the bottom of it.
+ * The media center's own height at its tallest (the screen) and whether it's now much shorter: Steam's
+ * on-screen keyboard doesn't shorten the window, it shrinks the page the media center is in, from below.
  */
-function useWindowHeight(ref: RefObject<HTMLElement | null>): { full: number; short: boolean } {
+function useAreaHeight(ref: RefObject<HTMLElement | null>): { full: number; short: boolean } {
   const [size, setSize] = useState({ full: 0, now: 0 });
   useEffect(() => {
-    const win = ref.current?.ownerDocument.defaultView;
-    if (!win) return;
-    const measure = () => setSize((was) => ({ full: Math.max(was.full, win.innerHeight), now: win.innerHeight }));
+    const el = ref.current;
+    const win = el?.ownerDocument.defaultView;
+    if (!el || !win) return;
+    const measure = () => setSize((was) => ({ full: Math.max(was.full, el.offsetHeight), now: el.offsetHeight }));
     measure();
-    win.addEventListener("resize", measure);
-    return () => win.removeEventListener("resize", measure);
+    const Observer: typeof ResizeObserver = (win as any).ResizeObserver ?? ResizeObserver;
+    const watch = new Observer(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
   }, []);
   return { full: size.full, short: size.full > 0 && size.now < size.full * 0.8 };
 }
@@ -696,7 +701,9 @@ const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }>
         ? view.query
         : view.type === "section"
           ? sectionKey(view.tab)
-          : "home";
+          : view.type === "all"
+            ? allKey(view.title)
+            : "home";
   useEffect(() => focusInto(box.current, focusKeyFor(stack, views.length - 1)), [viewKey, views.length]);
   useEffect(() => snapRows(box.current), []);
   return (
@@ -719,6 +726,15 @@ const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }>
         <TabPage key={view.tab} instanceId={instanceId} tab={view.tab} stack={stack} />
       ) : view.type === "search" ? (
         <SearchPage key={view.query} instanceId={instanceId} stack={stack} query={view.query} />
+      ) : view.type === "all" ? (
+        <AllPage
+          key={allKey(view.title)}
+          instanceId={instanceId}
+          stack={stack}
+          title={view.title}
+          items={view.items}
+          tracks={view.tracks}
+        />
       ) : (
         <CollectionPage
           key={view.collection.kind + view.collection.id}
@@ -913,7 +929,7 @@ export const MediaCenter: FC = () => {
   const { queue, index, playing } = useStore(player.state);
   const [screenOff, sleep, wake] = useScreenOff();
   const root = useRef<HTMLDivElement>(null);
-  const { full, short } = useWindowHeight(root);
+  const { full, short } = useAreaHeight(root);
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const preview = useStore(browsePreview).id;
@@ -985,10 +1001,10 @@ export const MediaCenter: FC = () => {
       <div
         style={{
           position: "absolute",
-          // between Steam's header and its hint bar, measured from the whole screen's height: the
-          // on-screen keyboard makes the window shorter, and Steam's bars stay as tall as they were
+          // between Steam's header and its hint bar, measured from the whole screen's height; with the
+          // keyboard up (the page shorter, the hint bar behind the keyboard), down to the keyboard
           top: full ? full * 0.086 : "8.6vh",
-          bottom: full ? full * 0.088 : "8.8vh",
+          bottom: short ? 0 : full ? full * 0.088 : "8.8vh",
           left: 0,
           right: 0,
           display: "flex",

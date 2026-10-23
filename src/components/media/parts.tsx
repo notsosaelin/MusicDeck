@@ -169,11 +169,12 @@ export const Card: FC<{
 };
 
 /** The end of a row: a square, as big as the row's covers, that opens all of it. */
-export const ShowAllCard: FC<{ onOpen: () => void; count?: string }> = ({ onOpen, count }) => {
+export const ShowAllCard: FC<{ onOpen: () => void; count?: string; mcKey?: string }> = ({ onOpen, count, mcKey }) => {
   const size = useCardSize();
   return (
     <Focusable
       className="mc-card"
+      data-mc={mcKey}
       noFocusRing
       onActivate={onOpen}
       onClick={onOpen}
@@ -612,9 +613,9 @@ export const Tile: FC<{ c: Collection; onOpen: () => void; width?: number | stri
     onActivate={onOpen}
     onClick={onOpen}
     onOKActionDescription="Open"
-    // sized by the grid it's in (TileGrid): every tile in a row as wide and as tall as the others; on a
-    // shelf, as wide as it's told
+    // a square, sized by the grid it's in (TileGrid), or as wide as it's told on a shelf
     style={{
+      aspectRatio: "1",
       ...(width !== undefined ? { width, flexShrink: 0 } : {}),
       minHeight: 76,
       padding: "12px 14px",
@@ -653,17 +654,15 @@ export const Tile: FC<{ c: Collection; onOpen: () => void; width?: number | stri
  * Tiles across the page's whole width, as many to a row as fit at a readable size, all as wide; a row's
  * tiles as tall as its tallest (a two-line name).
  */
-export const TileGrid: FC<{ title?: ReactNode; children: ReactNode }> = ({ title, children }) => (
-  <FittedGrid
-    title={title}
-    columns="repeat(auto-fill, minmax(clamp(150px, 18vw, 240px), 1fr))"
-    // every row as tall as the tallest, so one two-line name doesn't make its row stand out
-    autoRows="1fr"
-    gap={16}
-  >
-    {children}
-  </FittedGrid>
-);
+export const TileGrid: FC<{ title?: ReactNode; children: ReactNode }> = ({ title, children }) => {
+  const size = useCardSize();
+  // squares as big as the covers elsewhere, so a page of genres or countries lines up like one of albums
+  return (
+    <FittedGrid title={title} columns={`repeat(auto-fill, ${size})`} justify="space-between" gap={22}>
+      {children}
+    </FittedGrid>
+  );
+};
 
 /** Live stations, not tracks: a page or shelf of them is shown as stations, played one at a time. */
 export const allStations = (tracks: Track[]) => tracks.length > 0 && tracks.every((t) => t.live);
@@ -940,20 +939,25 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR } = {}
   const layout = () => {
     const scroller = scrollParent(container);
     if (!scroller || !container.isConnected) return;
-    const room = scroller.clientHeight - under - 16;
+    // from the row's top (just under the tabs) to the bottom edge: the next row starts past it
+    const room = scroller.clientHeight - under - 8;
     const rows = [...container.querySelectorAll<HTMLElement>(".mc-slot")];
     container.style.paddingBottom = "";
     if (room <= 0 || !rows.length) return;
-    rows.forEach((r) => (r.style.minHeight = ""));
-    const sizes = rows.map((r) => {
-      const margin = parseFloat(getComputedStyle(r).marginBottom) || 0;
-      return { margin, outer: r.offsetHeight + margin };
+    // the space between rows is the slot's own (the row sits in its middle), not a margin on top of it
+    rows.forEach((r) => {
+      r.style.minHeight = "";
+      r.style.marginBottom = "0";
     });
-    const typical = [...sizes].sort((a, b) => a.outer - b.outer)[Math.floor(sizes.length / 2)].outer;
+    const heights = rows.map((r) => r.offsetHeight);
+    const typical = [...heights].sort((a, b) => a - b)[Math.floor(heights.length / 2)];
     const slot = Math.floor(room / Math.max(1, Math.floor(room / typical)));
     rows.forEach((r, i) => {
-      const { margin, outer } = sizes[i];
-      r.style.minHeight = `${Math.max(1, Math.ceil((outer - 1) / slot)) * slot - margin}px`;
+      r.style.minHeight = `${Math.max(1, Math.ceil((heights[i] - 1) / slot)) * slot}px`;
+      // the row in the middle of its room, not at its top
+      r.style.display = "flex";
+      r.style.flexDirection = "column";
+      r.style.justifyContent = "center";
     });
     // the page ending in a row: room after it for it to reach the top
     const last = rows[rows.length - 1];
@@ -1085,7 +1089,8 @@ export const FittedGrid: FC<{
   };
   const paged = !!fit && fit.total > fit.rows;
   return (
-    <div ref={block} className="mc-row-block mc-slot" style={{ position: "relative", marginBottom: 28 }}>
+    // not a slot (snapRows' rows of one height): it fits itself to the screen
+    <div ref={block} className="mc-row-block" style={{ position: "relative", marginBottom: 28 }}>
       {title}
       <div
         style={{

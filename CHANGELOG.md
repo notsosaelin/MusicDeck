@@ -3,6 +3,30 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.13.5
+
+- **Genre pages fixed:** a genre's grid opened pushed down the screen, its albums cut off at the bottom
+  under an empty space. The grid fits itself to the screen again, rows from its top.
+- Rows on a page keep to one screen each however they're spaced (the space between rows no longer
+  counted toward a row's height, which could make a row take two screens).
+
+## 0.13.4
+
+- **Search keyboard, fixed for real:** Steam's keyboard shrinks the page rather than the window, which the
+  last fix didn't see. The media center now measures itself: with the keyboard up, the mini player steps
+  aside and the search field and results sit right above the keyboard.
+- **Rows centred, none peeking:** each row sits in the middle of the screen, and the next row no longer
+  shows its first few pixels at the bottom edge.
+- **Squares, not rectangles:** Your music is a row of square cards like albums, each a 2×2 of four of its
+  covers (one cover when there are fewer), with its name and count below. Genre, mood, country and language
+  grids are squares too, as big as album covers.
+
+## 0.13.3
+
+- **Long rows end in Show all:** any row longer than 16 items (an artist's albums, search results, Home's
+  new releases, recently played songs, stations near you) shows its first 15 and a square Show all. Show
+  all opens the full list in the standard grid (songs as a list).
+
 ## 0.13.2
 
 - A genre's (or mood's, decade's, chart's) Show all opens the same grid as every other Show all, whole

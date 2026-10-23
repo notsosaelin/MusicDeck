@@ -46,7 +46,9 @@ export type View =
   | { type: "search"; query: string }
   | { type: "collection"; collection: Collection }
   /** one of a source's own sections (its albums, genres, charts...), opened from the media center's Browse */
-  | { type: "section"; tab: string; title: string };
+  | { type: "section"; tab: string; title: string }
+  /** a row's every item, from its Show all: a grid of them (a list, for songs) */
+  | { type: "all"; title: string; items: Collection[]; tracks: Track[] };
 
 export type StackName = "library" | "search";
 

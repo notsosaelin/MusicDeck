@@ -687,6 +687,8 @@ export const Browser: FC<{ instanceId: string; stack: StackName }> = ({ instance
   // (sections are the media center's Browse pages; the panel's Library is the source's Home)
   if (view.type === "home" || view.type === "section") return <HomeView instanceId={instanceId} />;
   if (view.type === "search") return <SearchView key={view.query} instanceId={instanceId} query={view.query} />;
+  // (a row's Show all is the media center's; the panel never opens one)
+  if (view.type === "all") return <HomeView instanceId={instanceId} />;
   return (
     <CollectionView
       key={view.collection.kind + view.collection.id}

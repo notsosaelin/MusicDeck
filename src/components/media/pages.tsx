@@ -90,6 +90,7 @@ import {
   TrackCard,
   TrackLine,
   TrackTable,
+  useCardSize,
   useNear,
 } from "./parts";
 
@@ -113,10 +114,19 @@ export const cardKey = (c: Collection) => c.kind + ":" + c.id;
 /** The tile a source's section is opened from on Browse, to come back to it. */
 export const sectionKey = (tab: string) => "section:" + tab;
 
+/** A row's Show all, to come back to it. */
+export const allKey = (title: string) => "all:" + title;
+
 export function pushCenter(stack: CenterStack, view: View) {
   const views = viewsOf(centerNav.get(), stack);
   const from =
-    view.type === "collection" ? cardKey(view.collection) : view.type === "section" ? sectionKey(view.tab) : null;
+    view.type === "collection"
+      ? cardKey(view.collection)
+      : view.type === "section"
+        ? sectionKey(view.tab)
+        : view.type === "all"
+          ? allKey(view.title)
+          : null;
   if (from) (openedFrom[stack] ??= [])[views.length - 1] = from;
   centerNav.update({ [stack]: [...views, view] });
 }
@@ -161,7 +171,7 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
     <>
       {groupByKind(items).map(([kind, list]) => (
         <Shelf key={kind} title={titled ? KIND_TITLES[kind] : undefined}>
-          {list.map((c) => (
+          {list.slice(0, rowCut(list.length)).map((c) => (
             <Card
               key={c.kind + c.id}
               instanceId={instanceId}
@@ -175,6 +185,7 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
               }
             />
           ))}
+          {list.length > ROW_SIZE && rowEnd(stack, KIND_TITLES[kind], list, [])}
         </Shelf>
       ))}
     </>
@@ -257,22 +268,23 @@ const ONE_LINE = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "elli
 
 const TILE_BACK = "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))";
 
-/** Two of a section's covers side by side, filling the wide tile (two squares), or one across it. */
+/** A section's covers as one square picture: four in a 2 by 2, or one filling it when it has fewer. */
 const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) => {
   const [failed, setFailed] = useState<string[]>([]);
   const shown = art.filter((a) => !failed.includes(a));
-  const two = shown.slice(0, 2);
-  if (!two.length) return null;
+  const four = shown.length >= 4 ? shown.slice(0, 4) : shown.slice(0, 1);
+  if (!four.length) return null;
   return (
     <div
       style={{
         position: "absolute",
         inset: 0,
         display: "grid",
-        gridTemplateColumns: two.length === 2 ? "1fr 1fr" : "1fr",
+        gridTemplateColumns: four.length === 4 ? "1fr 1fr" : "1fr",
+        gridTemplateRows: four.length === 4 ? "1fr 1fr" : "1fr",
       }}
     >
-      {two.map((a) => (
+      {four.map((a) => (
         <img
           key={a}
           src={mediaUrl("art", instanceId, a)}
@@ -286,40 +298,47 @@ const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) 
   );
 };
 
-/** One of "Your music": large, its own covers behind its name and how many. */
-const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> = ({ instanceId, t, open }) => (
-  <Focusable
-    className="mc-tile"
-    data-mc={sectionKey(t.id)}
-    noFocusRing
-    onActivate={open}
-    onClick={open}
-    onOKActionDescription="Open"
-    // wide rather than tall, so the groups below are in sight
-    style={{ position: "relative", overflow: "hidden", aspectRatio: "2 / 1", background: TILE_BACK }}
-  >
-    <Mosaic instanceId={instanceId} art={t.art ?? []} />
-    {/* dark at the foot, so the name reads over any cover */}
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background:
-          "linear-gradient(to top, rgba(10, 13, 18, 0.95) 0%, rgba(10, 13, 18, 0.7) 45%, rgba(10, 13, 18, 0.15) 100%)",
-      }}
-    />
-    {!t.art?.length && (
-      // no covers: its icon in the top corner, clear of the name along the foot
-      <div style={{ position: "absolute", top: 14, right: 16, fontSize: 22, opacity: 0.4, display: "flex" }}>
-        {iconFor(t.id)}
+/**
+ * One of "Your music" (Albums, Artists, Playlists...): a card like an album's, its picture a square of
+ * four of its covers (or its icon), its name and how many below.
+ */
+const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> = ({ instanceId, t, open }) => {
+  const size = useCardSize();
+  return (
+    <Focusable
+      className="mc-card"
+      data-mc={sectionKey(t.id)}
+      noFocusRing
+      onActivate={open}
+      onClick={open}
+      onOKActionDescription="Open"
+      style={{ width: size, flexShrink: 0, padding: 2 }}
+    >
+      <div
+        className="mc-art"
+        style={{
+          position: "relative",
+          width: size,
+          height: size,
+          borderRadius: 6,
+          overflow: "hidden",
+          background: TILE_BACK,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: `calc(${size} * 0.3)`,
+          color: "rgba(255, 255, 255, 0.45)",
+        }}
+      >
+        {t.art?.length ? <Mosaic instanceId={instanceId} art={t.art} /> : iconFor(t.id)}
       </div>
-    )}
-    <div style={{ position: "absolute", left: 18, right: 18, bottom: 14 }}>
-      <div style={{ ...ONE_LINE, fontSize: 18, fontWeight: 700, color: "#ffffff" }}>{t.title}</div>
-      {t.subtitle && <div style={{ ...ONE_LINE, fontSize: 13, opacity: 0.7, marginTop: 2 }}>{t.subtitle}</div>}
-    </div>
-  </Focusable>
-);
+      <div style={{ marginTop: 10 }}>
+        <div style={{ ...ONE_LINE, fontSize: 14, fontWeight: 600, color: "#ffffff" }}>{t.title}</div>
+        {t.subtitle && <div style={{ ...ONE_LINE, fontSize: 12, opacity: 0.6, marginTop: 2 }}>{t.subtitle}</div>}
+      </div>
+    </Focusable>
+  );
+};
 
 /**
  * The media center's Browse: the source's own sections past its Home, so the tab bar keeps to Now
@@ -349,24 +368,19 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
     if (!t.art?.length) continue;
     const fresh = t.art.filter((a) => !used.has(a));
     if (fresh.length) t.art = [...fresh, ...t.art.filter((a) => used.has(a))];
-    t.art.slice(0, 2).forEach((a) => used.add(a));
+    t.art.slice(0, 4).forEach((a) => used.add(a));
   }
   const open = (t: CenterTabInfo) => () => pushCenter(stack, { type: "section", tab: t.id, title: t.title });
   return (
     <>
       {groups.map((g) =>
         g.id === "yours" ? (
-          // the library: large tiles, a press into each
-          <FittedGrid
-            key={g.id}
-            title={<SectionTitle>{g.title}</SectionTitle>}
-            columns="repeat(auto-fill, minmax(clamp(150px, 18vw, 300px), 1fr))"
-            gap={16}
-          >
+          // the library: a row of its parts, each a square of its covers, a press into each
+          <Shelf key={g.id} title={g.title}>
             {g.tabs.map((t) => (
               <LibraryTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
             ))}
-          </FittedGrid>
+          </Shelf>
         ) : (
           // the rest: a row of each, its first cards then Show all (its whole grid), each row's title
           // saying what it is
@@ -509,8 +523,8 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
   if (s.display === "covers")
     return (
       <Shelf title={s.title}>
-        {s.items.map((c) => collectionCard(instanceId, stack, c))}
-        {tracks.map((t, i) =>
+        {s.items.slice(0, rowCut(s.items.length + tracks.length)).map((c) => collectionCard(instanceId, stack, c))}
+        {tracks.slice(0, Math.max(0, rowCut(s.items.length + tracks.length) - s.items.length)).map((t, i) =>
           t.live ? (
             // a station plays on its own: a shelf of them isn't a playlist
             <StationCard
@@ -530,6 +544,7 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
             />
           ),
         )}
+        {s.items.length + tracks.length > ROW_SIZE && rowEnd(stack, s.title, s.items, tracks)}
       </Shelf>
     );
   if (s.display === "grid")
@@ -545,7 +560,12 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     );
   return (
     <>
-      {s.items.length > 0 && <Shelf title={s.title}>{s.items.map((c) => collectionCard(instanceId, stack, c))}</Shelf>}
+      {s.items.length > 0 && (
+        <Shelf title={s.title}>
+          {s.items.slice(0, rowCut(s.items.length)).map((c) => collectionCard(instanceId, stack, c))}
+          {s.items.length > ROW_SIZE && rowEnd(stack, s.title, s.items, [])}
+        </Shelf>
+      )}
       {songs}
     </>
   );
@@ -553,6 +573,79 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
 
 /** Cards a category row shows before its "All" card */
 const ROW_SIZE = 16;
+
+/** How many of a row's items it shows: all of a short one, a long one's first before its Show all */
+const rowCut = (n: number) => (n > ROW_SIZE ? ROW_SIZE - 1 : n);
+
+/** A long row's last card: Show all, opening every item as a grid (songs as a list) */
+const rowEnd = (stack: CenterStack, title: string, items: Collection[], tracks: Track[]) => {
+  const kinds = new Set(items.map((c) => c.kind));
+  const noun = items.length
+    ? kinds.size === 1 && ["album", "artist", "playlist"].includes(items[0].kind)
+      ? items[0].kind
+      : "item"
+    : tracks.every((t) => t.live)
+      ? "station"
+      : "song";
+  return (
+    <ShowAllCard
+      key="all"
+      mcKey={allKey(title)}
+      onOpen={() => pushCenter(stack, { type: "all", title, items, tracks })}
+      count={countOf(items.length + tracks.length, noun)}
+    />
+  );
+};
+
+/**
+ * Every item of a row, from its Show all: albums, playlists and artists in the standard grid, stations
+ * in theirs, songs as a list.
+ */
+export const AllPage: FC<{
+  instanceId: string;
+  stack: CenterStack;
+  title: string;
+  items: Collection[];
+  tracks: Track[];
+}> = ({ instanceId, stack, title, items, tracks }) => (
+  <>
+    {items.length > 0 && (
+      <CardGrid title={title} count={items.length}>
+        {(n) => items.slice(0, n).map((c) => collectionCard(instanceId, stack, c))}
+      </CardGrid>
+    )}
+    {tracks.length > 0 &&
+      (allStations(tracks) ? (
+        <FittedGrid
+          title={<SectionTitle>{items.length ? "Stations" : title}</SectionTitle>}
+          columns="repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))"
+          gap={18}
+        >
+          {tracks.map((t, i) => (
+            <StationCard
+              key={t.id + i}
+              instanceId={instanceId}
+              track={t}
+              width="100%"
+              onPlay={() => player.playList(instanceId, [t], 0)}
+              onOptions={(e) => showTrackMenu(instanceId, t, e?.currentTarget)}
+            />
+          ))}
+        </FittedGrid>
+      ) : (
+        <div style={{ marginBottom: 28 }}>
+          <SectionTitle>{items.length ? "Songs" : title}</SectionTitle>
+          <TrackTable
+            instanceId={instanceId}
+            tracks={tracks}
+            onPlay={(i) => player.playList(instanceId, tracks, i)}
+            onSecondary={(i) => addToQueue(instanceId, tracks[i])}
+            onOptions={(i, e) => showTrackMenu(instanceId, tracks[i], e?.currentTarget)}
+          />
+        </div>
+      ))}
+  </>
+);
 
 /** "12 albums", "1 song" */
 const countOf = (n: number, noun: string) => `${n.toLocaleString()} ${noun}${n === 1 ? "" : "s"}`;
