@@ -1,11 +1,11 @@
-import { Focusable } from "@decky/ui";
+import { DialogButton, Focusable, Navigation } from "@decky/ui";
 import { FC, ReactNode, useEffect, useRef, useState } from "react";
-import { FaHeadphones, FaLanguage, FaMapMarkerAlt, FaSignal } from "react-icons/fa";
+import { FaExternalLinkAlt, FaHeadphones, FaLanguage, FaMapMarkerAlt, FaSignal } from "react-icons/fa";
 import { NowPlayingKind, OnAir, TrackDetails, getTrackDetails } from "../../api";
 import { QueueItem, player } from "../../player";
-import { RecentlyUsed, Store, mediaUrl, useStore } from "../../store";
+import { RecentlyUsed, Store, useStore } from "../../store";
 import { showTrackMenu } from "../TrackMenu";
-import { Notice, StationArt, TrackTable } from "./parts";
+import { Notice, TrackTable } from "./parts";
 
 /**
  * What Now Playing shows beside the cover, by what's playing: songs get their lyrics and the queue;
@@ -187,9 +187,9 @@ const Label: FC<{ children: ReactNode }> = ({ children }) => (
 );
 
 /**
- * A station's Now Playing: what's on (its song and cover when it says, otherwise the sound itself, drawn),
- * how long you've listened, the station at a glance (where from, language, quality, today's listeners,
- * genres), the songs it played earlier, and stations like it to go to.
+ * A station's Now Playing: what's on (its song when it says), how long you've listened, the station at a
+ * glance (where from, language, quality, today's listeners, genres), what it played earlier, and its
+ * website. Stations like it are on Similar.
  */
 export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: TrackDetails | null | undefined }> = ({
   item,
@@ -199,7 +199,7 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
   const { playing } = useStore(player.state);
   const { current } = useStore(player.position);
   const key = `${item.instanceId}:${item.track.id}`;
-  const earlier = (useStore(heard)[key] ?? []).filter((h) => h.text !== song?.text).slice(0, 4);
+  const earlier = (useStore(heard)[key] ?? []).filter((h) => h.text !== song?.text);
   useEffect(() => {
     if (!song?.text) return;
     const list = heard.get()[key] ?? [];
@@ -213,9 +213,9 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
     .map((g: string) => g.trim())
     .filter(Boolean)
     .slice(0, 5);
-  const similar = (details?.related?.tracks ?? []).slice(0, 8);
+  const website: string | undefined = facts.Website;
   return (
-    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 22, paddingBottom: 12 }}>
+    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
         <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "#ff5c5c" }}>
           {song ? "● ON AIR" : "● LIVE"}
@@ -224,22 +224,17 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
           <span style={{ fontSize: 14, opacity: 0.55 }}>Listening for {formatListening(current)}</span>
         )}
       </div>
-      {song ? (
+      {song && (
         <div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "#ffffff", lineHeight: 1.2 }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#ffffff", lineHeight: 1.2 }}>
             {song.title || song.text}
           </div>
-          {song.artist && <div style={{ fontSize: 19, opacity: 0.75, marginTop: 4 }}>{song.artist}</div>}
+          {song.artist && <div style={{ fontSize: 18, opacity: 0.75, marginTop: 4 }}>{song.artist}</div>}
         </div>
-      ) : (
-        <Visualizer
-          height={120}
-          caption={
-            playing ? "The station doesn't say what's playing, so here's how it sounds" : "Play the station to hear it"
-          }
-        />
       )}
-      {(details?.facts?.length ?? 0) > 0 && (
+      {details === undefined ? (
+        <div style={{ fontSize: 14, opacity: 0.5 }}>Loading…</div>
+      ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {["From", "Language", "Quality", "Today"].map(
             (k) =>
@@ -267,42 +262,21 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
           </Focusable>
         </div>
       )}
-      {similar.length > 0 && (
+      {website && (
         <div>
-          <Label>{(details?.related?.title ?? "More like this").toUpperCase()}</Label>
-          <Focusable flow-children="row" style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 4 }}>
-            {similar.map((t, i) => {
-              const play = () => player.playList(item.instanceId, similar, i);
-              return (
-                <Focusable
-                  key={t.id}
-                  className="mc-card"
-                  noFocusRing
-                  onActivate={play}
-                  onClick={play}
-                  onOKActionDescription="Play"
-                  style={{ width: 96, flexShrink: 0 }}
-                >
-                  <StationArt
-                    url={t.art ? mediaUrl("art", item.instanceId, t.art) : undefined}
-                    name={t.title}
-                    style={{ width: 96, height: 96, borderRadius: 6 }}
-                  />
-                  <div
-                    style={{
-                      fontSize: 12,
-                      marginTop: 6,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {t.title}
-                  </div>
-                </Focusable>
-              );
-            })}
-          </Focusable>
+          <DialogButton
+            style={{
+              width: "auto",
+              minWidth: 0,
+              padding: "0 20px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+            onClick={() => Navigation.NavigateToExternalWeb(website)}
+          >
+            <FaExternalLinkAlt /> Station website
+          </DialogButton>
         </div>
       )}
     </Focusable>

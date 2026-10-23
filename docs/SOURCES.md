@@ -315,9 +315,9 @@ source (`MusicService.remove`).
   card then shows song, artist and station next to the song's cover (an image link in `StreamUrl`
   counts too) instead of the station's logo, place and genres. A song named without a cover gets one
   from Apple's catalogue (the iTunes Search API, no account; exactly that title by that artist, 600 px),
-  remembered a day, "none" included. The media center's On air page shows it, or a visualizer when the
-  station names nothing, with the station's facts (`details`: place, language, quality, today's
-  listeners, genres) as chips, the songs heard earlier, and stations like it.
+  remembered a day, "none" included. The media center's On air page shows it with the station's facts
+  (`details`: place, language, quality, today's listeners, genres) as chips, the songs heard earlier,
+  and a link to the station's website; stations like it are on Similar.
 - **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse
   requests without a user agent, so `art()` sends MusicDeck's.
 - **Favourites**: stored in this source's config (`favourites`) via `save_config`.

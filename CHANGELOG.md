@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.8.1
+
+- Radio's **On air** keeps to what's only there: the song when the station says (and what it played
+  earlier), how long you've listened, the station's facts, and a button to its website. No visualizer,
+  and no row of stations like it (that's Similar).
+
 ## 0.8.0
 
 **Quick Access**
@@ -14,10 +20,9 @@ What changed in each version, newest first. Every build put on a device has its 
 - A station's logo fills its square, whole, over a soft blur of itself; a station without one gets its
   initials on a colour of its own. When a station names the song, its cover takes the square, looked up
   in Apple's catalogue when the station doesn't send one.
-- **On air** is a page of its own now: the song and artist when the station says, or the sound itself,
-  drawn, when it doesn't; how long you've been listening; where the station is from, its language,
-  quality, today's listeners and genres; what it played earlier; and stations like it, one press away.
-  The Station tab is folded into it (On air · Similar).
+- **On air** is a page of its own now: the song and artist when the station says; how long you've been
+  listening; where the station is from, its language, quality, today's listeners and genres; what it
+  played earlier. The Station tab is folded into it (On air · Similar).
 
 **Local files: more places to look**
 - **Look up** searches Apple Music's and Deezer's public catalogues beside MusicBrainz (no account), so
