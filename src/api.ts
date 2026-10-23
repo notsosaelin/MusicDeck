@@ -305,6 +305,8 @@ export interface TagResult {
 }
 export interface Release {
   id: string;
+  /** where it's from: MusicBrainz, Apple Music or Deezer (their catalogues) */
+  source: string;
   group: string;
   title: string;
   artist: string;

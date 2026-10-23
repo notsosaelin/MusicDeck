@@ -92,6 +92,11 @@ def parse_on_air(title: str, stream_url: str = "") -> Optional[dict[str, Any]]:
     return {"text": " – ".join(x for x in (artist, song) if x), "title": song, "artist": artist, "art": art}
 
 
+SONG_ART_TTL = 24 * 3600
+SONG_ART_KEPT = 300
+ITUNES = "https://itunes.apple.com"
+
+
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(ssl=tls()),
@@ -111,6 +116,8 @@ class RadioService(MusicService):
         self.server = ""
         self.server_at = 0.0
         self.stations: Cache[dict[str, Any]] = Cache(STATION_TTL, STATIONS_KEPT)
+        # songs' covers looked up for stations that name the song but send no picture: {"artist – title": url}
+        self.song_art: Cache[str] = Cache(SONG_ART_TTL, SONG_ART_KEPT)
         # (when, the directory's genre names), for similar stations
         self.genres: Optional[tuple[float, set[str]]] = None
 
@@ -263,6 +270,7 @@ class RadioService(MusicService):
         facts = [[label, value] for label, value in (
             ("From", place), ("Language", (s.get("language") or "").title()), ("Genres", ", ".join(tags[:6])),
             ("Quality", quality), ("Website", s.get("homepage") or ""),
+            ("Today", f"{s['clickcount']:,} listeners" if s.get("clickcount") else ""),
             ("Votes", f"{s['votes']:,}" if s.get("votes") else "")) if value]
         related = None
         # stations like it by its genre: its first tag that's one of the directory's genres ("pop", not
@@ -369,7 +377,33 @@ class RadioService(MusicService):
                 return match.group(1).decode("utf-8").strip()
             except UnicodeDecodeError:  # older Shoutcast servers send Latin-1
                 return match.group(1).decode("latin-1").strip()
-        return parse_on_air(field(STREAM_TITLE), field(STREAM_URL))
+        song = parse_on_air(field(STREAM_TITLE), field(STREAM_URL))
+        if song and not song["art"] and song["title"] and song["artist"]:
+            song["art"] = await self._song_art(song["artist"], song["title"])
+        return song
+
+    async def _song_art(self, artist: str, title: str) -> Optional[str]:
+        """The cover of the song on air, from Apple's catalogue (no account): only for the song of exactly
+        that title by that artist. Remembered a day, "no cover" too, so polling doesn't ask again."""
+        key = f"{artist.casefold()} – {title.casefold()}"
+        hit = self.song_art.get(key)
+        if hit is not None:
+            return hit or None
+        url = ""
+        assert self.session
+        try:
+            async with self.session.get(f"{ITUNES}/search", params={"term": f"{artist} {title}", "entity": "song",
+                                                                     "limit": "5"},
+                                        timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                results = (await resp.json(content_type=None)).get("results") or [] if resp.status == 200 else []
+            same = lambda a, b: re.sub(r"\W+", " ", a.casefold()).strip() == re.sub(r"\W+", " ", b.casefold()).strip()  # noqa: E731
+            match = next((r for r in results if same(r.get("trackName", ""), title) and same(r.get("artistName", ""), artist)), None)
+            if match and match.get("artworkUrl100"):
+                url = match["artworkUrl100"].replace("100x100bb", "600x600bb")
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            return None  # not remembered: the next poll asks again
+        self.song_art.put(key, url)
+        return url or None
 
     # --- media ---
 

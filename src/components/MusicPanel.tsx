@@ -5,6 +5,8 @@ import { pluginState, useStore } from "../store";
 import { Browser } from "./Browser";
 import { PanelTab, TAB_ORDER, openMediaCenter, panelTab, popView, resetStack, setTabStrip, showTab } from "../nav";
 import { Equalizer } from "./Equalizer";
+import { CenterChoices } from "./media/MediaCenter";
+import { PlaybackSections } from "./Settings";
 import { MiniPlayer } from "./NowPlaying";
 import { PlayerPages } from "./PlayerPages";
 import { ACCENT, IconButton, Message, PLAYER_CSS } from "./common";
@@ -13,7 +15,7 @@ const TAB_LOOKS: Record<PanelTab, { label: string; icon: ReactNode }> = {
   playing: { label: "Now playing", icon: <FaCompactDisc /> },
   library: { label: "Library", icon: <FaMusic /> },
   search: { label: "Search", icon: <FaSearch /> },
-  eq: { label: "Equalizer", icon: <FaSlidersH /> },
+  settings: { label: "Settings", icon: <FaSlidersH /> },
 };
 
 // GamepadButton.BUMPER_LEFT / BUMPER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
@@ -74,6 +76,28 @@ const Tabs: FC<{ tab: PanelTab }> = ({ tab }) => (
 );
 
 /**
+ * The panel's Settings, as the media center's: the equalizer, playback, scrobbling and games, and the
+ * media center's own choices. Sources stay in Decky → MusicDeck, where they're picked.
+ */
+const PanelSettings: FC = () => {
+  const state = useStore(pluginState);
+  return (
+    <>
+      <Equalizer />
+      {state && <PlaybackSections state={state} />}
+      <CenterChoices Section={PanelSection} below />
+      <PanelSection>
+        <PanelSectionRow>
+          <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.4 }}>
+            Sources are added and picked in Decky → MusicDeck.
+          </div>
+        </PanelSectionRow>
+      </PanelSection>
+    </>
+  );
+};
+
+/**
  * The player in the Quick Access Menu (in place of Soundtracks, or as its own tab). Laid out like a
  * music app: tabs at the top, always in the same place; Now playing as two pages (the player, then the
  * song's lyrics or the queue below it, see PlayerPages); a one-row mini player above Library and
@@ -107,7 +131,7 @@ export const MusicPanel: FC = () => {
       ) : (
         <>
           <Tabs tab={tab} />
-          {tab !== "eq" && <MiniPlayer onOpen={() => showTab("playing")} />}
+          {tab !== "settings" && <MiniPlayer onOpen={() => showTab("playing")} />}
         </>
       )}
       {browsing &&
@@ -116,7 +140,7 @@ export const MusicPanel: FC = () => {
         ) : (
           <Message>Add a music source in Decky → MusicDeck</Message>
         ))}
-      {tab === "eq" && <Equalizer />}
+      {tab === "settings" && <PanelSettings />}
     </Focusable>
   );
 };

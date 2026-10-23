@@ -221,6 +221,11 @@ class MusicService:
             cache[tab_id] = (time.monotonic(), sections)
         return sections
 
+    def current(self, collection: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """A collection remembered from before (Jump back in) as it is now (renamed, a new picture), or
+        None when it's gone. As remembered, unless the source knows better."""
+        return collection
+
     async def open(self, kind: str, id: str) -> dict[str, Any]:
         """A Page for an album, artist, playlist or folder."""
         raise NotImplementedError

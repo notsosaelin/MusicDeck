@@ -207,7 +207,14 @@ export const editTags = (instanceId: string, kind: TagKind, id: string, title: s
 
 /** One line of a release: what tells two pressings apart. */
 const releaseLine = (r: Release, files: number) =>
-  [r.artist, r.year, r.country, r.format, `${r.tracks} tracks${r.tracks !== files ? ` (yours: ${files})` : ""}`]
+  [
+    r.source,
+    r.artist,
+    r.year,
+    r.country,
+    r.format,
+    `${r.tracks} tracks${r.tracks !== files ? ` (yours: ${files})` : ""}`,
+  ]
     .filter(Boolean)
     .join(" · ");
 

@@ -1,11 +1,11 @@
 import { Focusable } from "@decky/ui";
-import { FC, useEffect, useRef, useState } from "react";
-import { NowPlayingKind, TrackDetails, getTrackDetails } from "../../api";
+import { FC, ReactNode, useEffect, useRef, useState } from "react";
+import { FaHeadphones, FaLanguage, FaMapMarkerAlt, FaSignal } from "react-icons/fa";
+import { NowPlayingKind, OnAir, TrackDetails, getTrackDetails } from "../../api";
 import { QueueItem, player } from "../../player";
-import { RecentlyUsed, Store, useStore } from "../../store";
-import { useOnAir } from "../NowPlaying";
+import { RecentlyUsed, Store, mediaUrl, useStore } from "../../store";
 import { showTrackMenu } from "../TrackMenu";
-import { Notice, TrackTable } from "./parts";
+import { Notice, StationArt, TrackTable } from "./parts";
 
 /**
  * What Now Playing shows beside the cover, by what's playing: songs get their lyrics and the queue;
@@ -24,7 +24,6 @@ export const PANELS: Record<NowPlayingKind, { id: string; label: string }[]> = {
   ],
   radio: [
     { id: "onair", label: "On air" },
-    { id: "station", label: "Station" },
     { id: "related", label: "Similar" },
   ],
   podcast: [
@@ -146,11 +145,61 @@ const heard = new Store<Record<string, { text: string; at: number }[]>>({});
 const HEARD_KEPT = 30;
 
 /** The song on air now, big, and what the station played before it while it was on. */
-export const OnAirPanel: FC<{ item: QueueItem }> = ({ item }) => {
+const formatListening = (seconds: number) => {
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+    : `${m}:${String(s % 60).padStart(2, "0")}`;
+};
+
+const CHIP_ICONS: Record<string, ReactNode> = {
+  From: <FaMapMarkerAlt />,
+  Language: <FaLanguage />,
+  Quality: <FaSignal />,
+  Today: <FaHeadphones />,
+};
+
+/** A small fact about the station, as a pill. */
+const Chip: FC<{ icon?: ReactNode; children: ReactNode }> = ({ icon, children }) => (
+  <span
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 7,
+      padding: "6px 12px",
+      borderRadius: 999,
+      background: "rgba(255, 255, 255, 0.08)",
+      fontSize: 14,
+      whiteSpace: "nowrap",
+    }}
+  >
+    {icon && <span style={{ opacity: 0.6, display: "flex" }}>{icon}</span>}
+    {children}
+  </span>
+);
+
+const Label: FC<{ children: ReactNode }> = ({ children }) => (
+  <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.5, letterSpacing: "0.06em", marginBottom: 8 }}>
+    {children}
+  </div>
+);
+
+/**
+ * A station's Now Playing: what's on (its song and cover when it says, otherwise the sound itself, drawn),
+ * how long you've listened, the station at a glance (where from, language, quality, today's listeners,
+ * genres), the songs it played earlier, and stations like it to go to.
+ */
+export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: TrackDetails | null | undefined }> = ({
+  item,
+  song,
+  details,
+}) => {
   const { playing } = useStore(player.state);
-  const song = useOnAir(item, playing);
+  const { current } = useStore(player.position);
   const key = `${item.instanceId}:${item.track.id}`;
-  const earlier = (useStore(heard)[key] ?? []).filter((h) => h.text !== song?.text);
+  const earlier = (useStore(heard)[key] ?? []).filter((h) => h.text !== song?.text).slice(0, 4);
   useEffect(() => {
     if (!song?.text) return;
     const list = heard.get()[key] ?? [];
@@ -158,28 +207,56 @@ export const OnAirPanel: FC<{ item: QueueItem }> = ({ item }) => {
       heard.update({ [key]: [{ text: song.text, at: Date.now() }, ...list].slice(0, HEARD_KEPT) });
   }, [song?.text, key]);
   const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const facts = Object.fromEntries(details?.facts ?? []);
+  const genres = (facts.Genres ?? "")
+    .split(",")
+    .map((g: string) => g.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  const similar = (details?.related?.tracks ?? []).slice(0, 8);
   return (
-    <>
-      <div style={{ padding: "4px 10px 18px" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: "#ff5c5c" }}>● ON AIR</div>
-        {song ? (
-          <>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#ffffff", marginTop: 6, lineHeight: 1.2 }}>
-              {song.title || song.text}
-            </div>
-            {song.artist && <div style={{ fontSize: 18, opacity: 0.75, marginTop: 4 }}>{song.artist}</div>}
-          </>
-        ) : (
-          <div style={{ fontSize: 16, opacity: 0.6, marginTop: 6 }}>
-            {playing ? "This station doesn't say what it's playing" : "Play the station to see what's on"}
-          </div>
+    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 22, paddingBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "#ff5c5c" }}>
+          {song ? "● ON AIR" : "● LIVE"}
+        </span>
+        {playing && current > 0 && (
+          <span style={{ fontSize: 14, opacity: 0.55 }}>Listening for {formatListening(current)}</span>
         )}
       </div>
-      {earlier.length > 0 && (
-        <>
-          <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.5, letterSpacing: "0.06em", padding: "0 10px 6px" }}>
-            EARLIER
+      {song ? (
+        <div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: "#ffffff", lineHeight: 1.2 }}>
+            {song.title || song.text}
           </div>
+          {song.artist && <div style={{ fontSize: 19, opacity: 0.75, marginTop: 4 }}>{song.artist}</div>}
+        </div>
+      ) : (
+        <Visualizer
+          height={120}
+          caption={
+            playing ? "The station doesn't say what's playing, so here's how it sounds" : "Play the station to hear it"
+          }
+        />
+      )}
+      {(details?.facts?.length ?? 0) > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {["From", "Language", "Quality", "Today"].map(
+            (k) =>
+              facts[k] && (
+                <Chip key={k} icon={CHIP_ICONS[k]}>
+                  {facts[k]}
+                </Chip>
+              ),
+          )}
+          {genres.map((g: string) => (
+            <Chip key={g}>{g}</Chip>
+          ))}
+        </div>
+      )}
+      {earlier.length > 0 && (
+        <div>
+          <Label>EARLIER</Label>
           <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {earlier.map((h) => (
               <Line key={h.at} style={{ display: "flex", gap: 16 }}>
@@ -188,9 +265,47 @@ export const OnAirPanel: FC<{ item: QueueItem }> = ({ item }) => {
               </Line>
             ))}
           </Focusable>
-        </>
+        </div>
       )}
-    </>
+      {similar.length > 0 && (
+        <div>
+          <Label>{(details?.related?.title ?? "More like this").toUpperCase()}</Label>
+          <Focusable flow-children="row" style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 4 }}>
+            {similar.map((t, i) => {
+              const play = () => player.playList(item.instanceId, similar, i);
+              return (
+                <Focusable
+                  key={t.id}
+                  className="mc-card"
+                  noFocusRing
+                  onActivate={play}
+                  onClick={play}
+                  onOKActionDescription="Play"
+                  style={{ width: 96, flexShrink: 0 }}
+                >
+                  <StationArt
+                    url={t.art ? mediaUrl("art", item.instanceId, t.art) : undefined}
+                    name={t.title}
+                    style={{ width: 96, height: 96, borderRadius: 6 }}
+                  />
+                  <div
+                    style={{
+                      fontSize: 12,
+                      marginTop: 6,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {t.title}
+                  </div>
+                </Focusable>
+              );
+            })}
+          </Focusable>
+        </div>
+      )}
+    </Focusable>
   );
 };
 

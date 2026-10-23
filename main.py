@@ -367,10 +367,18 @@ class Plugin:
         """Home with what was played lately and the playlists made in MusicDeck before what the source
         suggests."""
         ours = self.playlists.for_instance(instance_id)
-        # MusicDeck playlists show as they are now (renamed, new artwork), not as they were played
+        # what was played shows as it is now (renamed, new artwork), not as it was then: MusicDeck
+        # playlists from the store, the rest as their source knows them; what's gone is left out
         current = {c["id"]: c for c in ours}
-        recent = [current.get(c["id"], c) for c in self.recents.for_instance(instance_id)
-                  if not PlaylistStore.is_ours(c["id"]) or c["id"] in current]
+        instance = self.instances.get(instance_id)
+        recent = []
+        for c in self.recents.for_instance(instance_id):
+            if PlaylistStore.is_ours(c["id"]):
+                now = current.get(c["id"])
+            else:
+                now = instance.current(c) if instance else c
+            if now:
+                recent.append(now)
         return (([{"title": "Jump back in", "items": recent}] if recent else [])
                 + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections)
 

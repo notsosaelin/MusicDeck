@@ -1,5 +1,5 @@
 import { Focusable, Spinner, gamepadDialogClasses } from "@decky/ui";
-import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
+import { CSSProperties, FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
@@ -443,6 +443,87 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) node = node.parentElement;
   return node;
 }
+
+/**
+ * A station's picture, as big as its square: its logo whole (logos are small, often not square, often
+ * on a clear background) over a blurred, darkened copy of itself that fills the square; `full` for a
+ * song's cover, which fills it outright. No picture (or a broken link): the station's initials on a
+ * colour of its own.
+ */
+export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?: CSSProperties }> = ({
+  url,
+  name,
+  full,
+  style,
+}) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  const shown = url && !failed;
+  const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const initials = name
+    .split(/\s+/)
+    .filter((w) => /\w/.test(w))
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+  const fill: CSSProperties = { position: "absolute", width: "100%", height: "100%", objectFit: "cover" };
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        containerType: "size",
+        background: `linear-gradient(135deg, hsl(${hue} 45% 34%), hsl(${(hue + 50) % 360} 50% 16%))`,
+        ...style,
+      }}
+    >
+      {shown && full && <img src={url} onError={() => setFailed(true)} style={fill} />}
+      {shown && !full && (
+        <>
+          <img
+            src={url}
+            aria-hidden
+            style={{
+              ...fill,
+              inset: "-15%",
+              width: "130%",
+              height: "130%",
+              filter: "blur(26px) brightness(0.5) saturate(1.4)",
+            }}
+          />
+          <img
+            src={url}
+            onError={() => setFailed(true)}
+            style={{
+              position: "absolute",
+              inset: "13%",
+              width: "74%",
+              height: "74%",
+              objectFit: "contain",
+              filter: "drop-shadow(0 8px 22px rgba(0, 0, 0, 0.55))",
+            }}
+          />
+        </>
+      )}
+      {!shown && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "34cqw",
+            fontWeight: 800,
+            color: "rgba(255, 255, 255, 0.85)",
+          }}
+        >
+          {initials || "♪"}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /** A big labelled tile for a part of the library ("All albums", "Artists"), Media Center style. */
 export const Tile: FC<{ c: Collection; onOpen: () => void }> = ({ c, onOpen }) => (

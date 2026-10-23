@@ -301,7 +301,11 @@ async def run():
         src = await library.art(piece["art"])
         check(src.path and src.path.endswith(".png") and library.art_dir in src.path, "the album's own picture comes first")
         check(not (await plugin.album_art(lid, works["id"], "set", os.path.join(tmp, "x.txt")))["ok"], "only pictures")
+        plugin.recents.add(lid, works)  # played as it was
         renamed = (await plugin.set_tags(lid, "album", works["id"], {"album": "Collected Works", "year": "1986"}))["data"]
+        jump = next(sec for sec in (await plugin.home(lid))["data"] if sec["title"] == "Jump back in")["items"][0]
+        check(jump["id"] == renamed["album_id"] and jump["title"] == "Collected Works" and jump["art"] != works["art"],
+              f"Jump back in shows an album as it is now: renamed, with its picture: {jump}")
         check(renamed["album_id"] != works["id"] and renamed["album_id"] in library.album_art
               and works["id"] not in library.album_art, "a renamed album keeps its picture")
         piece_t = library.tracks[piece["id"]]
@@ -348,6 +352,32 @@ async def run():
                      "artist-credit": [{"name": "Various Artists"}], "media": [{"track-count": 2}, {"track-count": 1}]}]})
             if request.path == "/ws/2/release/rel1":
                 return mbweb.json_response(mb_release)
+            if request.path == "/itunes/search":
+                found = "Catalogue Only" in request.query.get("term", "")
+                return mbweb.json_response({"results": [
+                    {"collectionId": 77, "collectionName": "Catalogue Only", "artistName": "Indie Band", "trackCount": 2,
+                     "releaseDate": "2023-01-01T08:00:00Z", "country": "USA"}] if found else []})
+            if request.path == "/itunes/lookup" and request.query.get("id") == "77":
+                return mbweb.json_response({"results": [
+                    {"wrapperType": "collection", "collectionName": "Catalogue Only", "artistName": "Indie Band",
+                     "releaseDate": "2023-01-01T08:00:00Z", "primaryGenreName": "Indie",
+                     "artworkUrl100": mb_base + "/pic/100x100bb.jpg"},
+                    {"wrapperType": "track", "trackName": "First Light", "trackNumber": 1, "discNumber": 1, "artistName": "Indie Band"},
+                    {"wrapperType": "track", "trackName": "Last Light", "trackNumber": 2, "discNumber": 1, "artistName": "Indie Band"}]})
+            if request.path == "/pic/1200x1200bb.jpg":
+                return mbweb.Response(body=JPEG, content_type="image/jpeg")
+            if request.path == "/deezer/search/album":
+                found = "Catalogue Only" in request.query.get("q", "")
+                return mbweb.json_response({"data": [
+                    {"id": 88, "title": "Catalogue Only", "artist": {"name": "Indie Band"}, "nb_tracks": 2}] if found else []})
+            if request.path == "/deezer/album/88":
+                return mbweb.json_response({"title": "Catalogue Only", "artist": {"name": "Indie Band"}, "label": "Small Label",
+                                            "release_date": "2023-01-01", "genres": {"data": [{"name": "Indie"}]},
+                                            "cover_xl": mb_base + "/pic/real.jpg"})
+            if request.path == "/deezer/album/88/tracks":
+                return mbweb.json_response({"data": [
+                    {"title": "First Light", "track_position": 1, "disk_number": 1, "artist": {"name": "Indie Band"}},
+                    {"title": "Last Light", "track_position": 2, "disk_number": 1, "artist": {"name": "Indie Band"}}]})
             if request.path == "/deezer/search/artist":
                 q = request.query.get("q")
                 return mbweb.json_response({"data": [
@@ -384,12 +414,14 @@ async def run():
         mb_site = mbweb.TCPSite(mb_runner, "127.0.0.1", 0)
         await mb_site.start()
         mb_base = f"http://127.0.0.1:{mb_site._server.sockets[0].getsockname()[1]}"
-        from musicdeck import lyrics as lymod, pictures as picmod
+        from musicdeck import catalogues as catmod, lyrics as lymod, pictures as picmod
         from musicdeck.services import local as localmod
-        real_mb = (mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE)
+        real_mb = (mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE,
+                   catmod.ITUNES, catmod.DEEZER)
         mbmod.API, mbmod.CAA, mbmod.SPACING = mb_base + "/ws/2", mb_base, 0
         picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE = (mb_base + "/deezer", mb_base + "/lrclib",
                                                                         mb_base + "/netease", 0)
+        catmod.ITUNES, catmod.DEEZER = mb_base + "/itunes", mb_base + "/deezer"
         try:
             found = (await plugin.lookup_album(lid, hits[0]["id"]))["data"]
             check([r["id"] for r in found] == ["rel1", "rel2"] and found[0]["tracks"] == 3 and found[0]["group"] == "rg1",
@@ -520,8 +552,34 @@ async def run():
                   and not any(n.endswith(".lrc") for n in os.listdir(sure_dir)),
                   "and its lyrics found, kept in MusicDeck")
             library.config.update(auto_tags="ask", auto_lyrics=False)
+
+            print("local library: Apple Music's and Deezer's catalogues")
+            library.config.update(auto_tags="off", auto_art=False)
+            cat_dir = os.path.join(lib2, "Catalogue Only")
+            for n, title in ((1, "first light"), (2, "last light")):
+                make_wav(os.path.join(cat_dir, f"0{n} {title}.wav"), title, "Indie Band", "Catalogue Only", n)
+            library.rescan()
+            await library.scan_task
+            cat = next(k for k, v in library._albums().items() if v[0][1]["album"] == "Catalogue Only")
+            found = (await plugin.lookup_album(lid, cat))["data"]
+            check([(r["id"], r["source"]) for r in found[:2]] == [("itunes:77", "Apple Music"), ("deezer:88", "Deezer")]
+                  and found[0]["year"] == "2023", f"an album MusicBrainz doesn't know, found in the catalogues: {found[:3]}")
+            preview = (await plugin.lookup_changes(lid, cat, "deezer:88"))["data"]
+            check({c[0]: c[2] for c in preview["album"]} == {"Year": "2023", "Genre": "Indie",
+                                                              "Label": "Small Label"}
+                  and [len(t[1]) for t in preview["tracks"]] == [1, 1], f"Deezer's album, track by track: {preview}")
+            applied = (await plugin.apply_lookup(lid, cat, "deezer:88"))["data"]
+            cat = applied["album_id"]
+            check(applied["changed"] == 2 and applied.get("art") and cat in library.album_art,
+                  f"applied, with its cover: {applied}")
+            await plugin.album_art(lid, cat, "clear")
+            check((await plugin.album_art(lid, cat, "find"))["data"] is True and cat in library.album_art,
+                  "no cover at the Cover Art Archive: Apple's instead")
+            check(not (await plugin.lookup_changes(lid, cat, "itunes:../x"))["ok"], "a catalogue id that isn't one")
+            library.config.update(auto_tags="ask", auto_art=True)
         finally:
-            mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE = real_mb
+            (mbmod.API, mbmod.CAA, mbmod.SPACING, picmod.API, lymod.LRCLIB, lymod.NETEASE, localmod.LYRICS_PACE,
+             catmod.ITUNES, catmod.DEEZER) = real_mb
             await mb_runner.cleanup()
         check(not (await plugin.get_tags(sid, "track", "nope"))["ok"], "a track that isn't there")
 
@@ -1542,17 +1600,27 @@ async def run():
             meta += b"\0" * (-len(meta) % 16)
             body = b"A" * 16 + bytes([len(meta) // 16]) + meta + b"B" * 16
             return aioweb.Response(body=body, headers={"icy-metaint": "16", "Content-Type": "audio/mpeg"})
+        async def song_search(request):
+            # Apple's catalogue: the song on air, and one only like it
+            return aioweb.json_response({"results": [
+                {"trackName": "Song (Live)", "artistName": "Artist", "artworkUrl100": "https://x/live/100x100bb.jpg"},
+                {"trackName": "Song", "artistName": "Artist", "artworkUrl100": "https://x/song/100x100bb.jpg"},
+            ] if "Artist Song" == request.query.get("term") else []})
         icy_app = aioweb.Application()
         icy_app.router.add_get("/stream", icy)
+        icy_app.router.add_get("/search", song_search)
         icy_runner = aioweb.AppRunner(icy_app)
         await icy_runner.setup()
         icy_site = aioweb.TCPSite(icy_runner, "127.0.0.1", 0)
         await icy_site.start()
         icy_port = icy_site._server.sockets[0].getsockname()[1]
         await rs.start()
+        from musicdeck.services import radio as radiomod
+        real_itunes, radiomod.ITUNES = radiomod.ITUNES, f"http://127.0.0.1:{icy_port}"
         rs.stations.put("s1", {"stationuuid": "s1", "url_resolved": f"http://127.0.0.1:{icy_port}/stream"})
-        check(await rs.on_air("s1") == {"text": "Artist – Song", "title": "Song", "artist": "Artist", "art": None},
-              "song on air read from ICY metadata")
+        check(await rs.on_air("s1") == {"text": "Artist – Song", "title": "Song", "artist": "Artist",
+                                        "art": "https://x/song/600x600bb.jpg"},
+              "song on air read from ICY metadata, its cover found for exactly that song")
         from musicdeck.services.radio import parse_on_air
         iheart = ('Zara Larsson - text="Midnight Sun" song_spot="M" MediaBaseId="3134734" '
                   'amgArtworkURL="https://i.iheart.com/v3/catalog/track/332448851?ops=fit(200,200)" length="00:03:05"')
@@ -1575,7 +1643,9 @@ async def run():
         check(parse_on_air('title="Z100 Preset 4",artist="",url="song_spot="F" MediaBaseId="0"') is None,
               "a jingle behind an unclosed url= tag isn't a song")
         rs.stations.put("s3", {"stationuuid": "s3", "url_resolved": f"http://127.0.0.1:{icy_port}/stream?enc=latin1"})
-        check((await rs.on_air("s3"))["artist"] == "Brüllová", "Latin-1 titles read as Latin-1")
+        on_s3 = await rs.on_air("s3")
+        check(on_s3["artist"] == "Brüllová" and on_s3["art"] is None, "Latin-1 titles read as Latin-1; no cover found, none")
+        radiomod.ITUNES = real_itunes
         rs.stations.put("s2", {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})
         check(await rs.on_air("s2") is None, "HLS stations have no ICY title")
         await rs.stop()

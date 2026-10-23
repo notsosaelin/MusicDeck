@@ -63,6 +63,11 @@ source (`MusicService.remove`).
   `originaldate` the file has. What each key held before is kept per file in
   `local-<id>-tag-history.json` for one undo. No edits while a scan runs; the index is re-read for the
   files edited, and an album renamed as a whole keeps its own picture.
+- **Catalogues** (`catalogues.py`): Apple's (iTunes Search API) and Deezer's public APIs, no account or key,
+  searched beside MusicBrainz in Look up (results say their source; ids `itunes:<id>`, `deezer:<id>`)
+  with the same release shape, and asked for covers after the Cover Art Archive (Apple's 1200 px first;
+  only an album of exactly that title by that artist). Only when sure uses MusicBrainz alone: it tells
+  one release from another.
 - **MusicBrainz** (`musicbrainz.py`, only when asked): releases searched by album and artist ("Various
   artists" left out), those with the album's track count first; a release's title, album artist, first
   year, top genres, label, and track titles, artists and numbers (per disc). Track by track only when
@@ -308,7 +313,11 @@ source (`MusicService.remove`).
   (`Artist - text="Song" song_spot="M" amgArtworkURL="…"`, or `title="…",artist="…"`); anything
   not marked as music (`song_spot` other than "M": idents, ads, talk) is skipped. The now-playing
   card then shows song, artist and station next to the song's cover (an image link in `StreamUrl`
-  counts too) instead of the station's logo, place and genres.
+  counts too) instead of the station's logo, place and genres. A song named without a cover gets one
+  from Apple's catalogue (the iTunes Search API, no account; exactly that title by that artist, 600 px),
+  remembered a day, "none" included. The media center's On air page shows it, or a visualizer when the
+  station names nothing, with the station's facts (`details`: place, language, quality, today's
+  listeners, genres) as chips, the songs heard earlier, and stations like it.
 - **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse
   requests without a user agent, so `art()` sends MusicDeck's.
 - **Favourites**: stored in this source's config (`favourites`) via `save_config`.

@@ -3,6 +3,30 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.8.0
+
+**Quick Access**
+- The Equalizer tab is now **Settings**, with everything the media center's Settings has: the equalizer,
+  playback, scrobbling, games, and the media center's own choices. Values sit under their labels, so none
+  is cut short. Sources are still picked in Decky → MusicDeck.
+
+**Internet radio**
+- A station's logo fills its square, whole, over a soft blur of itself; a station without one gets its
+  initials on a colour of its own. When a station names the song, its cover takes the square, looked up
+  in Apple's catalogue when the station doesn't send one.
+- **On air** is a page of its own now: the song and artist when the station says, or the sound itself,
+  drawn, when it doesn't; how long you've been listening; where the station is from, its language,
+  quality, today's listeners and genres; what it played earlier; and stations like it, one press away.
+  The Station tab is folded into it (On air · Similar).
+
+**Local files: more places to look**
+- **Look up** searches Apple Music's and Deezer's public catalogues beside MusicBrainz (no account), so
+  albums MusicBrainz doesn't know (new releases, small labels) can be filled in too; each result says
+  where it's from.
+- Covers come from the Cover Art Archive, then Apple's (up to 1200 px) or Deezer's.
+- **Jump back in** shows albums and artists as they are now: new pictures, and albums renamed by a tag fix
+  under their new names.
+
 ## 0.7.0
 
 **New music gets ready by itself (local files)**

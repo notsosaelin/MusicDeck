@@ -27,6 +27,7 @@ import aiohttp
 
 from .. import lyrics, models, pictures, tagging
 from ..background import spawn
+from ..catalogues import Catalogues
 from ..musicbrainz import MusicBrainz
 from ..pictures import plain
 from ..watch import FolderWatcher
@@ -412,6 +413,7 @@ class LocalService(MusicService):
         # one edit at a time, and none while a scan runs (it would put back what it read before)
         self.edit_lock = asyncio.Lock()
         self.mb: Optional[MusicBrainz] = None
+        self.catalogues: Optional[Catalogues] = None
         self.http: Optional[aiohttp.ClientSession] = None
         self.art_task: Optional[asyncio.Task[None]] = None
         self.art_progress = {"running": False, "done": 0, "total": 0, "found": 0}
@@ -428,6 +430,8 @@ class LocalService(MusicService):
         self.watcher: Optional[FolderWatcher] = None
         self.recheck: Optional[asyncio.Task[None]] = None
         self.new_tracks: set[str] = set()
+        # albums renamed by tag edits: {old id: new id}, so what remembered the old one still finds it
+        self.renamed: dict[str, str] = {}
         # the tracks of the albums being got ready (lyrics are only looked up for these)
         self.new_since: set[str] = set()
         self.import_queue: list[str] = []
@@ -674,7 +678,8 @@ class LocalService(MusicService):
             self._save_review()
             done["review"] += 1
             return key
-        sure = [r for r in releases if r["tracks"] == len(items) and r["score"] >= 95
+        # MusicBrainz's only: it tells one release from another, where the catalogues name albums
+        sure = [r for r in releases if r["source"] == "MusicBrainz" and r["tracks"] == len(items) and r["score"] >= 95
                 and (owner == VARIOUS or plain(r["artist"]) == plain(owner))]
         # every likely release the same record (pressings of one release group), or no doubt at all
         if not sure or len({r["group"] or r["id"] for r in sure}) != 1:
@@ -744,6 +749,7 @@ class LocalService(MusicService):
             return
         self.tracks = data.get("tracks", {})
         self.playlists = data.get("playlists", {})
+        self.renamed = data.get("renamed", {}) if isinstance(data.get("renamed"), dict) else {}
         self._changed()
         self.scan_progress["last_scan"] = data.get("scanned_at", 0.0)
 
@@ -752,7 +758,7 @@ class LocalService(MusicService):
         tmp = self.index_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"version": INDEX_VERSION, "roots": self.roots, "scanned_at": time.time(),
-                       "tracks": self.tracks, "playlists": self.playlists}, f)
+                       "tracks": self.tracks, "playlists": self.playlists, "renamed": self.renamed}, f)
         os.replace(tmp, self.index_path)
 
     # --- grouping ---
@@ -993,6 +999,20 @@ class LocalService(MusicService):
         if kind == "folder":
             return self._open_folder(id)
         raise ServiceError(f"Unknown collection kind: {kind}")
+
+    def current(self, collection: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """An album or artist as it is now: its picture, its name; an album renamed by a tag edit under
+        its new id; None when it's left the library."""
+        kind, id = collection.get("kind"), collection.get("id", "")
+        if kind == "album":
+            albums = self._albums()
+            id = self.renamed.get(id, id)
+            return self._album_collection(id, albums[id]) if id in albums else None
+        if kind == "artist":
+            found = self._artist_index().get(id)
+            return models.collection(id, "artist", found[0], models.count(found[1], "album"),
+                                     art=self._artist_art_id(id)) if found else None
+        return collection
 
     def _tracks_page(self, title: str, picked: list[tuple[str, dict[str, Any]]], subtitle: str = "") -> dict[str, Any]:
         """A page of tracks, with the albums they're from first when there are a few."""
@@ -1238,9 +1258,13 @@ class LocalService(MusicService):
                 changed += 1
             self._changed()
             new_albums = {self._album_key(self.tracks[tid]) for tid, _ in edits if tid in self.tracks}
-            # an album renamed as a whole keeps its picture
+            # an album renamed as a whole keeps its picture, and is found under its new id (Jump back in)
             if len(old_albums) == 1 and len(new_albums) == 1 and old_albums != new_albums:
-                self._move_art(old_albums.pop(), next(iter(new_albums)))
+                old, new = next(iter(old_albums)), next(iter(new_albums))
+                self._move_art(old, new)
+                self.renamed = {k: (new if v == old else v) for k, v in self.renamed.items()}
+                self.renamed[old] = new
+                self.renamed = dict(list(self.renamed.items())[-200:])
             await asyncio.to_thread(self._save_after_edit)
         if not changed:
             raise ServiceError(errors[0] if errors else "Nothing was changed")
@@ -1273,6 +1297,11 @@ class LocalService(MusicService):
                                               timeout=aiohttp.ClientTimeout(total=20))
         return self.http
 
+    def _catalogues(self) -> Catalogues:
+        if self.catalogues is None:
+            self.catalogues = Catalogues(self._http())
+        return self.catalogues
+
     def _musicbrainz(self) -> MusicBrainz:
         if self.mb is None:
             self.mb = MusicBrainz(self._http())
@@ -1284,7 +1313,16 @@ class LocalService(MusicService):
         first = items[0][1]
         album = first["album"] or os.path.basename(self._album_folder(first))
         owner = self._album_owner(items)
-        return await self._musicbrainz().search("" if owner == VARIOUS else owner, album, len(items))
+        artist = "" if owner == VARIOUS else owner
+        # MusicBrainz, and the catalogues that know what it may not; one that can't be asked is left out
+        found = await asyncio.gather(self._musicbrainz().search(artist, album, len(items)),
+                                     self._catalogues().search(artist, album), return_exceptions=True)
+        if isinstance(found[0], BaseException) and isinstance(found[1], BaseException):
+            raise found[0] if isinstance(found[0], ServiceError) else ServiceError("Couldn't look the album up")
+        releases = [{**r, "source": "MusicBrainz"} for r in found[0]] if isinstance(found[0], list) else []
+        releases += found[1] if isinstance(found[1], list) else []
+        # the album's track count first, then the best matches; MusicBrainz's before the catalogues' on a tie
+        return sorted(releases, key=lambda r: (r["tracks"] != len(items), -r["score"], r["source"] != "MusicBrainz"))[:12]
 
     async def lookup_changes(self, album_id: str, release_id: str) -> dict[str, Any]:
         """What taking a release's details would change: {"release", "album": [[label, old, new]],
@@ -1311,7 +1349,9 @@ class LocalService(MusicService):
         result = await self._write_tags(edits) if edits else {"changed": 0, "album_id": album_id}
         new_album = result.get("album_id") or album_id
         if new_album in self._albums() and not await self._has_art(new_album):
-            cover = await self._musicbrainz().cover(release_id, plan["release"]["group"])
+            release = plan["release"]
+            cover = await (self._catalogues().cover(release) if release.get("cover")
+                           else self._musicbrainz().cover(release_id, release["group"]))
             if cover:
                 self._save_art(new_album, *cover)
                 result["art"] = True
@@ -1319,7 +1359,9 @@ class LocalService(MusicService):
 
     async def _lookup_plan(self, album_id: str, release_id: str) -> dict[str, Any]:
         items = self._target("album", album_id)
-        r = await self._musicbrainz().release(release_id)
+        # a catalogue's album ("itunes:...", "deezer:...") or a MusicBrainz release
+        r = await (self._catalogues().release(release_id) if ":" in release_id
+                   else self._musicbrainz().release(release_id))
         first = items[0][1]
         wanted = {"album": r["title"], "albumartist": r["artist"], "year": r["year"],
                   "genre": "; ".join(r["genres"]), "label": r["label"]}
@@ -1415,7 +1457,9 @@ class LocalService(MusicService):
         if not first["album"]:
             raise ServiceError("Name the album first (Edit tags) to look for its cover")
         owner = self._album_owner(items)
-        cover = await self._musicbrainz().find_cover("" if owner == VARIOUS else owner, first["album"])
+        artist = "" if owner == VARIOUS else owner
+        # the Cover Art Archive first (its covers are the exact release's), then the catalogues
+        cover = await self._musicbrainz().find_cover(artist, first["album"])             or await self._catalogues().find_cover(artist, first["album"])
         if not cover:
             return False
         self._save_art(album_id, *cover)

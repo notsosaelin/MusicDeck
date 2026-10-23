@@ -34,7 +34,8 @@ import {
   isTalk,
   useDetails,
 } from "./nowplaying";
-import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto, snapRows } from "./parts";
+import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
+import { useOnAir } from "../NowPlaying";
 import {
   CollectionPage,
   QueueList,
@@ -392,7 +393,9 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   const side = sideOf(kind, useStore(nowPlayingSide)).id;
   const upNext = Math.max(player.playOrder.length - 1 - player.playOrder.indexOf(state.index), 0);
   const lyrics = useLyrics(side === "lyrics" ? item : undefined);
-  const details = useDetails(item, ["notes", "station", "related", "info"].includes(side));
+  const details = useDetails(item, ["notes", "station", "related", "info", "onair"].includes(side));
+  // a station's song (when it says): for On air, and its cover in the station's square
+  const song = useOnAir(kind === "radio" ? item : undefined, state.playing);
   const page = useRef<HTMLDivElement>(null);
   const room = useFitBelow(page);
   const area = useRef<HTMLDivElement>(null);
@@ -433,23 +436,35 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
           style={{ display: "flex", flexDirection: "column", gap: "2vh", height: "100%" }}
         >
           <div style={{ flex: 1, minHeight: 0, display: "flex", gap: "3.5vw" }}>
-            <div
-              style={{
-                height: "100%",
-                // on a squarer screen (docked) the row's height would take most of its width
-                maxHeight: "40vw",
-                aspectRatio: "1",
-                flexShrink: 0,
-                borderRadius: 8,
-                // a station's logo is small: whole, on a dark square, rather than blown up to fill it
-                background: !art
-                  ? "rgba(255, 255, 255, 0.08)"
-                  : kind === "radio"
-                    ? `center / 62% no-repeat url("${art}"), rgba(255, 255, 255, 0.06)`
-                    : `center / cover no-repeat url("${art}")`,
-                boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
-              }}
-            />
+            {kind === "radio" ? (
+              // a station: its logo as big as the square (or the song's cover, when it's found one)
+              <StationArt
+                url={song?.art ? mediaUrl("art", item.instanceId, song.art) : art}
+                name={item.track.title}
+                full={!!song?.art}
+                style={{
+                  height: "100%",
+                  maxHeight: "40vw",
+                  aspectRatio: "1",
+                  flexShrink: 0,
+                  borderRadius: 8,
+                  boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  height: "100%",
+                  // on a squarer screen (docked) the row's height would take most of its width
+                  maxHeight: "40vw",
+                  aspectRatio: "1",
+                  flexShrink: 0,
+                  borderRadius: 8,
+                  background: art ? `center / cover no-repeat url("${art}")` : "rgba(255, 255, 255, 0.08)",
+                  boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
+                }}
+              />
+            )}
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5vh" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -475,7 +490,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                 {side === "queue" ? (
                   <QueueList />
                 ) : side === "onair" ? (
-                  <OnAirPanel item={item} />
+                  <OnAirPanel item={item} song={song} details={details} />
                 ) : side === "station" ? (
                   <DetailsPanel details={details} show="facts" empty="Nothing more about this station" />
                 ) : side === "info" ? (
@@ -738,6 +753,28 @@ async function setCenter(patch: Partial<CenterSettings>) {
   await refreshState();
 }
 
+/**
+ * The media center's own choices (what it opens on, its look, screen off), in its Settings and in the
+ * panel's: `below` puts each value under its label, for the narrow panel, so none is cut short.
+ */
+export const CenterChoices: FC<{ Section: SectionFrame; below?: boolean }> = ({ Section, below }) => {
+  const center = { ...DEFAULT_CENTER, ...useStore(pluginState)?.center };
+  return (
+    <Section title="Media center">
+      {CHOICES.map((c) => (
+        <DropdownItem
+          key={c.key}
+          layout={below ? "below" : undefined}
+          label={c.label}
+          rgOptions={c.options}
+          selectedOption={center[c.key]}
+          onChange={(o) => setCenter({ [c.key]: o.data })}
+        />
+      ))}
+    </Section>
+  );
+};
+
 /** A group of settings here: the heading this page's own groups use, a little space above. */
 const CenterSection: SectionFrame = ({ title, children }) => (
   <div style={{ marginTop: 28 }}>
@@ -752,20 +789,10 @@ const CenterSection: SectionFrame = ({ title, children }) => (
  */
 const SettingsPage: FC = () => {
   const state = useStore(pluginState);
-  const center = { ...DEFAULT_CENTER, ...state?.center };
   return (
     <div style={{ maxWidth: 760 }}>
       <Equalizer />
-      <SectionTitle>Media center</SectionTitle>
-      {CHOICES.map((c) => (
-        <DropdownItem
-          key={c.key}
-          label={c.label}
-          rgOptions={c.options}
-          selectedOption={center[c.key]}
-          onChange={(o) => setCenter({ [c.key]: o.data })}
-        />
-      ))}
+      <CenterChoices Section={CenterSection} />
       {state && <PlaybackSections state={state} Section={CenterSection} />}
       <div style={{ fontSize: 13, opacity: 0.55, marginTop: 24, lineHeight: 1.5 }}>
         Sources are added and chosen in Decky → MusicDeck. Press the View button to go back to the Quick Access panel.

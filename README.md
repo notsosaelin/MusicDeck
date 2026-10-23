@@ -14,9 +14,11 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   pause while you play and pick up again when the game closes.
 - **Several accounts:** add a service more than once (two Spotify accounts, a second Navidrome user) and
   switch between them like any other source.
-- **Native Quick Access tab:** Now playing, Library, Search and Equalizer, with a mini player while you
+- **Native Quick Access tab:** Now playing, Library, Search and Settings, with a mini player while you
   browse, built from Steam's own components and controller conventions. Now playing is two pages: the
-  player, then below it the song's lyrics (a small visualizer when there are none) or the queue.
+  player, then below it the song's lyrics (a small visualizer when there are none) or the queue. Settings
+  has what the media center's has: the equalizer, playback, scrobbling, games and the media center's own
+  choices (sources are picked in Decky → MusicDeck).
 - **Your music library:** local files as a library, not a folder list: albums (compilations kept whole, discs
   in CD1/CD2 folders together), artists with the songs they appear on elsewhere, genres, years by decade and
   composers, all from the files' tags. MusicDeck counts plays on the Deck for Recently played, Most played and
@@ -24,8 +26,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays.
 - **Library manager for your files:** edit a track's or a whole album's tags (**Y** → Edit tags; the last
   edit to each file can be undone), fill them in from a [MusicBrainz](https://musicbrainz.org) release you
-  pick after seeing exactly what would change, and give albums and artists pictures: one of your own, an
-  album's cover from the Cover Art Archive, an artist's picture from Deezer's public catalogue (no account),
+  pick after seeing exactly what would change (MusicBrainz, and Apple Music's and Deezer's public
+  catalogues for what it doesn't know), and give albums and artists pictures: one of your own, an
+  album's cover from the Cover Art Archive (then Apple's or Deezer's, up to 1200 px), an artist's picture from Deezer's public catalogue (no account),
   or every missing one at once (Decky → MusicDeck → the source's menu → Find missing artwork). Pictures are
   kept in MusicDeck. Lyrics found online can be kept for a track, an album, or the whole library (Find
   missing lyrics), synced when they are: in MusicDeck, or as the same-named `.lrc` beside each song that
@@ -45,8 +48,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky. All on the
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
-  station what's on air (and
-  what it played earlier), the station and stations like it; a podcast episode its show notes and the
+  station its logo as big as its square, and an On air page: the song and its cover when the station says
+  (the cover looked up when it doesn't send one), or the sound itself, drawn, when it doesn't; where it's
+  from, its language, quality, today's listeners and genres; what it played earlier; and stations like it; a podcast episode its show notes and the
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
   Live Music Archive its setlist and recording notes.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
