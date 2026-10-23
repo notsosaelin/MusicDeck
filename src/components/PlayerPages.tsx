@@ -80,14 +80,14 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
         {hasSecond && (
           <div ref={second} style={{ height: page, overflowY: side === "queue" ? "auto" : "clip" }}>
             <PageSwitch side={side} upNext={queue.length} />
+            {/* the lyrics' and the list's section spacing would make a second gap under the header */}
             {side === "lyrics" ? (
-              <PanelLyrics height={page - SWITCH_HEIGHT - 8} /> // the list's section spacing under the header would be a second gap
+              <div style={{ marginTop: -16 }}>
+                <PanelLyrics height={page - SWITCH_HEIGHT + 8} />
+              </div>
             ) : (
               <div style={{ marginTop: -20 }}>
-                // the list's section spacing would make a second gap under the header
-                <div style={{ marginTop: -20 }}>
-                  <Queue titled={false} />
-                </div>
+                <Queue titled={false} />
               </div>
             )}
           </div>

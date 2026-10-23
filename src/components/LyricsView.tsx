@@ -58,10 +58,14 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
     else break;
   }
   // Lines wrap, so position by the active line's measured offset rather than a fixed line height. The
-  // active line rides a third of the way down; until the song gets that far the lines start at the top
-  // (just under the fade), not a third of the way down with nothing above them
+  // active line rides a third of the way down; until the song gets that far the lines start at the top,
+  // not a third of the way down with nothing above them
   const el = lineRefs.current[Math.max(active, 0)];
-  const offset = Math.min(height * TOP_FADE, height / 3 - (el ? el.offsetTop + el.offsetHeight / 2 : 0));
+  const riding = height / 3 - (el ? el.offsetTop + el.offsetHeight / 2 : 0);
+  const atTop = riding >= 8;
+  const offset = atTop ? 8 : riding;
+  // at the top there's nothing above to fade out
+  const mask = `linear-gradient(${atTop ? "black" : "transparent"}, black ${TOP_FADE * 100}%, black ${100 - TOP_FADE * 100}%, transparent)`;
   return (
     <div
       style={{
@@ -69,8 +73,8 @@ export const SyncedLyrics: FC<{ lyrics: Lyrics; height: number; fontSize: number
         overflow: "hidden",
         position: "relative",
         // fade lines in and out at the edges instead of cutting them off
-        maskImage: `linear-gradient(transparent, black ${TOP_FADE * 100}%, black ${100 - TOP_FADE * 100}%, transparent)`,
-        WebkitMaskImage: `linear-gradient(transparent, black ${TOP_FADE * 100}%, black ${100 - TOP_FADE * 100}%, transparent)`,
+        maskImage: mask,
+        WebkitMaskImage: mask,
       }}
     >
       <div style={{ transform: `translateY(${offset}px)`, transition: "transform 350ms ease" }}>
