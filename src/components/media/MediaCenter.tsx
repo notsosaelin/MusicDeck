@@ -8,12 +8,11 @@ import {
   FaRedo,
   FaStepBackward,
   FaStepForward,
-  FaUndo,
   FaVolumeDown,
   FaVolumeMute,
   FaVolumeUp,
 } from "react-icons/fa";
-import { MdRepeatOne } from "react-icons/md";
+import { MdForward30, MdRepeatOne, MdReplay10 } from "react-icons/md";
 import { CenterSettings, CenterTabInfo, NowPlayingKind, ServiceInfo, setSetting } from "../../api";
 import { CenterTab, centerTab, leaveMediaCenter } from "../../nav";
 import { player } from "../../player";
@@ -186,17 +185,17 @@ const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean; kind?: Now
   const big = size === "large";
   const side = { height: big ? 48 : 40, fontSize: big ? 17 : 15 };
   const skip = { height: big ? 48 : 40, fontSize: big ? 20 : 17 };
-  // talk skips back and ahead where music shuffles and repeats; a station does neither
+  // talk skips back and ahead where music shuffles and repeats, with buttons just like them
   const talk = isTalk(kind);
-  const radio = kind === "radio";
   return (
-    <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: 8, width: big ? 380 : 300 }}>
+    <Focusable
+      flow-children="row"
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: big ? 380 : 300 }}
+    >
       {talk ? (
-        <IconButton look="plain" label="Back 15 seconds" onClick={() => player.skipBy(-15)} style={side}>
-          <SkipLabel back seconds={15} />
+        <IconButton look="plain" label="Back 10 seconds" onClick={() => player.skipBy(-10)} style={skip}>
+          <MdReplay10 />
         </IconButton>
-      ) : radio ? (
-        <div style={{ width: side.height }} />
       ) : (
         <IconButton
           look="plain"
@@ -224,11 +223,9 @@ const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean; kind?: Now
         <FaStepForward />
       </IconButton>
       {talk ? (
-        <IconButton look="plain" label="Ahead 30 seconds" onClick={() => player.skipBy(30)} style={side}>
-          <SkipLabel seconds={30} />
+        <IconButton look="plain" label="Ahead 30 seconds" onClick={() => player.skipBy(30)} style={skip}>
+          <MdForward30 />
         </IconButton>
-      ) : radio ? (
-        <div style={{ width: side.height }} />
       ) : (
         <IconButton
           look="plain"
@@ -244,18 +241,6 @@ const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean; kind?: Now
   );
 };
 
-/** A skip button's face: the arrow round, with how far it goes inside, as podcast apps draw it. */
-const SkipLabel: FC<{ seconds: number; back?: boolean }> = ({ seconds, back }) => (
-  <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-    {back ? <FaUndo style={{ fontSize: "1.5em" }} /> : <FaRedo style={{ fontSize: "1.5em" }} />}
-    <span
-      style={{ position: "absolute", fontSize: "0.5em", fontWeight: 700, top: "52%", transform: "translateY(-50%)" }}
-    >
-      {seconds}
-    </span>
-  </span>
-);
-
 const SPEEDS = [0.8, 1, 1.2, 1.5, 1.75, 2];
 
 /** How fast talk plays: A goes to the next speed, round again after the fastest. */
@@ -264,7 +249,7 @@ const SpeedButton: FC = () => {
   const next = SPEEDS.find((x) => x > speed + 0.01) ?? SPEEDS[0];
   return (
     <Focusable
-      className="mc-row"
+      className="mc-pill"
       noFocusRing
       onActivate={() => player.setSpeed(next)}
       onClick={() => player.setSpeed(next)}
@@ -364,7 +349,7 @@ const SideSwitch: FC<{ kind: NowPlayingKind; upNext: number }> = ({ kind, upNext
       {PANELS[kind].map(({ id, label }) => (
         <Focusable
           key={id}
-          className="mc-row"
+          className={side === id ? "mc-pill mc-on" : "mc-pill"}
           noFocusRing
           onActivate={() => pick(id)}
           onClick={() => pick(id)}

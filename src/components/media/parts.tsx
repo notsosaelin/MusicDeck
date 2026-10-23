@@ -26,6 +26,18 @@ export const CENTER_CSS =
 .mc-center [class*="TabContentsScroll"] { scroll-padding-top: 104px; scroll-padding-bottom: 12px; }
 .mc-card, .mc-tile { scroll-margin-top: 46px; scroll-margin-bottom: 10px; scroll-margin-left: 2.8vw; scroll-margin-right: 2.8vw; }
 .mc-row { scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
+/* pills (Lyrics | Queue, a speed) light up as Steam's own do, without a frame; the chosen one stays white */
+.mc-pill { outline: none; transition: background 0.12s; }
+.mc-pill.gpfocus:not(.mc-on), .mc-pill:hover:not(.mc-on) { background: rgba(255, 255, 255, 0.24) !important; }
+.mc-pill.gpfocus.mc-on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+/* a line of text to rest on while reading (show notes, a station's details): barely marked */
+.mc-line { border-radius: 4px; outline: none; scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
+.mc-line.gpfocus { background: rgba(255, 255, 255, 0.06); }
+/* the transport's plain buttons (shuffle, skip...) as circles that light up softly, like the round play
+   button, not the full-width white block Steam's buttons fill with */
+.mc-center button.DialogButton.md-plain { border-radius: 50% !important; flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; aspect-ratio: 1; }
+.mc-center button.DialogButton.md-plain.gpfocus, .mc-center button.DialogButton.md-plain:hover {
+  background: rgba(255, 255, 255, 0.18) !important; color: #ffffff !important; box-shadow: none !important; }
 .mc-tile { border-radius: 6px; outline: none; transition: transform 0.12s ease-out; }
 .mc-tile.gpfocus, .mc-tile:hover { transform: scale(1.04); box-shadow: 0 0 0 3px #ffffff, 0 10px 28px rgba(0, 0, 0, 0.55); }
 ` + fieldCss(gamepadDialogClasses as Record<string, string> | undefined);

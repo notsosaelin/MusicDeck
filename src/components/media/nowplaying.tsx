@@ -70,7 +70,7 @@ export function useDetails(item: QueueItem | undefined, wanted: boolean): TrackD
 
 /** A line to rest the controller on, so long text scrolls under it a paragraph at a time. */
 const Line: FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
-  <Focusable className="mc-row" noFocusRing onActivate={() => {}} style={{ padding: "6px 10px", ...style }}>
+  <Focusable className="mc-line" noFocusRing onActivate={() => {}} style={{ padding: "6px 10px", ...style }}>
     {children}
   </Focusable>
 );
