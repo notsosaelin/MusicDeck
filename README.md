@@ -49,7 +49,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
   station its logo as big as its square, and an On air page: the song and its cover when the station says
-  (the cover looked up when it doesn't send one); its language, quality and today's listeners; and what it
+  (the cover looked up when it doesn't send one); its language and today's listeners; and what it
   played earlier (only what looks like songs: a station's own name or its
   playout codes aren't); stations like it under Similar, and the stations you listened to in Jump back in; a podcast episode its show notes and the
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
@@ -104,7 +104,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | Live Music Archive | None | Over 250,000 concert recordings bands allow to be shared ([archive.org](https://archive.org/details/etree)): concerts played on this day, popular this week, bands and their shows, search, same-band radio |
 | Qobuz | Your subscription | Your playlists and favourites (synced), editorial picks, search, MP3 up to 24-bit/192 kHz FLAC, plays reported as from the official player |
 | TIDAL | Your subscription | Your playlists, mixes and favourites, TIDAL's home page, search, track radio, synced lyrics, up to CD-quality FLAC |
-| Soulseek | A Soulseek name (registered when you first sign in with it) | Search what other people share, albums by folder with their format and quality, play a track (downloaded first), download an album into your music folder (default `~/Music/Soulseek`), where your local files pick it up and get it ready |
+| Soulseek | A Soulseek name (registered when you first sign in with it) | Search what other people share, albums by folder (the whole folder) with format and quality, browse a user's whole library, play a track (downloaded first), download an album into your music folder (default `~/Music/Soulseek`), where your local files pick it up and get it ready; downloads carry on after interruptions, retry and can be cancelled; optionally share folders of your own (searches, browsing, uploads two at a time), with your router asked to forward the port |
 | Spotify | Premium | Your playlists, Liked Songs (synced), recently played, top tracks and artists, saved albums, new releases, search, Spotify's synced lyrics, up to 320 kbps, Spotify's own loudness levelling |
 
 **No accounts where a service doesn't need one.** SoundCloud, YouTube, Bandcamp, radio, podcasts and the Live Music Archive are used signed

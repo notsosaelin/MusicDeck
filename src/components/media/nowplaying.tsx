@@ -164,7 +164,7 @@ export const OnAirPanel: FC<{
 }> = ({ item, song, details, height }) => {
   const key = `${item.instanceId}:${item.track.id}`;
   // what it played earlier: as many as fit under the rest (the song, the station's details)
-  const room = height - (song ? 76 : 0) - 3 * 26 - 50;
+  const room = height - (song ? 76 : 0) - 2 * 26 - 50;
   const earlier = (useStore(heard)[key] ?? [])
     .filter((h) => h.text !== song?.text)
     .slice(0, Math.max(0, Math.floor(room / 26)));
@@ -178,8 +178,16 @@ export const OnAirPanel: FC<{
   const facts = Object.fromEntries(details?.facts ?? []);
   const stationFacts = (
     [
-      ["Language", facts.Language],
-      ["Quality", facts.Quality],
+      // two languages at most: a station listing a dozen would push the page down
+      [
+        "Language",
+        (facts.Language ?? "")
+          .split(",")
+          .map((l: string) => l.trim())
+          .filter(Boolean)
+          .slice(0, 2)
+          .join(", "),
+      ],
       ["Listeners today", (facts.Today ?? "").replace(/ listeners$/, "")],
     ] as [string, string][]
   ).filter(([, value]) => value);

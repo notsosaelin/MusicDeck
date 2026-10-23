@@ -359,6 +359,17 @@ const SoulseekFields: FC<{
   hasCredentials: boolean;
 }> = ({ draft, setConfig, hasCredentials }) => {
   const folder: string = draft.config.download_dir || "~/Music/Soulseek";
+  const shares: string[] = draft.config.share_dirs ?? [];
+  const addShare = async () => {
+    try {
+      const home = pluginState.get()?.user_home || "/home";
+      const res = await openFilePicker(SELECT_FOLDER, home, false, true);
+      if (res?.realpath && !shares.includes(res.realpath))
+        setConfig({ ...draft.config, share_dirs: [...shares, res.realpath] });
+    } catch {
+      // picker cancelled
+    }
+  };
   const pick = async () => {
     try {
       const home = pluginState.get()?.user_home || "/home";
@@ -394,6 +405,33 @@ const SoulseekFields: FC<{
             <FaFolderPlus style={{ marginRight: 8 }} /> Change
           </DialogButton>
         </Focusable>
+      </Field>
+      <Field
+        label="Share folders"
+        hint={
+          shares.length
+            ? "Other Soulseek users can search, browse and download the music in these (two at a time)."
+            : "Nothing is shared. Some users only send to people who share: add a folder to share its music."
+        }
+      >
+        {shares.map((p) => (
+          <Focusable
+            key={p}
+            flow-children="row"
+            style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}
+          >
+            <ScrollingText play text={p} style={{ flex: 1, minWidth: 0 }} />
+            <DialogButton
+              style={{ minWidth: 0, width: 40, padding: "6px 0" }}
+              onClick={() => setConfig({ ...draft.config, share_dirs: shares.filter((x) => x !== p) })}
+            >
+              <FaTimes />
+            </DialogButton>
+          </Focusable>
+        ))}
+        <DialogButton onClick={addShare}>
+          <FaFolderPlus style={{ marginRight: 8 }} /> Share a folder
+        </DialogButton>
       </Field>
     </>
   );

@@ -1585,6 +1585,16 @@ async def run():
         song = bytes(range(256)) * 300  # 76,800 bytes
         shared = [("@@music\\Band - Record\\01 One.flac", len(song)), ("@@music\\Band - Record\\02 Two.flac", len(song)),
                   ("@@music\\Band - Record\\cover.jpg", 10)]
+        # the folder holds one more track than a search finds
+        whole_folder = shared + [("@@music\\Band - Record\\03 Three.flac", len(song))]
+        offsets = []
+
+        def listing(files):
+            body = u32n = slu32(len(files))
+            for path, size in files:
+                body += slu8(1) + slstr(path.rpartition("\\")[2]) + slu64(size) + slstr("flac") + slu32(0)
+            del u32n
+            return body
         listen = {}  # our client's listening port, as it tells the server
         tokens = {"next": 76}  # each upload its own transfer token
 
@@ -1603,8 +1613,9 @@ async def run():
             async def send_file(token, path):
                 fr, fw = await asyncio.open_connection("127.0.0.1", listen["port"])
                 fw.write(slmsg(1, slstr(user) + slstr("F") + slu32(0), code_size=1) + slu32(token))
-                assert await fr.readexactly(8) == slu64(0)
-                fw.write(song)
+                offset = struct.unpack("<Q", await fr.readexactly(8))[0]
+                offsets.append(offset)
+                fw.write(song[offset:])
                 await fw.drain()
                 await asyncio.sleep(0.05)
                 fw.close()
@@ -1618,7 +1629,14 @@ async def run():
                     path = r.string()
                     tokens["next"] += 1
                     pending[tokens["next"]] = path
-                    writer.write(slmsg(40, slu32(1) + slu32(tokens["next"]) + slstr(path) + slu64(dict(shared)[path])))
+                    writer.write(slmsg(40, slu32(1) + slu32(tokens["next"]) + slstr(path) + slu64(dict(whole_folder)[path])))
+                elif code == 36:
+                    token, folder = r.u32(), r.string()
+                    writer.write(slmsg(37, slzlib.compress(slu32(token) + slstr(folder) + slu32(1) + slstr(folder)
+                                                          + listing(whole_folder))))
+                elif code == 4:
+                    writer.write(slmsg(5, slzlib.compress(slu32(1) + slstr("@@music\\Band - Record") + listing(whole_folder)
+                                                         + slu32(0) + slu32(0))))
                 elif code == 41:
                     token, allowed = r.u32(), r.bool()
                     if allowed and token in pending:
@@ -1631,6 +1649,8 @@ async def run():
         alice_port = alice.sockets[0].getsockname()[1]
         # bob can't be reached: he only reaches us, asked through the server
         logins = []
+        counts = []  # what the client says it shares
+        carol = {}  # a user who searches, browses and downloads from us
 
         async def slsk_server(reader, writer):
             code, payload = await read_message(reader)
@@ -1667,11 +1687,27 @@ async def run():
                     writer.write(slmsg(18, slstr("bob") + slstr("P") + bytes([1, 0, 0, 127]) + slu32(bob_port) + slu32(555) + slu8(0)))
                 elif code == 3:
                     user = r.string()
-                    writer.write(slmsg(3, slstr(user) + bytes([1, 0, 0, 127]) + slu32(alice_port if user == "alice" else 0)
-                                       + slu32(0) + bytes(2)))
+                    port = {"alice": alice_port, "carol": carol.get("port", 0)}.get(user, 0)
+                    writer.write(slmsg(3, slstr(user) + bytes([1, 0, 0, 127]) + slu32(port) + slu32(0) + bytes(2)))
+                elif code == 35:
+                    counts.append((r.u32(), r.u32()))
+                elif code == 99:  # a test's way to have the server pass on carol's search
+                    writer.write(slmsg(26, slstr("carol") + slu32(4242) + slstr(r.string())))
         server = await asyncio.start_server(slsk_server, "127.0.0.1", 0)
         real_server = slsk.SERVER
         slsk.SERVER = ("127.0.0.1", server.sockets[0].getsockname()[1])
+        import musicdeck.services.soulseek as ssmod
+
+        class NoRouter:  # the test machine's own router isn't asked
+            def __init__(self, *args):
+                pass
+
+            async def open(self):
+                return False
+
+            async def close(self):
+                pass
+        real_mapping, ssmod.PortMapping = ssmod.PortMapping, NoRouter
         music_dir = os.path.join(tmp, "SlskMusic")
         try:
             wrong = await plugin.save_service({"type": "soulseek", "name": "", "config": {"username": "me", "password": "nope"}})
@@ -1685,7 +1721,6 @@ async def run():
             inst = plugin.instances[ss]
             await inst.connecting
             check(inst.status()["connected"], "connected to the server")
-            import musicdeck.services.soulseek as ssmod
             real_wait, ssmod.SEARCH_WAIT = ssmod.SEARCH_WAIT, 0.6
             found = (await plugin.search(ss, "band record"))["data"]
             ssmod.SEARCH_WAIT = real_wait
@@ -1694,7 +1729,8 @@ async def run():
                   and sorted(t["title"] for t in found["tracks"]) == ["01 One", "02 Two", "single"],
                   f"results from a user who reached us and one we reached through the server; pictures left out: {found}")
             album = (await plugin.open_collection(ss, "album", found["collections"][0]["id"]))["data"]
-            check(album["action"]["label"] == "Download album" and len(album["tracks"]) == 2, "an album, with Download album")
+            check(album["action"]["label"] == "Download album" and len(album["tracks"]) == 3,
+                  "an album, the whole folder, with Download album")
             one = next(t for t in found["tracks"] if t["title"] == "01 One")
             src = await inst.stream(one["id"])
             check(open(src.path, "rb").read() == song, "playing a track downloads it first")
@@ -1705,14 +1741,103 @@ async def run():
                     break
                 await asyncio.sleep(0.05)
             target = os.path.join(music_dir, "Band - Record")
-            check(sorted(os.listdir(target)) == ["01 One.flac", "02 Two.flac"]
+            check(sorted(os.listdir(target)) == ["01 One.flac", "02 Two.flac", "03 Three.flac"]
                   and open(os.path.join(target, "02 Two.flac"), "rb").read() == song,
                   "into a folder of its own in the chosen music folder")
             home = (await plugin.home(ss))["data"]
             downloaded = next(sec for sec in home if sec["title"] == "Downloaded")["items"][0]
             folder = (await plugin.open_collection(ss, "folder", downloaded["id"]))["data"]
-            check(len(folder["tracks"]) == 2 and (await inst.stream(folder["tracks"][0]["id"])).path.startswith(target),
+            check(len(folder["tracks"]) == 3 and (await inst.stream(folder["tracks"][0]["id"])).path.startswith(target),
                   "Home lists it, and plays it from the folder")
+            print("soulseek: full folders, browsing, resuming, cancelling")
+            album_page = (await plugin.open_collection(ss, "album", album_id))["data"]
+            check([t["title"] for t in album_page["tracks"]] == ["01 One", "02 Two", "03 Three"]
+                  and album_page["collections"][0]["title"] == "Everything alice shares",
+                  f"an album opens with its whole folder, and the user's library a press away: {album_page['tracks']}")
+            library = (await plugin.open_collection(ss, "folder", album_page["collections"][0]["id"]))["data"]
+            check([c["title"] for c in library["collections"]] == ["Band - Record"], f"alice's library: {library}")
+            three = next(t for t in album_page["tracks"] if t["title"] == "03 Three")
+            part = os.path.join(inst.cache_dir, three["id"][:120] + ".flac") + ".part"
+            os.makedirs(inst.cache_dir, exist_ok=True)
+            with open(part, "wb") as f:
+                f.write(song[:30000])
+            offsets.clear()
+            src = await inst.stream(three["id"])
+            check(offsets == [30000] and open(src.path, "rb").read() == song and not os.path.exists(part),
+                  f"an interrupted download carries on from what it had: {offsets}")
+            inst.client.downloads[("x", "y")] = slsk.Download("x", "y", 1, os.path.join(tmp, "never"))
+            waiting = asyncio.ensure_future(inst.client.downloads[("x", "y")].done)
+            inst.client.cancel("x", "y")
+            await asyncio.sleep(0)
+            check(waiting.done() and "Cancelled" in str(waiting.exception()), "a download can be cancelled")
+
+            print("soulseek: sharing")
+            share_dir = os.path.join(tmp, "SlskShare")
+            make_wav(os.path.join(share_dir, "Our Band - Our Album", "01 Shared Song.wav"), "Shared Song", "Our Band",
+                     "Our Album", 1)
+            shared_bytes = open(os.path.join(share_dir, "Our Band - Our Album", "01 Shared Song.wav"), "rb").read()
+            got = {"results": [], "listing": None, "file": b""}
+
+            async def carol_peer(reader, writer):
+                code, payload = await read_message(reader, code_size=1)  # our PeerInit
+                kind = slsk.Reader(payload)
+                kind.string()
+                if kind.string() == "F":
+                    token = struct.unpack("<I", await reader.readexactly(4))[0]
+                    writer.write(slu64(0))
+                    data = b""
+                    while len(data) < len(shared_bytes):
+                        chunk = await reader.read(65536)
+                        if not chunk:
+                            break
+                        data += chunk
+                    got["file"] = data
+                    writer.close()
+                    return
+                while True:
+                    try:
+                        code, payload = await read_message(reader)
+                    except (asyncio.IncompleteReadError, ConnectionError):
+                        return
+                    if code == 9:
+                        got["results"] = slsk.parse_search_response(payload)[2]
+                        writer.write(slmsg(4))  # and browse
+                        writer.write(slmsg(43, slstr(got["results"][0].path)))  # and ask for the file
+                        writer.write(slmsg(43, slstr("MusicDeck\\nope.flac")))
+                    elif code == 5:
+                        got["listing"] = slsk._read_folders(slsk.Reader(slzlib.decompress(payload)), "me")
+                    elif code == 50:
+                        got["denied"] = slsk.Reader(payload).string()
+                    elif code == 40:
+                        r = slsk.Reader(payload)
+                        r.u32()
+                        writer.write(slmsg(41, slu32(r.u32()) + slu8(1)))
+            carol_server = await asyncio.start_server(carol_peer, "127.0.0.1", 0)
+            carol["port"] = carol_server.sockets[0].getsockname()[1]
+            sharing = (await plugin.save_service({"type": "soulseek", "name": "", "config": {
+                "username": "sharer", "password": "right", "download_dir": music_dir, "share_dirs": [share_dir]}}))["data"]
+            sh = plugin.instances[sharing["id"]]
+            await sh.connecting
+            for _ in range(100):
+                if sh.shares.files and counts and counts[-1] == (1, 1):
+                    break
+                await asyncio.sleep(0.05)
+            check(counts[-1] == (1, 1) and sh.status()["shared"] == 1, f"what's shared is counted, truly: {counts}")
+            sh.client._send(slmsg(99, slstr("shared song")))
+            for _ in range(100):
+                if got["file"]:
+                    break
+                await asyncio.sleep(0.05)
+            check([f.path for f in got["results"]] == ["MusicDeck\\SlskShare\\Our Band - Our Album\\01 Shared Song.wav"],
+                  f"someone's search finds our shared file: {got['results']}")
+            check(got["listing"] and list(got["listing"]) == ["MusicDeck\\SlskShare\\Our Band - Our Album"],
+                  "they can browse what we share")
+            check(got["file"] == shared_bytes, "and download it from us")
+            check(got.get("denied") == "MusicDeck\\nope.flac", "a file we don't share is refused")
+            check(sh.client.uploads_done == 1 and not sh.client.uploading, "one upload done, its slot free again")
+            await plugin.remove_service(sharing["id"])
+            carol_server.close()
+
             from musicdeck.services.soulseek import _safe
             check(_safe("..") == "untitled" and "/" not in _safe("a/../b") and "\\" not in _safe("a\\b"),
                   "names from other people's shares can't climb out of the folder")
@@ -1725,6 +1850,7 @@ async def run():
             await plugin.remove_service(ss)
         finally:
             slsk.SERVER = real_server
+            ssmod.PortMapping = real_mapping
             server.close()
             alice.close()
 

@@ -597,7 +597,7 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
             tracks={page.tracks}
             numbered={numbered}
             showAlbum={showAlbum}
-            limit={mixed ? 8 : undefined}
+            limit={mixed && !from ? 8 : undefined}
             onPlay={(i) =>
               from ? playFrom(instanceId, from, page.tracks, i) : player.playList(instanceId, page.tracks, i)
             }

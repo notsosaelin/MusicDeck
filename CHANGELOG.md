@@ -3,6 +3,23 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.10.0
+
+**Soulseek, much closer to a full client**
+- Albums open with the user's whole folder, not just the files that matched; **Everything <user> shares**
+  browses their library.
+- Downloads carry on from where they stopped, try again up to three times, can be cancelled, and show how
+  far along they are.
+- **Share folders** (in the source's dialog; nothing is shared until you pick one): other users can
+  search, browse and download your music, two at a time, and the server is told what you share.
+  Your Deck takes part in the network that passes searches along, to hear them.
+- Your router is asked to forward Soulseek's port (UPnP), so more users can reach you.
+- Answer to "does sharing from another device count?": no. An account is signed in at one place at a
+  time, and signing in on the Deck signs the other device out; share from the Deck instead.
+
+**Internet radio**
+- On air leaves out the stream quality, and shows two languages at most, so it never scrolls.
+
 ## 0.9.1
 
 **Internet radio**

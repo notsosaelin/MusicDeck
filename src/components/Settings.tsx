@@ -122,7 +122,12 @@ const describeStatus = (s: ServiceInfo): string => {
       return parts(s.config.username, host(s.config.url));
     case "soulseek":
       return s.status.connected
-        ? parts(s.status.user, s.status.downloading ? `downloading ${s.status.downloading}` : "connected")
+        ? parts(
+            s.status.user,
+            s.status.downloading ? `downloading ${s.status.downloading}` : "connected",
+            s.status.shared ? `sharing ${s.status.shared} files` : "",
+            s.status.uploading ? `uploading ${s.status.uploading}` : "",
+          )
         : s.status.error || "Connecting…";
     case "local": {
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;

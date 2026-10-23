@@ -316,7 +316,7 @@ source (`MusicService.remove`).
   counts too) instead of the station's logo, place and genres. A song named without a cover gets one
   from Apple's catalogue (the iTunes Search API, no account; exactly that title by that artist, 600 px),
   remembered a day, "none" included. The media center's On air page shows it with the station's facts
-  (`details`: language, quality and today's listeners, as text; its place and genres are under its name)
+  (`details`: language (two at most) and today's listeners, as text; its place and genres are under its name)
   and the songs heard earlier, as many as fit; stations like it are on Similar. `believable()` drops what isn't a song: the
   station's own name, playout codes ("PLAY_8_NEW", "ID1234"; a number alone can be a title), adverts,
   idents and web addresses. `tidy_on_air()` first drops a half that's the station's own (its name, its
@@ -405,12 +405,26 @@ source (`MusicService.remove`).
   HaveNoParent, FileSearch, GetPeerAddress, ConnectToPeer); peer connections "P" (search results,
   QueueUpload, TransferRequest/Response) and "F" (a file), each opened directly or, when that can't work,
   by the other side after ConnectToPeer through the server (PierceFireWall with the asker's token).
-  Listens on 2234 (the next free port up to 2253); no UPnP, so behind a router peers that can't be
+  Listens on 2234 (the next free port up to 2253), and asks the router to forward it (`igd.py`: UPnP
+  AddPortMapping, an hour at a time, renewed; given back at stop); without that, peers who can't be
   reached either aren't heard from.
+- **Whole folders and libraries**: an album opens with FolderContents (36/37), so it has every track,
+  not just those a search matched; "Everything <user> shares" is a browse (GetShareFileList 4/5).
+- **Downloads** carry on: FileOffset is what's already in the `.part`; a file that fails is asked for
+  again up to 3 times, 10 s and more apart; an album can be cancelled (the parts stay, to resume).
+- **Sharing** (only with `share_dirs`): `Shares` indexes audio files (bitrate, length, sample rate, bit
+  depth via mutagen; cached in `soulseek-<id>-shares.json`, rescanned hourly) as
+  `MusicDeck\<folder>\...`; the server is told the true counts. Searches arrive from the server
+  (FileSearch 26, EmbeddedMessage 93) and from a distributed parent (PossibleParents 102 → a D
+  connection; DistribSearch 3; HaveNoParent 0, BranchLevel, BranchRoot sent once adopted; no children
+  accepted), and are answered with up to 200 matches (every word, none of the -excluded). Browses and
+  folder requests are answered from the index. QueueUpload for a shared file waits for one of 2 slots
+  (PlaceInQueue answered); then TransferRequest, the peer's yes, an F connection, and the file from the
+  offset it asks for. Anything else is UploadDenied ("File not shared.").
 - **Untrusted peers**: messages over 16 MB refused, fields read with bounds checks, at most 5,000 files a
   response; only audio files up to 2 GB are fetched; a file's and folder's names are cleaned (`_safe`:
   no separators, no dots at the ends) before they become paths; a search result's user is the
-  connection's, not what it claims. Nothing is shared; requests for our files go unanswered.
+  connection's, not what it claims. Only files in the shared folders are ever read for anyone.
 - **Sign-in**: name and password; a new name is registered by signing in with it. The password is kept
   (`SECRET_KEYS`; never in backups): the protocol sends it at every sign-in and has no token.
 - **Search**: answers gathered for 6 s; albums are one user's folder of two or more audio files, ranked
