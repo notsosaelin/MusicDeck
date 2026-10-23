@@ -793,10 +793,26 @@ export function snapRows(container: HTMLElement | null): () => void {
     const top = scroller.scrollTop + box.top - view.top;
     const max = scroller.scrollHeight - scroller.clientHeight;
     if (!nearest) return Math.max(0, Math.min(top - TAB_BAR - 8, max));
-    const above = top - TAB_BAR - 16;
-    const below = top + box.height + 24 - scroller.clientHeight;
-    const to = above < scroller.scrollTop ? above : below > scroller.scrollTop ? below : scroller.scrollTop;
-    return Math.max(0, Math.min(to, max));
+    // a grid moves by whole rows: the top of the view always on a row's top, never half a row under the tabs
+    const room = scroller.clientHeight - TAB_BAR - 8 - 24;
+    const grid = block.closest(".mc-grid");
+    const rows = grid
+      ? [
+          ...new Set(
+            [...grid.children].map((c) => Math.round(scroller.scrollTop + c.getBoundingClientRect().top - view.top)),
+          ),
+        ].sort((x, y) => x - y)
+      : [top];
+    const rowTop = (y: number) => Math.max(0, Math.min(y - TAB_BAR - 8, max));
+    // the first row: the grid's heading in view with it
+    const heading = grid?.previousElementSibling?.getBoundingClientRect();
+    const first = rows[0] === Math.round(top) && heading ? scroller.scrollTop + heading.top - view.top : null;
+    const showing = scroller.scrollTop + TAB_BAR + 8;
+    if (top < showing) return rowTop(first ?? top); // above: its row right under the tabs
+    if (top + box.height <= scroller.scrollTop + scroller.clientHeight - 24) return scroller.scrollTop; // in view
+    // below: the first row from which it fits
+    const from = rows.find((r) => r <= top && top + box.height - r <= room) ?? top;
+    return rowTop(from);
   };
   const step = (now: number) => {
     if (!glide) return;
