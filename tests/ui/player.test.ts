@@ -219,6 +219,38 @@ describe("transport", () => {
   });
 });
 
+describe("stream links that run out", () => {
+  const expiring = (expires: number) => async () => ({ ok: true, data: { hls: false, gain: null, start_at: 0, expires } });
+
+  test("resuming after the link ran out fetches a fresh one and carries on from the same second", async () => {
+    backend.stream_info = expiring(Date.now() / 1000 - 5);
+    player.playList("src", tracks("a"), 0);
+    await settle();
+    player.toggle();
+    audio().currentTime = 42;
+    calls.length = 0;
+    player.toggle();
+    await settle();
+    assert.deepEqual(calls.filter((c) => c.name === "forget_stream").map((c) => c.args[1]), ["a"]);
+    assert.equal(calls.filter((c) => c.name === "stream_info").length, 1);
+    assert.equal(playing(), "a");
+    assert.equal(audio().paused, false);
+    assert.equal(audio().currentTime, 42);
+  });
+
+  test("a link that's still good is just resumed", async () => {
+    backend.stream_info = expiring(Date.now() / 1000 + 3600);
+    player.playList("src", tracks("a"), 0);
+    await settle();
+    player.toggle();
+    calls.length = 0;
+    player.toggle();
+    await settle();
+    assert.equal(calls.filter((c) => c.name === "stream_info" || c.name === "forget_stream").length, 0);
+    assert.equal(audio().paused, false);
+  });
+});
+
 test("clear stops everything and saves the empty queue", async () => {
   player.playList("src", tracks("a", "b"), 0);
   player.clear();

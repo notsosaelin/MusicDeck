@@ -2,6 +2,7 @@
 export default class Hls {
   static isSupported = () => false;
   static Events = {};
+  static ErrorDetails = { FRAG_LOAD_ERROR: "fragLoadError" };
   loadSource() {}
   attachMedia() {}
   detachMedia() {}

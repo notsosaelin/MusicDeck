@@ -231,8 +231,11 @@ export const saveSession = callable<[session: Session], void>("save_session");
 export const loadSession = callable<[], Session | null>("load_session");
 export const streamInfo = callable<
   [id: string, trackId: string],
-  /** start_at: where a long track (a podcast episode) was left, in seconds */
-  Result<{ hls: boolean; gain?: Track["gain"]; start_at?: number }>
+  /**
+   * start_at: where a long track (a podcast episode) was left, in seconds; expires: when the stream's
+   * link stops working (Unix seconds), if it does
+   */
+  Result<{ hls: boolean; gain?: Track["gain"]; start_at?: number; expires?: number | null }>
 >("stream_info");
 export const collectionAction = callable<
   [id: string, kind: CollectionKind, collectionId: string, call: string],

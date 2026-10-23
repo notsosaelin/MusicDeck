@@ -401,7 +401,9 @@ class Plugin:
                     start_at = await instance.resume_position(track_id)
                 except ServiceError as e:
                     debuglog.debug("progress", "no resume point", track=track_id, error=str(e))
-            return {"hls": source.hls, "gain": source.gain, "start_at": start_at}
+            # expires: when the stream's link stops working (signed links), so a track paused past it
+            # is fetched afresh on resume
+            return {"hls": source.hls, "gain": source.gain, "start_at": start_at, "expires": source.expires}
         return await _result(work())
 
     @_when_ready

@@ -32,6 +32,8 @@ const STALL_TIMEOUT_MS = 12_000;
 const PROGRESS_SAVE_MS = 15_000;
 /** A live stream paused longer than this rejoins the broadcast on play instead of resuming the buffer. */
 const LIVE_REJOIN_MS = 30_000;
+/** A stream link this close to running out (seconds) counts as gone when resuming */
+const EXPIRY_MARGIN_S = 60;
 /** How long before a track ends the next one is loaded on the idle deck (more when crossfading). */
 const PRELOAD_SECONDS = 15;
 /** readyState from which a preloaded track can start (and fade in) without stuttering. */
@@ -89,6 +91,8 @@ class Deck {
   switching = false;
   /** The track loaded ahead of time, for which queue, so it's only played if it's still what's next */
   preloaded?: { index: number; item: QueueItem; queue: number; gain?: Track["gain"] };
+  /** When its stream's link stops working (Unix seconds), for links signed for a while (SoundCloud's) */
+  expires?: number;
 
   /** `audio` is an element, or while casting a RemoteAudio standing in for one */
   constructor(readonly audio: HTMLAudioElement = new Audio()) {
@@ -108,6 +112,7 @@ class Deck {
   /** Stops it, lets go of its source, and puts its fader back to full. */
   empty() {
     this.preloaded = undefined;
+    this.expires = undefined;
     this.detachHls();
     this.audio.pause();
     this.audio.removeAttribute("src");
@@ -440,6 +445,17 @@ export class Player {
     if (this.current?.track.live && Date.now() - this.livePausedAt > LIVE_REJOIN_MS) {
       return void this.prepare(this.state.get().index, true, 0);
     }
+    // paused past its stream link's life: carry on from the same second on a fresh link (hls.js
+    // would otherwise retry the dead one's next piece for good)
+    const item = this.current;
+    if (item && !this.casting && this.deck.expires && Date.now() / 1000 > this.deck.expires - EXPIRY_MARGIN_S) {
+      const at = this.audio.currentTime || 0;
+      dlog("link expired while paused", { id: item.track.id, at });
+      this.state.update({ loading: true });
+      return void forgetStream(item.instanceId, item.track.id)
+        .catch(() => {})
+        .then(() => this.prepare(this.state.get().index, true, at));
+    }
     this.play();
   }
 
@@ -688,6 +704,7 @@ export class Player {
     }
     this.pendingSeek = startAt > 0 ? startAt : undefined;
     this.attach(this.deck, url, info.data.hls, startAt, token);
+    this.deck.expires = info.data.expires ?? undefined;
     this.applyLevelling();
     if (autoplay) this.play();
   }
@@ -713,6 +730,15 @@ export class Player {
           url: ((data as any).frag?.url ?? (data as any).url ?? "").slice(0, 120),
           preloaded: deck !== this.deck,
         });
+        // a piece refused: the link's signature ran out (hls.js would keep asking for it); start over on
+        // a fresh link from here, once
+        const status = (data as any).response?.code;
+        if (!data.fatal && data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR && [403, 410].includes(status)) {
+          h.stopLoad();
+          if (deck !== this.deck) deck.empty();
+          else if (token === this.loadToken) this.recover(`hls link expired (${status})`);
+          return;
+        }
         if (!data.fatal) return;
         if (deck !== this.deck) deck.empty();
         else if (token === this.loadToken) this.recover(`hls ${data.details}`);
@@ -774,6 +800,7 @@ export class Player {
       idle.empty();
       this.attach(idle, url, info.data.hls, 0, this.loadToken);
       idle.preloaded = { index: next, item, queue, gain: info.data.gain };
+      idle.expires = info.data.expires ?? undefined;
       dlog("preloaded", { index: next, id: item.track.id, hls: info.data.hls });
     } finally {
       this.preloading = false;
