@@ -642,9 +642,20 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
   const mixed = page.collections.length > 0 || !!page.extra?.length;
   const playlistId = from && isLocalPlaylist(from.id) ? from.id : undefined;
   const numbered = from?.kind === "album" && !showAlbum && !mixed && !hasFeature(instanceId, "progress");
-  const shelves = page.collections.length > 0 && (
-    <Shelves instanceId={instanceId} stack={stack} items={page.collections} titled />
-  );
+  // a long list (a genre's albums, a decade's, a chart's): the standard grid, as every Show all is; a page
+  // that's mostly its tracks (an artist's) keeps its albums to a row above them
+  const listing = page.collections.length > 0 && (from?.kind === "list" || !page.tracks.length);
+  const shelves =
+    page.collections.length > 0 &&
+    (listing ? (
+      groupByKind(page.collections).map(([kind, list]) => (
+        <CardGrid key={kind} title={KIND_TITLES[kind] ?? "Albums"} count={list.length}>
+          {(n) => list.slice(0, n).map((c) => collectionCard(instanceId, stack, c))}
+        </CardGrid>
+      ))
+    ) : (
+      <Shelves instanceId={instanceId} stack={stack} items={page.collections} titled />
+    ));
   if (allStations(page.tracks)) {
     // stations: a grid of them, each played on its own, but in a list of your own stations from there on
     // (the previous and next stations are the list's)

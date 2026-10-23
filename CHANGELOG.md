@@ -3,6 +3,11 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.13.2
+
+- A genre's (or mood's, decade's, chart's) Show all opens the same grid as every other Show all, whole
+  rows filling the screen, instead of a sideways row of its albums.
+
 ## 0.13.1
 
 - **Genres as rows:** Browse shows a row per genre (Pop/Rock's albums, then Jazz's, then Classical's...),
