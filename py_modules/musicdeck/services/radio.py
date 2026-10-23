@@ -20,9 +20,9 @@ from .. import debuglog, models
 from ..cache import Cache
 from ..net import tls
 from .base import ROWS_MAX, MusicService, ServiceError, StreamSource
+from ..version import USER_AGENT
 
 DIRECTORY = "https://all.api.radio-browser.info"
-USER_AGENT = "MusicDeck/0.1.0"  # Radio Browser asks clients to identify themselves
 SERVER_TTL = 6 * 3600
 STATION_TTL = 3600
 STATIONS_KEPT = 1000

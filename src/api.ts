@@ -192,6 +192,8 @@ export interface CenterSettings {
 }
 
 export interface PluginState {
+  /** MusicDeck's version (package.json) */
+  version: string;
   services: ServiceInfo[];
   active_service: string | null;
   qam_mode: QamMode;

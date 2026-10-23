@@ -28,11 +28,11 @@ from ..feeds import parse_feed
 from ..net import tls
 from ..settings import load_json, save_json
 from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
+from ..version import USER_AGENT
 
 SEARCH = "https://itunes.apple.com/search"
 LOOKUP = "https://itunes.apple.com/lookup"
 CHARTS = "https://rss.marketingtools.apple.com/api/v2/{country}/podcasts/top/{count}/podcasts.json"
-USER_AGENT = "MusicDeck/0.1.0"
 FEED_TTL = 30 * 60
 FEEDS_KEPT = 100  # a parsed feed can be large (hundreds of episodes)
 CHARTS_TTL = 6 * 3600

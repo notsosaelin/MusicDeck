@@ -201,9 +201,16 @@ the "Steam Big Picture Mode" target. (The screen must be on; a sleeping display 
   features; if a source can't work natively, document it under "Not possible" in SOURCES.md.
 - **Commits**: one feature or fix per commit, message says what and why.
 
-## Releasing
+## Versions and releasing
 
-1. Bump `version` in `package.json` (the frontend reports it to Decky).
+Every build put on a device has a number of its own, set in one place: `version` in `package.json`
+(the frontend reports it to Decky, the backend reads it in `musicdeck/version.py` for the User-Agent
+sources see, and Decky → MusicDeck shows it). `python scripts/bump.py` raises the last number (a fix
+or a small change); `bump.py minor` the middle one (new features); `bump.py major` the first. Commit
+the bump as "Release <version>" and tag it `v<version>`. `scripts/deploy.py` copies `package.json`
+along and pauses the music before it reloads the plugin.
+
+1. `python scripts/bump.py [minor|major]`.
 2. `pnpm build && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && python scripts/package.py`
 3. Install the zip on a device and smoke-test every source you can sign in to.
 4. Tag the commit and attach `out/MusicDeck.zip`.

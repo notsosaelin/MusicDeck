@@ -28,9 +28,9 @@ import aiohttp
 from .. import debuglog, lyrics, models
 from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
+from ..version import VERSION
 
 PRODUCT = "MusicDeck"
-VERSION = "0.1.0"
 PLEX_TV = "https://plex.tv/api/v2"
 RESOURCES = "https://clients.plex.tv/api/v2/resources?includeHttps=1&includeRelay=1"
 LINK_PAGE = "https://plex.tv/link"

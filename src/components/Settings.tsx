@@ -658,6 +658,9 @@ export const Settings: FC = () => {
             }}
           />
         </PanelSectionRow>
+        <PanelSectionRow>
+          <Field label="Version">{state.version}</Field>
+        </PanelSectionRow>
       </PanelSection>
     </>
   );

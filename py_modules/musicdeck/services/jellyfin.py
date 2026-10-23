@@ -21,9 +21,9 @@ import aiohttp
 from .. import debuglog, models
 from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
+from ..version import VERSION
 
 CLIENT = "MusicDeck"
-VERSION = "0.1.0"
 TICKS = 10_000_000  # Jellyfin times are in 100 ns ticks
 # what Steam's browser engine decodes; anything else is transcoded to MP3 by the server
 CONTAINERS = "opus,webm,mp3,aac,m4a,m4b,flac,webma,wav,ogg"

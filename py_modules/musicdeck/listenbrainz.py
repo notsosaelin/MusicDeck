@@ -14,10 +14,10 @@ from typing import Any, Optional
 import aiohttp
 
 from . import debuglog
+from .version import VERSION
 
 API = "https://api.listenbrainz.org/1"
 CLIENT = "MusicDeck"
-VERSION = "0.1.0"
 MAX_PENDING = 1000  # oldest listens are dropped beyond this many unsent
 BATCH = 100  # ListenBrainz accepts up to 1000 per import; smaller batches fail less painfully
 

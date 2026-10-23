@@ -4,6 +4,9 @@ Copy a development build to a device and hot-reload the plugin, without packagin
     MUSICDECK_DEVICE=deck@steamdeck.local python scripts/deploy.py            # frontend only
     MUSICDECK_DEVICE=deck@steamdeck.local python scripts/deploy.py --backend  # + Python and bin/
 
+Every build put on a device gets a version of its own: run scripts/bump.py first (package.json goes
+along, so Decky shows it). Reloading restarts the player, so music that's playing is paused first.
+
 Needs: the plugin installed once from the zip (so ~/homebrew/plugins/MusicDeck exists), SSH key
 login to the device (`ssh-copy-id`), `pnpm build` run first, and for the reload, Decky's CEF
 remote debugging enabled (Decky settings → Developer) plus `pip install websockets`. Without those
@@ -39,6 +42,7 @@ def upload(device: str, backend: bool) -> None:
     home = ssh(device, "echo $HOME").strip()
     plugin, data = f"{home}/homebrew/plugins/MusicDeck", f"{home}/homebrew/data/MusicDeck"
     scp(device, ROOT / "dist" / "index.js", f"{plugin}/dist/index.js")
+    scp(device, ROOT / "package.json", f"{plugin}/package.json")  # the version Decky and the backend show
     print("frontend copied")
     if not backend:
         return
@@ -75,7 +79,10 @@ async def reload(device: str, backend: bool) -> None:
             raise SystemExit("Steam's debugger isn't reachable; enable CEF remote debugging in Decky")
         target = next(t for t in targets if t["title"] == "SharedJSContext")
         version = json.loads((ROOT / "package.json").read_text())["version"]
-        js = "(async () => {"
+        # the reload restarts the player: pause what's playing first (it picks up from there), rather
+        # than cut it off mid-song
+        js = ("(async () => { const p = window.__musicdeck?.player; "
+              "if (p?.state.get().playing) { await p.fadeOutAndPause(1); } ")
         if backend:
             # restarting the backend makes Decky import the frontend itself; importing it again on top
             # loads the plugin twice in a row

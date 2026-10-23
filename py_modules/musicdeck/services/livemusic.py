@@ -23,12 +23,12 @@ from .. import feeds, models
 from ..cache import Cache
 from ..net import tls
 from .base import MusicService, ServiceError, StreamSource
+from ..version import USER_AGENT
 
 SEARCH = "https://archive.org/advancedsearch.php"
 METADATA = "https://archive.org/metadata/{id}"
 DOWNLOAD = "https://archive.org/download/{id}/{name}"
 THUMBNAIL = "https://archive.org/services/img/{id}"
-USER_AGENT = "MusicDeck/0.1.0"
 SHOWS = "collection:etree AND mediatype:etree"
 BANDS = "collection:etree AND mediatype:collection"
 # the file kinds tried for a show's tracks, best for streaming first (FLAC only when there's nothing else)
