@@ -36,12 +36,15 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 /** The cover's size in the panel, and the smallest it gets to keep the player on its page. */
 const COVER = 76;
 const COVER_MIN = 44;
+/** Room kept under the volume slider at the foot of the page. */
+const AIR = 8;
 
 /**
  * The cover size that keeps the player (`content`) inside its page (`area`): what it runs over by comes
  * off the cover (while the cover is the tallest thing in its row, the row shrinks with it one for one),
  * and room coming back gives it back, up to COVER. A casting line or a long title then squeezes the cover,
- * not the volume slider onto page 2.
+ * not the volume slider onto page 2. What counts is how far down the player is drawn, not its box: the
+ * panel section's empty padding below the slider can go.
  */
 function useCoverThatFits(
   area: RefObject<HTMLElement | null>,
@@ -53,8 +56,21 @@ function useCoverThatFits(
     const outer = area.current;
     const inner = content.current;
     if (!outer || !inner) return;
-    const fit = () =>
-      setCover((c) => Math.max(COVER_MIN, Math.min(COVER, c - (inner.offsetHeight - outer.clientHeight))));
+    const drawnBottom = () => {
+      let bottom = 0;
+      for (const el of inner.querySelectorAll("*")) {
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height) bottom = Math.max(bottom, r.bottom);
+      }
+      return bottom;
+    };
+    const fit = () => {
+      const room = outer.getBoundingClientRect();
+      // a closed panel measures nothing: nothing to fit
+      if (!room.height) return;
+      const over = Math.ceil(drawnBottom() + AIR - room.bottom);
+      setCover((c) => Math.max(COVER_MIN, Math.min(COVER, c - over)));
+    };
     fit();
     const unwatchOuter = watchSize(outer, fit);
     const unwatchInner = watchSize(inner, fit);

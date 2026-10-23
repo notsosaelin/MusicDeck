@@ -3,6 +3,11 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.4.1
+
+- Now playing's cover in the Quick Access panel shrinks only as much as the player needs: the empty space
+  under the volume slider no longer counts, so the cover stays bigger on a short panel.
+
 ## 0.4.0
 
 **Local files as a music library**
