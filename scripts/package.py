@@ -44,7 +44,5 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
                 else:
                     z.write(path, arcname)
 digest = hashlib.sha256(out.read_bytes()).hexdigest()
-(out.parent / f"{out.name}.sha256").write_text(f"{digest}  {out.name}
-")
-print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)
-sha256 {digest}")
+(out.parent / f"{out.name}.sha256").write_text(f"{digest}  {out.name}\n")
+print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)\nsha256 {digest}")
