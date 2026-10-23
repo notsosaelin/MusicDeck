@@ -728,6 +728,7 @@ class LocalService(MusicService):
             "genres": (models.count(len(genres), "genre"), []),
             "years": (models.count(len(decades), "decade"), []),
             "composers": (models.count(len(composers), "composer"), []),
+            "folders": (models.count(len(self._open_folder("")["collections"]), "folder"), []),
         }
         tabs = []
         for tab in super().center_tabs():

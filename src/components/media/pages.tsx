@@ -244,7 +244,8 @@ const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }
     onActivate={open}
     onClick={open}
     onOKActionDescription="Open"
-    style={{ position: "relative", overflow: "hidden", aspectRatio: "16 / 10", background: TILE_BACK }}
+    // wide rather than tall, so the groups below are in sight
+    style={{ position: "relative", overflow: "hidden", aspectRatio: "2 / 1", background: TILE_BACK }}
   >
     <Mosaic instanceId={instanceId} art={t.art ?? []} />
     {/* dark at the foot, so the name reads over any cover */}

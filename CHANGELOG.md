@@ -3,6 +3,11 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.6.2
+
+- Browse's "Your music" tiles are wider than tall, so Explore shows below them without scrolling as far;
+  Folders says how many there are.
+
 ## 0.6.1
 
 - Lyrics for FLAC and Ogg files: looking in their tags for lyrics failed, which stopped the online lookup
