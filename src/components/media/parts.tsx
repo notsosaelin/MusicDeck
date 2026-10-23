@@ -21,9 +21,8 @@ export const CENTER_CSS =
 .mc-row.gpfocus, .mc-row:hover { background: rgba(255, 255, 255, 0.12); }
 .mc-row.gpfocus { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .mc-shelf::-webkit-scrollbar { display: none; }
-/* Steam's tab bar sits over the top of the tab's scrolling area: what's scrolled into view must clear
-   it, and bring the title of its row along (Steam heeds the area's padding, not the cards' margins,
-   when it scrolls up), rather than stop half under the bar */
+/* Steam's tab bar sits over the top of the tab's scrolling area: what Steam scrolls into view (lists of
+   tracks; rows of cards are snapRows' own) must clear it rather than stop half under the bar */
 .mc-center [class*="TabContentsScroll"] { scroll-padding-top: 104px; scroll-padding-bottom: 12px; }
 .mc-card, .mc-tile { scroll-margin-top: 46px; scroll-margin-bottom: 10px; scroll-margin-left: 2.8vw; scroll-margin-right: 2.8vw; }
 .mc-row { scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
@@ -488,28 +487,102 @@ export const CardBlanks: FC<{ count?: number }> = ({ count = 6 }) => {
 /** The height of Steam's tab bar over the top of a tab's scrolling area */
 const TAB_BAR = 58;
 
+/** How long the page takes to glide to a row */
+const GLIDE_MS = 200;
+
 /**
- * Rows of cards scroll as on Steam's home page: entering a row puts it, title and all, just under the
- * tab bar. Steam's own scrolling (to the nearest edge) lands rows half under the bar when moving up,
- * by however far the last move went. Lists of tracks keep Steam's scrolling. Returns the cleanup.
+ * Rows of cards scroll as on Steam's home page: entering a row glides it, title and all, to just
+ * under the tab bar, and it stays there. The media center does this scrolling itself rather than
+ * share it with Steam's, as two scrolls at once stutter and leave rows half under the bar:
+ * - Steam scrolls a focused card into view (to the nearest edge, which when moving up lands the row
+ *   half under the bar); for cards in rows that's cut down to scrolling along the row.
+ * - Steam's scroll area notes its position every 250ms and puts it back when the note differs from
+ *   the latest one, which in the middle of a scroll is a stale spot: the page jumps back and stays
+ *   there. That's turned off while the controller is in the page (its job is coming back to a tab).
+ * - Rows that finish loading above change where a row is: the glide aims anew each frame, and a
+ *   change after it ends glides the row back.
+ * Lists of tracks keep Steam's scrolling. Returns the cleanup.
  */
 export function snapRows(container: HTMLElement | null): () => void {
   if (!container) return () => {};
-  const onFocus = (e: FocusEvent) => {
-    const block = (e.target as HTMLElement | null)?.closest?.(".mc-row-block") as HTMLElement | null;
-    const scroller = block && scrollParent(block);
-    if (!block || !scroller) return;
-    const snap = () => {
-      // moved on meanwhile: that row's own snap has it
-      if (!block.contains(block.ownerDocument.activeElement)) return;
-      const top = scroller.scrollTop + block.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-      scroller.scrollTo({ top: Math.max(0, top - TAB_BAR - 8), behavior: "smooth" });
-    };
-    // at once, and again once Steam's own smooth scroll for this move has run, which can end after
-    // this one and undo it
-    window.requestAnimationFrame(snap);
-    window.setTimeout(snap, 320);
+  const win = (container.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
+  const focused = () => container.ownerDocument.activeElement as HTMLElement | null;
+  const focusedBlock = () => {
+    const el = focused();
+    return container.contains(el) ? (el?.closest(".mc-row-block") as HTMLElement | null) : null;
   };
+  let glide: { scroller: HTMLElement; block: HTMLElement; from: number; start?: number; frame: number } | null = null;
+
+  const target = (scroller: HTMLElement, block: HTMLElement) => {
+    const top = scroller.scrollTop + block.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    return Math.max(0, Math.min(top - TAB_BAR - 8, scroller.scrollHeight - scroller.clientHeight));
+  };
+  const step = (now: number) => {
+    if (!glide) return;
+    glide.start ??= now;
+    const t = Math.min(1, (now - glide.start) / GLIDE_MS);
+    const eased = 1 - Math.pow(1 - t, 3);
+    glide.scroller.scrollTop = glide.from + (target(glide.scroller, glide.block) - glide.from) * eased;
+    if (t < 1) glide.frame = win.requestAnimationFrame(step);
+    else glide = null;
+  };
+  const glideTo = (block: HTMLElement) => {
+    const scroller = scrollParent(block);
+    if (!scroller) return;
+    ownScrolling(scroller);
+    if (glide) win.cancelAnimationFrame(glide.frame);
+    glide = null;
+    if (Math.abs(target(scroller, block) - scroller.scrollTop) < 1) return;
+    glide = { scroller, block, from: scroller.scrollTop, frame: win.requestAnimationFrame(step) };
+  };
+  // Steam's position restore, off while the controller is in this page
+  const ownScrolling = (scroller: HTMLElement & { mcOwned?: () => boolean }) => {
+    const restore = scroller.mcOwned ? null : scroller.scrollTo;
+    scroller.mcOwned = () => container.isConnected && container.contains(focused());
+    if (!restore) return;
+    scroller.scrollTo = function (this: typeof scroller, ...args: any[]) {
+      if (!this.mcOwned?.()) return (restore as any).apply(this, args);
+    };
+  };
+
+  const onFocus = (e: FocusEvent) => {
+    const el = e.target as HTMLElement & { mcAlong?: boolean };
+    const block = el?.closest?.(".mc-row-block") as HTMLElement | null;
+    if (!block) return;
+    if (!el.mcAlong) {
+      // Steam calls this on what it focuses, after this event: along the row only
+      el.mcAlong = true;
+      el.scrollIntoView = () => alongShelf(el);
+    }
+    glideTo(block);
+  };
+  const Observer: typeof ResizeObserver = (win as any).ResizeObserver ?? ResizeObserver;
+  const resized = new Observer(() => {
+    const block = focusedBlock();
+    if (block && !glide) glideTo(block);
+  });
+  resized.observe(container);
   container.addEventListener("focusin", onFocus);
-  return () => container.removeEventListener("focusin", onFocus);
+  return () => {
+    container.removeEventListener("focusin", onFocus);
+    resized.disconnect();
+    if (glide) win.cancelAnimationFrame(glide.frame);
+    glide = null;
+  };
+}
+
+/** Scrolls a card's row sideways to show it, leaving the row's margin beside it. */
+function alongShelf(el: HTMLElement) {
+  const shelf = el.closest(".mc-shelf") as HTMLElement | null;
+  if (!shelf) return;
+  const margin = parseFloat(getComputedStyle(shelf).paddingLeft) || 0;
+  const card = el.getBoundingClientRect();
+  const row = shelf.getBoundingClientRect();
+  const dx =
+    card.left < row.left + margin
+      ? card.left - row.left - margin
+      : card.right > row.right - margin
+        ? card.right - row.right + margin
+        : 0;
+  if (Math.abs(dx) >= 1) shelf.scrollBy({ left: dx, behavior: "smooth" });
 }
