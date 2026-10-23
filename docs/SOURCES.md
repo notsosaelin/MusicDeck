@@ -319,7 +319,8 @@ source (`MusicService.remove`).
   (`details`: place, language, quality, today's listeners, genres) as one row of chips and the songs heard
   earlier, as many as fit; stations like it are on Similar. `believable()` drops what isn't a song: the
   station's own name, playout codes ("PLAY_8_NEW", "ID1234"; a number alone can be a title), adverts,
-  idents and web addresses.
+  idents and web addresses. `tidy_on_air()` first drops a half that's the station's own (its name, its
+  website): what's left counts only as "<song> by <artist>".
 - **Jump back in**: the stations listened to (`played_station`, recorded once a station is playing;
   `recents.json` "stations", 12 per source), not the genre or country page they were found on.
 - **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse

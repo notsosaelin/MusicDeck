@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.8.4
+
+- On air reads stations that pad the song with themselves ("Theme from Joy House by Jimmy Smith - Adroit
+  Jazz Underground on walmradio.com"): the song and artist show, the station's part doesn't. A station's
+  slogan with its name ("Radio Bob - Rockt!") isn't taken for a song. Web addresses in titles are caught
+  again (0.8.3's check for them never matched).
+
 ## 0.8.3
 
 **Internet radio**

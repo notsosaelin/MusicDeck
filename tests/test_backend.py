@@ -1670,6 +1670,15 @@ async def run():
         check(believable({"title": "Hey Jude", "artist": "The Beatles"}, station)
               and believable({"title": "1999", "artist": "Prince"}, station),
               "real songs are, number titles included")
+        from musicdeck.services.radio import tidy_on_air
+        padded = tidy_on_air(parse_on_air("Theme from Joy House by Jimmy Smith - Adroit Jazz Underground on walmradio.com"),
+                             "Adroit Jazz Underground")
+        check(padded and padded["title"] == "Theme from Joy House" and padded["artist"] == "Jimmy Smith",
+              f"the station's half of a title goes, and '<song> by <artist>' is read as such: {padded}")
+        check(tidy_on_air(parse_on_air("Radio Bob - Rockt!"), "Radio Bob") is None
+              and tidy_on_air(parse_on_air("50s 60s RETRO HITS - PLAY_8_NEW"), station) is None
+              and tidy_on_air(parse_on_air("Will.i.am - Scream"), "Hits FM")["artist"] == "Will.i.am",
+              "a station's slogan or code isn't a song; a dotted name is")
         check(parse_on_air("NY's #1 Hit Music Station - text=\"Z100\" song_spot=\"T\"") is None,
               "station idents and ads aren't songs")
         check(parse_on_air('title="Super Bass",artist="NICKI MINAJ",url="song_spot="M" MediaBaseId="0"')["text"]

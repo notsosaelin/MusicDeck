@@ -102,11 +102,43 @@ ITUNES = "https://itunes.apple.com"
 NOT_A_SONG = re.compile(r"^(unknown|advert\w*|commercial\w*|jingle\w*|station id|sweeper|promo|news|"
                         r"weather|traffic|live|on air|now playing|-+|\.+)$", re.I)
 CODE_LIKE = re.compile(r"^[\w.]*[_\d][\w.]*$")
-WEB = re.compile(r"https?://|www\.|\.(com|net|org|fm|radio|de|co\.uk|ru|it|fr)", re.I)
+WEB = re.compile(r"https?://|www\.|\.(com|net|org|fm|radio|de|co\.uk|ru|it|fr)\b", re.I)
 
 
 def _plain(text: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", text.casefold()).split())
+
+
+def _stations_own(part: str, station: str) -> bool:
+    """A half of a title that's the station talking: its name, its website."""
+    plain = _plain(part)
+    return bool(part) and (bool(WEB.search(part)) or bool(station and station in plain))
+
+
+BY = re.compile(r"^(.+?)\s+by\s+(.+)$", re.I)
+
+
+def tidy_on_air(song: Optional[dict[str, Any]], station: str) -> Optional[dict[str, Any]]:
+    """What a station says is on air, as a song, or None when it isn't one. Some put the song in one
+    half and themselves in the other ("Theme from Joy House by Jimmy Smith - Adroit Jazz on walmradio.com"):
+    the station's half goes, and "<song> by <artist>" is read as just that."""
+    if not song:
+        return None
+    plain_station = _plain(station)
+    title, artist = song["title"], song["artist"]
+    padded = False  # one half was the station's own: the other has to say "<song> by <artist>"
+    if _stations_own(title, plain_station) and artist and not _stations_own(artist, plain_station):
+        title, artist, padded = artist, "", True
+    elif _stations_own(artist, plain_station) and title:
+        artist, padded = "", True
+    if not artist:
+        by = BY.match(title)
+        if by:
+            title, artist = by.group(1).strip(), by.group(2).strip()
+        elif padded:
+            return None  # "Radio Bob - Rockt!": the station talking
+    song = {**song, "title": title, "artist": artist, "text": " – ".join(x for x in (artist, title) if x)}
+    return song if believable(song, station) else None
 
 
 def believable(song: dict[str, Any], station: str) -> bool:
@@ -410,8 +442,7 @@ class RadioService(MusicService):
             except UnicodeDecodeError:  # older Shoutcast servers send Latin-1
                 return match.group(1).decode("latin-1").strip()
         song = parse_on_air(field(STREAM_TITLE), field(STREAM_URL))
-        if song and not believable(song, info.get("name") or ""):
-            return None
+        song = tidy_on_air(song, info.get("name") or "")
         if song and not song["art"] and song["title"] and song["artist"]:
             song["art"] = await self._song_art(song["artist"], song["title"])
         return song
