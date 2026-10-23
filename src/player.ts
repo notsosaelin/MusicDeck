@@ -10,6 +10,7 @@ import {
   getRadio,
   saveProgress,
   saveSession,
+  playedStation,
   scrobble,
   forgetStream,
   streamInfo,
@@ -232,6 +233,8 @@ export class Player {
    * never report the same play twice.
    */
   private nowPlayingSent = false;
+  /** the station last put in its source's Jump back in (once per play) */
+  private stationNoted?: QueueItem;
   private submitted = false;
   private prefetched = false;
   private lastTime = 0;
@@ -1079,6 +1082,11 @@ export class Player {
       );
     }
     const item = this.current;
+    // a station once it's actually playing: it leads its source's Jump back in
+    if (item?.track.live && this.stationNoted !== item) {
+      this.stationNoted = item;
+      playedStation(item.instanceId, item.track).catch(() => {});
+    }
     if (item && !this.nowPlayingSent && reportsPlays(item.instanceId)) {
       this.nowPlayingSent = true;
       scrobble(item.instanceId, item.track.id, false, item.track).catch(() => {});

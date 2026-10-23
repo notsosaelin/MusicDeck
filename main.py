@@ -367,10 +367,14 @@ class Plugin:
         """Home with what was played lately and the playlists made in MusicDeck before what the source
         suggests."""
         ours = self.playlists.for_instance(instance_id)
+        instance = self.instances.get(instance_id)
+        if instance and instance.NOW_PLAYING == "radio":
+            # a radio source's are the stations listened to, not the genre or country they were found in
+            stations = self.recents.stations_for(instance_id)
+            return ([{"title": "Jump back in", "items": [], "tracks": stations, "display": "covers"}] if stations else [])                 + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections
         # what was played shows as it is now (renamed, new artwork), not as it was then: MusicDeck
         # playlists from the store, the rest as their source knows them; what's gone is left out
         current = {c["id"]: c for c in ours}
-        instance = self.instances.get(instance_id)
         recent = []
         for c in self.recents.for_instance(instance_id):
             if PlaylistStore.is_ours(c["id"]):
@@ -1075,6 +1079,13 @@ class Plugin:
                 raise ServiceError("This source doesn't keep track of what's been played")
             await instance.set_played(track, bool(played))
         return await _result(work())
+
+    @_when_ready
+    async def played_station(self, instance_id: str, track: dict[str, Any]) -> None:
+        """A live station was listened to: it leads a radio source's "Jump back in" row."""
+        instance = self.instances.get(instance_id)
+        if instance and instance.NOW_PLAYING == "radio":
+            self.recents.add_station(instance_id, track)
 
     @_when_ready
     async def played_collection(self, instance_id: str, collection: dict[str, Any]) -> None:

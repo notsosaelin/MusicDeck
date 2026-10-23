@@ -34,6 +34,7 @@ import {
   FaPodcast,
   FaServer,
   FaSoundcloud,
+  FaShareAlt,
   FaSpotify,
   FaSteam,
   FaYoutube,
@@ -86,6 +87,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   livemusic: <FaArchive />,
   qobuz: <FaCompactDisc />,
   spotify: <FaSpotify />,
+  soulseek: <FaShareAlt />,
   tidal: <SiTidal />,
 };
 
@@ -118,6 +120,10 @@ const describeStatus = (s: ServiceInfo): string => {
     case "audiobookshelf":
     case "subsonic":
       return parts(s.config.username, host(s.config.url));
+    case "soulseek":
+      return s.status.connected
+        ? parts(s.status.user, s.status.downloading ? `downloading ${s.status.downloading}` : "connected")
+        : s.status.error || "Connecting…";
     case "local": {
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;
       if (s.status.art?.running)
@@ -549,6 +555,7 @@ const SOURCE_GROUPS: { group: ServiceType["group"]; label: string }[] = [
   { group: "yours", label: "Your files and servers" },
   { group: "streaming", label: "Streaming services" },
   { group: "radio", label: "Radio and podcasts" },
+  { group: "sharing", label: "File sharing" },
   { group: "other", label: "Other" },
 ];
 

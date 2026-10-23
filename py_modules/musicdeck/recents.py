@@ -14,6 +14,9 @@ SEARCHES_LIMIT = 8
 MAX_QUERY = 200
 # what's kept of a collection: enough to show its row and open it again
 KEYS = ("id", "kind", "title", "subtitle", "art")
+STATIONS_LIMIT = 12
+# what's kept of a station: enough to show it and play it again
+TRACK_KEYS = ("id", "title", "artist", "album", "duration", "art", "album_id", "artist_id", "starred", "gain")
 
 
 def _lists(data: Any) -> dict[str, list]:
@@ -27,9 +30,11 @@ class Recents:
         first_version = "collections" not in data and "searches" not in data
         self.collections = _lists(data if first_version else data.get("collections"))
         self.searches_by_instance = _lists(data.get("searches"))
+        self.stations = _lists(data.get("stations"))
 
     def _save(self) -> None:
-        save_json(self.path, {"collections": self.collections, "searches": self.searches_by_instance})
+        save_json(self.path, {"collections": self.collections, "searches": self.searches_by_instance,
+                              "stations": self.stations})
 
     # --- albums and playlists ---
 
@@ -45,6 +50,21 @@ class Recents:
 
     def for_instance(self, instance_id: str) -> list[dict[str, Any]]:
         return list(self.collections.get(instance_id, []))
+
+    # --- stations ---
+
+    def add_station(self, instance_id: str, track: dict[str, Any]) -> None:
+        """Puts a station that was listened to first: a radio source's Jump back in."""
+        if not isinstance(track, dict) or not isinstance(track.get("id"), str) or not track["id"]:
+            return
+        entry = {k: track.get(k) for k in TRACK_KEYS}
+        entry["live"] = True
+        others = [t for t in self.stations.get(instance_id, []) if t.get("id") != entry["id"]]
+        self.stations[instance_id] = [entry, *others][:STATIONS_LIMIT]
+        self._save()
+
+    def stations_for(self, instance_id: str) -> list[dict[str, Any]]:
+        return list(self.stations.get(instance_id, []))
 
     # --- searches ---
 

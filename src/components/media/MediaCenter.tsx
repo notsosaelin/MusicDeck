@@ -486,11 +486,15 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   <FaMoon />
                 </span>
               </div>
-              <div ref={area} style={{ flex: 1, minHeight: 0, overflowY: side === "lyrics" ? "hidden" : "auto" }}>
+              {/* lyrics and On air fit themselves to the room; the lists scroll */}
+              <div
+                ref={area}
+                style={{ flex: 1, minHeight: 0, overflowY: side === "lyrics" || side === "onair" ? "hidden" : "auto" }}
+              >
                 {side === "queue" ? (
                   <QueueList />
                 ) : side === "onair" ? (
-                  <OnAirPanel item={item} song={song} details={details} />
+                  <OnAirPanel item={item} song={song} details={details} height={height} />
                 ) : side === "station" ? (
                   <DetailsPanel details={details} show="facts" empty="Nothing more about this station" />
                 ) : side === "info" ? (

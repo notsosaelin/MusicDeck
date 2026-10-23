@@ -3,6 +3,17 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.8.3
+
+**Internet radio**
+- **Jump back in** shows the stations you listened to, latest first, instead of the genre or country page
+  you found one on.
+- **On air** no longer shows what isn't a song: stations that send their own name, their playout system's
+  codes ("PLAY_8_NEW"), adverts, idents or web addresses where the song should be are shown as live, with
+  nothing made up.
+- On air fits its space and doesn't scroll: the station's facts stay on one row, and only as many earlier
+  songs show as fit. The Station website button is gone.
+
 ## 0.8.2
 
 - On air doesn't repeat what the line under the station's name says (its place, its first genres).

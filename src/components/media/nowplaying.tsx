@@ -1,6 +1,6 @@
-import { DialogButton, Focusable, Navigation } from "@decky/ui";
+import { Focusable } from "@decky/ui";
 import { FC, ReactNode, useEffect, useRef, useState } from "react";
-import { FaExternalLinkAlt, FaHeadphones, FaLanguage, FaMapMarkerAlt, FaSignal } from "react-icons/fa";
+import { FaHeadphones, FaLanguage, FaMapMarkerAlt, FaSignal } from "react-icons/fa";
 import { NowPlayingKind, OnAir, TrackDetails, getTrackDetails } from "../../api";
 import { QueueItem, player } from "../../player";
 import { RecentlyUsed, Store, useStore } from "../../store";
@@ -188,18 +188,23 @@ const Label: FC<{ children: ReactNode }> = ({ children }) => (
 
 /**
  * A station's Now Playing: what's on (its song when it says), how long you've listened, the station at a
- * glance (where from, language, quality, today's listeners, genres), what it played earlier, and its
- * website. Stations like it are on Similar.
+ * glance (where from, language, quality, today's listeners, genres) and what it played earlier, as much
+ * of that as fits `height`: it never scrolls. Stations like it are on Similar.
  */
-export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: TrackDetails | null | undefined }> = ({
-  item,
-  song,
-  details,
-}) => {
+export const OnAirPanel: FC<{
+  item: QueueItem;
+  song: OnAir | null;
+  details: TrackDetails | null | undefined;
+  height: number;
+}> = ({ item, song, details, height }) => {
   const { playing } = useStore(player.state);
   const { current } = useStore(player.position);
   const key = `${item.instanceId}:${item.track.id}`;
-  const earlier = (useStore(heard)[key] ?? []).filter((h) => h.text !== song?.text);
+  // what it played earlier: as many as fit under the rest (LIVE, the song, the station's row)
+  const room = height - 22 - (song ? 76 : 0) - 50 - 34;
+  const earlier = (useStore(heard)[key] ?? [])
+    .filter((h) => h.text !== song?.text)
+    .slice(0, Math.max(0, Math.floor(room / 26)));
   useEffect(() => {
     if (!song?.text) return;
     const list = heard.get()[key] ?? [];
@@ -216,7 +221,6 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
     .map((g: string) => g.trim())
     .filter((g: string) => g && !said.split(/,|·/).some((x) => x.trim() === g.toLowerCase()))
     .slice(0, 4);
-  const website: string | undefined = facts.Website;
   return (
     <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
@@ -238,7 +242,15 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
       {details === undefined ? (
         <div style={{ fontSize: 14, opacity: 0.5 }}>Loading…</div>
       ) : (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        // one row: what doesn't fit fades out at its end rather than taking another row
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            overflow: "hidden",
+            maskImage: "linear-gradient(to right, black 88%, transparent)",
+          }}
+        >
           {["From", "Language", "Quality", "Today"].map(
             (k) =>
               facts[k] &&
@@ -264,23 +276,6 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
               </Line>
             ))}
           </Focusable>
-        </div>
-      )}
-      {website && (
-        <div>
-          <DialogButton
-            style={{
-              width: "auto",
-              minWidth: 0,
-              padding: "0 20px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-            onClick={() => Navigation.NavigateToExternalWeb(website)}
-          >
-            <FaExternalLinkAlt /> Station website
-          </DialogButton>
         </div>
       )}
     </Focusable>

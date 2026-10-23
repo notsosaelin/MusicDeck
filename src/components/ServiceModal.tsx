@@ -352,6 +352,53 @@ const ServerFields: FC<{
   </>
 );
 
+/** Soulseek: a name and password (a new name is registered on sign-in), and where albums are saved. */
+const SoulseekFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  hasCredentials: boolean;
+}> = ({ draft, setConfig, hasCredentials }) => {
+  const folder: string = draft.config.download_dir || "~/Music/Soulseek";
+  const pick = async () => {
+    try {
+      const home = pluginState.get()?.user_home || "/home";
+      const res = await openFilePicker(SELECT_FOLDER, home, false, true);
+      if (res?.realpath) setConfig({ ...draft.config, download_dir: res.realpath });
+    } catch {
+      // picker cancelled
+    }
+  };
+  return (
+    <>
+      <Field label="Soulseek name" hint="A name nobody has is registered for you when you sign in with it.">
+        <TextField
+          value={draft.config.username ?? ""}
+          onChange={(e) => setConfig({ ...draft.config, username: e.target.value })}
+        />
+      </Field>
+      <Field label="Password" hint="Soulseek has no sign-in tokens, so the password is kept (never in backups).">
+        <TextField
+          bIsPassword
+          value={draft.config.password ?? ""}
+          placeholder={hasCredentials ? "Unchanged" : ""}
+          onChange={(e) => setConfig({ ...draft.config, password: e.target.value })}
+        />
+      </Field>
+      <Field
+        label="Save albums in"
+        hint="Inside a folder your Local files source scans (~/Music by default), downloaded albums join your library."
+      >
+        <Focusable flow-children="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ScrollingText play text={folder} style={{ flex: 1, minWidth: 0 }} />
+          <DialogButton style={{ width: "auto", minWidth: 0, padding: "0 16px" }} onClick={pick}>
+            <FaFolderPlus style={{ marginRight: 8 }} /> Change
+          </DialogButton>
+        </Focusable>
+      </Field>
+    </>
+  );
+};
+
 /**
  * A sign-in code shown in the dialog (Jellyfin's Quick Connect, Plex's link code): asks the backend
  * for a code, shows it with where to enter it, and saves the source once it's approved elsewhere.
@@ -600,6 +647,9 @@ export const ServiceModal: FC<{
       <DialogBody>
         {type === "local" && <LocalFields draft={draft} setConfig={setConfig} />}
         {type === "local" && <NewMusicFields draft={draft} setConfig={setConfig} />}
+        {type === "soulseek" && (
+          <SoulseekFields draft={draft} setConfig={setConfig} hasCredentials={!!existing?.has_credentials} />
+        )}
         {type === "subsonic" && (
           <ServerFields
             draft={draft}

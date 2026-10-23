@@ -316,8 +316,12 @@ source (`MusicService.remove`).
   counts too) instead of the station's logo, place and genres. A song named without a cover gets one
   from Apple's catalogue (the iTunes Search API, no account; exactly that title by that artist, 600 px),
   remembered a day, "none" included. The media center's On air page shows it with the station's facts
-  (`details`: place, language, quality, today's listeners, genres) as chips, the songs heard earlier,
-  and a link to the station's website; stations like it are on Similar.
+  (`details`: place, language, quality, today's listeners, genres) as one row of chips and the songs heard
+  earlier, as many as fit; stations like it are on Similar. `believable()` drops what isn't a song: the
+  station's own name, playout codes ("PLAY_8_NEW", "ID1234"; a number alone can be a title), adverts,
+  idents and web addresses.
+- **Jump back in**: the stations listened to (`played_station`, recorded once a station is playing;
+  `recents.json` "stations", 12 per source), not the genre or country page they were found on.
 - **Logos** come from wherever the directory points, and some hosts (DuckDuckGo's icon cache) refuse
   requests without a user agent, so `art()` sends MusicDeck's.
 - **Favourites**: stored in this source's config (`favourites`) via `save_config`.

@@ -97,6 +97,38 @@ SONG_ART_KEPT = 300
 ITUNES = "https://itunes.apple.com"
 
 
+# what stations put where a song should be: their playout system's codes ("PLAY_8_NEW", "ID_1234"),
+# adverts and idents, web addresses
+NOT_A_SONG = re.compile(r"^(unknown|advert\w*|commercial\w*|jingle\w*|station id|sweeper|promo|news|"
+                        r"weather|traffic|live|on air|now playing|-+|\.+)$", re.I)
+CODE_LIKE = re.compile(r"^[\w.]*[_\d][\w.]*$")
+WEB = re.compile(r"https?://|www\.|\.(com|net|org|fm|radio|de|co\.uk|ru|it|fr)", re.I)
+
+
+def _plain(text: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", text.casefold()).split())
+
+
+def believable(song: dict[str, Any], station: str) -> bool:
+    """Whether what a station says is on air looks like a song: not its own name, not a playout
+    system's code ("PLAY_8_NEW"), not an advert, ident or web address."""
+    station = _plain(station)
+    for part in (song["title"], song["artist"]):
+        plain = _plain(part)
+        if not part:
+            continue
+        if station and (plain == station or plain in station.split(" - ")):
+            return False
+        if NOT_A_SONG.match(part.strip()) or WEB.search(part):
+            return False
+        # one word with underscores or digits mixed in: a code, not a title ("PLAY_8_NEW", "ID1234");
+        # a number alone can be a song ("1999")
+        word = part.strip()
+        if " " not in word and CODE_LIKE.match(word) and not word.isalpha() and not word.isdigit():
+            return False
+    return bool(song["title"])
+
+
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(ssl=tls()),
@@ -378,6 +410,8 @@ class RadioService(MusicService):
             except UnicodeDecodeError:  # older Shoutcast servers send Latin-1
                 return match.group(1).decode("latin-1").strip()
         song = parse_on_air(field(STREAM_TITLE), field(STREAM_URL))
+        if song and not believable(song, info.get("name") or ""):
+            return None
         if song and not song["art"] and song["title"] and song["artist"]:
             song["art"] = await self._song_art(song["artist"], song["title"])
         return song

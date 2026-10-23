@@ -50,7 +50,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
   station its logo as big as its square, and an On air page: the song and its cover when the station says
   (the cover looked up when it doesn't send one); where it's from, its language, quality, today's
-  listeners and genres; what it played earlier; and its website; stations like it under Similar; a podcast episode its show notes and the
+  listeners and genres; and what it played earlier (only what looks like songs: a station's own name or its
+  playout codes aren't); stations like it under Similar, and the stations you listened to in Jump back in; a podcast episode its show notes and the
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
   Live Music Archive its setlist and recording notes.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.

@@ -185,7 +185,7 @@ export interface ServiceType {
   type: string;
   display_name: string;
   /** where "Add a source" lists it: your files and servers, streaming services, radio and podcasts */
-  group: "yours" | "streaming" | "radio" | "other";
+  group: "yours" | "streaming" | "radio" | "sharing" | "other";
 }
 
 /** The media center's choices (settings.DEFAULTS["center"]) */
@@ -425,6 +425,8 @@ export const searchHistory = callable<[id: string], string[]>("search_history");
 /** query "" forgets them all */
 export const forgetSearch = callable<[id: string, query: string], void>("forget_search");
 export const playedCollection = callable<[id: string, collection: Collection], void>("played_collection");
+/** A live station listened to: a radio source's Jump back in. */
+export const playedStation = callable<[id: string, track: Track], void>("played_station");
 export const setGameMusic = callable<
   [id: string, appid: number, game: string, collection: Collection | null],
   Result<GameMusic[]>

@@ -1554,6 +1554,30 @@ async def run():
         await empty.cached_tab("charts")
         check(fetched == ["charts", "charts"], "an empty answer isn't kept")
 
+        print("radio's jump back in")
+
+        class Stations(BaseService):
+            type = "fakestations"
+            display_name = "Stations"
+            NOW_PLAYING = "radio"
+
+            async def home(self):
+                return []
+
+        main.SERVICE_TYPES["fakestations"] = Stations
+        try:
+            fs = (await plugin.save_service({"type": "fakestations", "name": "", "config": {}}))["data"]["id"]
+            await plugin.played_collection(fs, {"id": "tag:pop", "kind": "list", "title": "pop"})
+            for sid_ in ("one", "two", "one"):
+                await plugin.played_station(fs, {"id": sid_, "title": f"Station {sid_}", "artist": "Somewhere", "live": True})
+            jump = (await plugin.home(fs))["data"][0]
+            check(jump["title"] == "Jump back in" and jump["items"] == [] and jump.get("display") == "covers"
+                  and [t["id"] for t in jump["tracks"]] == ["one", "two"] and jump["tracks"][0]["live"],
+                  f"a radio source's Jump back in: the stations listened to, latest first, not the genre: {jump}")
+            await plugin.remove_service(fs)
+        finally:
+            main.SERVICE_TYPES.pop("fakestations", None)
+
         print("overlapping restarts")
         started, stopped = [], []
 
@@ -1636,6 +1660,16 @@ async def run():
         check(parse_on_air("A - B", "https://cdn.example/cover.jpg")["art"] == "https://cdn.example/cover.jpg",
               "an image in StreamUrl is the cover")
         check(parse_on_air("") is None and parse_on_air(" - ") is None, "nothing on air")
+        from musicdeck.services.radio import believable
+        station = "50s 60s RETRO HITS"
+        check(not believable({"title": "PLAY_8_NEW", "artist": station}, station)
+              and not believable({"title": "Advertisement", "artist": ""}, station)
+              and not believable({"title": "Listen", "artist": "www.station.example"}, station)
+              and not believable({"title": "ID1234", "artist": "Promo"}, station),
+              "a station's own name, playout codes, adverts and web addresses aren't songs")
+        check(believable({"title": "Hey Jude", "artist": "The Beatles"}, station)
+              and believable({"title": "1999", "artist": "Prince"}, station),
+              "real songs are, number titles included")
         check(parse_on_air("NY's #1 Hit Music Station - text=\"Z100\" song_spot=\"T\"") is None,
               "station idents and ads aren't songs")
         check(parse_on_air('title="Super Bass",artist="NICKI MINAJ",url="song_spot="M" MediaBaseId="0"')["text"]
