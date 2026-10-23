@@ -122,7 +122,8 @@ export const trackActions = (instanceId: string, track: Track, ctx: MenuContext 
     player.enqueue(instanceId, [track]);
     notify("Added to queue", track.title, { instanceId, track });
   },
-  secondaryLabel: "Add to queue",
+  // short: with Play and Options it has to fit the panel's hint bar on one line
+  secondaryLabel: "Queue",
   onOptions: (e?: any) => showTrackMenu(instanceId, track, e?.currentTarget, ctx),
   optionsLabel: "Options",
 });

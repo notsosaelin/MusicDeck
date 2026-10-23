@@ -215,9 +215,15 @@ export const RowText: FC<{
   );
 };
 
+/**
+ * A row's controller actions, named in Steam's hint bar. The Quick Access panel is narrow: keep the names
+ * short ("Play", "Queue", "Options"), or three of them wrap the bar onto a second line.
+ */
 interface RowActions {
   /** A / tap */
   onActivate: () => void;
+  /** what A does, in the hint bar (Steam says "Select" otherwise) */
+  activateLabel?: string;
   /** X button */
   onSecondary?: () => void;
   secondaryLabel?: string;
@@ -257,6 +263,7 @@ export const ListRow: FC<
   trailing,
   active,
   onActivate,
+  activateLabel,
   onSecondary,
   secondaryLabel,
   onOptions,
@@ -287,7 +294,7 @@ export const ListRow: FC<
         childrenLayout="below"
         onActivate={moving ? done : onActivate}
         onClick={moving ? done : onActivate}
-        onOKActionDescription={moving ? "Done" : undefined}
+        onOKActionDescription={moving ? "Done" : activateLabel}
         onCancelButton={moving ? done : undefined}
         onCancelActionDescription={moving ? "Done" : undefined}
         onGamepadDirection={moving ? direction : undefined}
@@ -385,6 +392,7 @@ export const TrackRow: FC<
     }
     active={active}
     onActivate={onPlay}
+    activateLabel="Play"
     {...actions}
   />
 );
