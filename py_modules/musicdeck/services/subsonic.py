@@ -157,22 +157,32 @@ class SubsonicService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
-            ("library", "Library"))
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("playlists", "Playlists"),
+            ("favourites", "Starred"), ("added", "Recently added"), ("played", "Recently played"),
+            ("frequent", "Most played"), ("rated", "Highest rated"), ("random", "Random"), ("genres", "Genres"))
+    #: Browse's picks: each a grid of the server's albums in that order
+    PICKS = {"added": "newest", "played": "recent", "frequent": "frequent", "rated": "highest", "random": "random"}
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
             return [s for s in await self.home() if s["title"] != "Playlists" and not models.is_categories(s)]
+        if tab_id in self.PICKS:
+            title = dict(self.TABS)[tab_id]
+            return [models.section(title, await self._album_list(self.PICKS[tab_id], 60), display="grid")]
+        if tab_id == "playlists":
+            playlists = await self._call("getPlaylists")
+            return [models.section("Playlists", [self._playlist(p) for p in
+                                                 playlists.get("playlists", {}).get("playlist", [])],
+                                   display="grid", mine=True)]
+        if tab_id == "favourites":
+            starred = (await self._call("getStarred2")).get("starred2", {})
+            return [models.section("Starred albums", [self._album(a) for a in starred.get("album", [])],
+                                   display="grid"),
+                    models.section("Starred artists", [self._artist(a) for a in starred.get("artist", [])]),
+                    models.section("Starred tracks", [], [self._track(x) for x in starred.get("song", [])],
+                                   display="grid")]
         if tab_id == "albums":
-            lists = [("Recently added", "newest"), ("Most played", "frequent"), ("Highest rated", "highest"),
-                     ("Random", "random")]
-            found = await asyncio.gather(*[self._album_list(t, 30) for _, t in lists],
-                                         self._album_list("alphabeticalByName", 500), return_exceptions=True)
-            sections = [models.section(title, albums) for (title, _), albums in zip(lists, found)
-                        if isinstance(albums, list)]
-            if isinstance(found[-1], list):
-                sections.append(models.section("All albums", found[-1], display="grid"))
-            return sections
+            return [models.section("All albums", await self._album_list("alphabeticalByName", 500), display="grid")]
         if tab_id == "artists":
             return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
         if tab_id == "genres":

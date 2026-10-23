@@ -481,7 +481,8 @@ class SteamService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("composers", "Composers"))
+    TABS = (("home", "Home"), ("soundtracks", "Soundtracks"), ("favourites", "Favourites"),
+            ("composers", "Composers"))
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
@@ -489,6 +490,15 @@ class SteamService(MusicService):
             sections = [s for s in await self.home() if not models.is_categories(s)]
             favourites = self._open_list("favourites")["tracks"]
             return sections + ([models.section("Favourite tracks", [], favourites, display="grid")] if favourites else [])
+        if tab_id == "soundtracks":
+            self._check_for_changes()
+            installed = self._by_name(self._playable())
+            return [models.section("Soundtracks", [self._collection(a) for a in installed], display="grid")] \
+                if installed else [models.notice("No soundtracks installed")]
+        if tab_id == "favourites":
+            favourites = self._open_list("favourites")["tracks"]
+            return [models.section("Favourite tracks", [], favourites, display="grid")] if favourites else \
+                [models.notice("Press Y on a track and choose Favourite to keep it here")]
         if tab_id == "composers":
             self._check_for_changes()
             return [models.section("Composers", self._open_list("artists")["collections"], display="grid")]

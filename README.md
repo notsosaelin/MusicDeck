@@ -41,10 +41,13 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   tags, or choose to keep lyrics beside the songs.
 - **Media center:** the player full screen in Steam's main window, laid out like Steam's library, with the
   same five tabs for every source: Now Playing, Home, Browse, Search and Settings. Browse holds what each
-  source has besides its Home: your own music as large tiles with its covers and counts, then the ways in (YouTube Music's New, Charts, Moods and Genres; radio's Genres,
-  Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists, Genres and Library;
-  local files' Albums, Artists, Songs, Playlists, Favourites, then From your listening (Recently played, Most played, Not played yet, Top rated), Genres and Years, your biggest genres a press away, and Folders with how much space the library takes; Qobuz's Discover; Spotify's Your top;
-  Audiobookshelf's Authors and Series...). Settings has the equalizer; what it opens on, background, cover
+  source has besides its Home, every tile saying what's in it with covers from it: your own music as
+  large tiles (Albums, Artists, Playlists, Favourites or Liked Songs, Songs, your stations or podcasts,
+  and the playlists made in MusicDeck); For you (a server's Recently added, Recently played, Most played
+  and Random; local files' Recently played, Most played, Not played yet and Top rated; Spotify's Your
+  top); then the ways in (YouTube Music's New, Charts, Moods and Genres; radio's Genres, Countries and
+  Languages; Qobuz's Playlists by Qobuz, Press awards, Best sellers and more; your biggest local genres;
+  Audiobookshelf's Authors and Series...); and local Folders with how much space the library takes. Settings has the equalizer; what it opens on, background, cover
   and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky. All on the
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a

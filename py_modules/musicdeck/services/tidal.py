@@ -318,12 +318,22 @@ class TidalService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("library", "Library"))
+    TABS = (("home", "Home"), ("playlists", "Playlists"), ("mixes", "Your mixes"), ("albums", "Albums"),
+            ("artists", "Artists"), ("songs", "Songs"))
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
             moved = ("Your playlists", "Favourite albums")
             return [s for s in await self.home() if s["title"] not in moved and not models.is_categories(s)]
+        if tab_id in ("playlists", "mixes", "albums", "artists", "songs"):
+            # the library's parts, each its own tile
+            sections = await self.tab("library")
+            fixed = {"Playlists", "Albums", "Artists", "Favourite tracks"}
+            if tab_id == "mixes":
+                mixes = [s for s in sections if s["title"] not in fixed]
+                return mixes or [models.notice("No mixes yet: TIDAL makes them as you listen")]
+            title = {"playlists": "Playlists", "albums": "Albums", "artists": "Artists", "songs": "Favourite tracks"}
+            return [{**s, "display": "grid"} for s in sections if s["title"] == title[tab_id]]
         if tab_id == "library":
             user = self._user()
             await self._load_favourites()

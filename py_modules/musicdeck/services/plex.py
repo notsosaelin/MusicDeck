@@ -324,21 +324,33 @@ class PlexService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
-            ("library", "Library"))
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("playlists", "Playlists"),
+            ("favourites", "Favourites"), ("added", "Recently added"), ("played", "Recently played"),
+            ("frequent", "Most played"), ("random", "Random"), ("genres", "Genres"))
+    #: Browse's picks: each a grid of the server's albums in that order (played ones only, for plays)
+    PICKS = {"added": dict(sort="addedAt:desc"), "played": {"sort": "lastViewedAt:desc", "viewCount>>": 0},
+             "frequent": {"sort": "viewCount:desc", "viewCount>>": 0}, "random": dict(sort="random")}
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
             return [s for s in await self.home() if s["title"] != "Playlists" and not models.is_categories(s)]
+        if tab_id in self.PICKS:
+            albums = await self._all(ALBUM, 60, **self.PICKS[tab_id])
+            return [models.section(dict(self.TABS)[tab_id], [self._album(a) for a in albums], display="grid")]
+        if tab_id == "playlists":
+            playlists = await self._metadata("/playlists", playlistType="audio")
+            return [models.section("Playlists", [self._playlist(p) for p in playlists], display="grid", mine=True)]
+        if tab_id == "favourites":
+            albums, tracks = await asyncio.gather(
+                self._all(ALBUM, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}),
+                self.open("list", "favourite-tracks"), return_exceptions=True)
+            return [models.section("Favourite albums", [self._album(a) for a in albums]
+                                   if isinstance(albums, list) else [], display="grid"),
+                    models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
+                                   display="grid")]
         if tab_id == "albums":
-            lists = [("Recently added", "addedAt:desc"), ("Most played", "viewCount:desc"), ("Random", "random")]
-            found = await asyncio.gather(*[self._all(ALBUM, 30, sort=sort) for _, sort in lists],
-                                         self._all(ALBUM, sort="titleSort"), return_exceptions=True)
-            sections = [models.section(title, [self._album(a) for a in albums])
-                        for (title, _), albums in zip(lists, found) if isinstance(albums, list)]
-            if isinstance(found[-1], list):
-                sections.append(models.section("All albums", [self._album(a) for a in found[-1]], display="grid"))
-            return sections
+            return [models.section("All albums", [self._album(a) for a in await self._all(ALBUM, sort="titleSort")],
+                                   display="grid")]
         if tab_id == "artists":
             return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
         if tab_id == "genres":

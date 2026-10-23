@@ -3,6 +3,39 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.12.5
+
+- Large Browse tiles without covers keep their icon in the top corner, clear of the name.
+
+## 0.12.4
+
+- Tiles without covers no longer show their icon over the name.
+
+## 0.12.3
+
+**Browse filled out for every source**
+- Every tile says what's in it ("19 playlists", "60 albums", "35 genres") and shows covers from it. These
+  load in the background a moment after Browse opens, and opening the tile right after is instant. A tile
+  with nothing in it yet says "None yet".
+- Your library in its own tiles instead of one long Library page:
+  - **Navidrome**, **Jellyfin/Emby** and **Plex:** Albums, Artists, Playlists, Favourites (Starred on
+    Navidrome).
+  - **Qobuz:** Playlists, Albums, Artists, Songs.
+  - **TIDAL:** Playlists, Your mixes, Albums, Artists, Songs.
+  - **Spotify:** Liked Songs, Playlists, Albums, Artists.
+- **For you:** a server's Recently added, Recently played, Most played, Highest rated (Navidrome) and
+  Random albums; Spotify's Your top.
+- **Qobuz's Explore:** Playlists by Qobuz, Press awards, Best sellers, Ideal discography and Most featured,
+  each a tile of its own.
+- **Internet radio:** Your stations. **Steam soundtracks:** Soundtracks and Favourites.
+- Playlists made in MusicDeck get a "Your playlists" tile on sources without a Playlists tile, and join the
+  source's own Playlists where it has one (local files included).
+- **Layout:**
+  - Large tiles fit four to a row, each with two covers side by side.
+  - Names and lines stay on one line.
+  - No two tiles lead with the same cover.
+  - Text over covers is easier to read.
+
 ## 0.11.3
 
 - At the end of a page, a row left half under the tabs is hidden too, so the top edge is as clean as the

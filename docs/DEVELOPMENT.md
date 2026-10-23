@@ -175,6 +175,8 @@ m.games.reconcile([2149420])              // pretend a game started (by app id);
 m.games.runningGame.set({ appid, name })  // show the "play with this game" buttons without a game
 m.navigation / m.panelTab                 // the QAM panel's navigation state
 m.centerTab.set({ tab: "playing" })       // the media center's tab; m.openMediaCenter() opens it
+m.previewSource(id)                       // another source's Home/Browse/Search, the live one left playing;
+                                          // m.previewSource() goes back (for checking each source's pages)
 ```
 
 Screenshots of the QAM: `python scripts/cdp.py QuickAccess "1" --shot qam.png`. Dialogs render in

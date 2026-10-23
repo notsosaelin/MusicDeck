@@ -112,6 +112,13 @@ export const PLAYER_ROUTE = "/musicdeck/player";
 export type CenterTab = string;
 export const centerTab = new Store<{ tab: CenterTab }>({ tab: "playing" });
 
+/**
+ * For checking how another source's pages look (docs/DEVELOPMENT.md, the debug handle): the media
+ * center's browsing tabs show that source while it's set, without switching the live source (which
+ * would end what's playing). Nothing in MusicDeck itself sets it.
+ */
+export const browsePreview = new Store<{ id: string | null }>({ id: null });
+
 /** The page Steam's main window shows ("/library/home", PLAYER_ROUTE...), or "" if it can't tell. */
 function mainWindowPath(): string {
   return (Router as any).WindowStore?.GamepadUIMainWindowInstance?.m_history?.location?.pathname ?? "";

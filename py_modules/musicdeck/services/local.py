@@ -1019,7 +1019,7 @@ class LocalService(MusicService):
             return [models.section("Playlists", [
                 models.collection(pid, "playlist", pl["title"], models.count(len(pl["tracks"]), "track"))
                 for pid, pl in sorted(self.playlists.items(), key=lambda kv: kv[1]["title"].lower())],
-                display="grid")]
+                display="grid", mine=True)]
         if tab_id in ("favourites", "recentplayed", "mostplayed", "toprated"):
             page = self._open_list(tab_id)
             return [models.section(page["title"], [], page["tracks"], display="grid")] if page["tracks"] \

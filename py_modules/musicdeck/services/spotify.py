@@ -505,8 +505,11 @@ class SpotifyService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("top", "Your top"), ("library", "Library"))
-    TAB_GROUP_OVERRIDES = {"top": "yours"}
+    TAB_GROUP_OVERRIDES = {"top": "listening"}
+    TABS = (("home", "Home"), ("liked", "Liked Songs"), ("playlists", "Playlists"), ("albums", "Albums"),
+            ("artists", "Artists"), ("top", "Your top"))
+    #: thousands of liked songs would be fetched just for the tile's count
+    BROWSE_INFO_SKIP = frozenset({"liked"})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
@@ -530,6 +533,22 @@ class SpotifyService(MusicService):
             if not sections:
                 raise next(f for f in found if isinstance(f, Exception))
             return sections
+        if tab_id == "liked":
+            page = await self.open("list", "liked")
+            return [models.section("Liked Songs", [], page["tracks"], display="grid")]
+        if tab_id == "playlists":
+            playlists = await self._library_playlists()
+            return [models.section("Playlists", [self._playlist(p) for p in playlists if p], display="grid",
+                                   mine=True)]
+        if tab_id == "albums":
+            albums = await self._all("/me/albums", max_items=500)
+            return [models.section("Saved albums", [self._album(i["album"]) for i in albums if i.get("album")],
+                                   display="grid")]
+        if tab_id == "artists":
+            artists = await self._get("/me/following", type="artist", limit=50)
+            return [models.section("Artists you follow", [self._artist(a) for a in
+                                                          (artists.get("artists") or {}).get("items", [])],
+                                   display="grid")]
         if tab_id == "library":
             playlists, albums, artists = await asyncio.gather(
                 self._library_playlists(), self._all("/me/albums", max_items=500),

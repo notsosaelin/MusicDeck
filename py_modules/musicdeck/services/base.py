@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -8,11 +9,59 @@ from .. import models
 # a list of ways in up to this long shows as a row of music each; longer, as tiles to pick from
 ROWS_MAX = 40
 #: Where a source's sections sit on the media center's Browse: the user's own music ("yours": albums,
-#: artists, their library), ways into the catalogue ("explore", the rest), folders on the Deck ("files").
+#: artists, playlists, favourites), picks from it ("listening": recently added, most played, their top),
+#: ways into the catalogue ("explore", the rest), folders on the Deck ("files").
 TAB_GROUPS = {"library": "yours", "yours": "yours", "albums": "yours", "artists": "yours", "composers": "yours",
-              "authors": "yours", "series": "yours", "folders": "files"}
+              "authors": "yours", "series": "yours", "playlists": "yours", "favourites": "yours", "songs": "yours",
+              "liked": "yours", "mixes": "yours", "soundtracks": "yours", "stations": "yours",
+              "added": "listening", "played": "listening", "frequent": "listening", "rated": "listening",
+              "random": "listening", "folders": "files"}
 #: How long a tab that's the same for everyone (SHARED_TABS) is kept before it's fetched again.
 TAB_CACHE_SECONDS = 600
+#: How long a Browse tile's tab may take to fetch for its line and covers
+BROWSE_INFO_SECONDS = 12
+
+
+#: How long a tab fetched for its Browse tile is kept for opening it.
+PREFETCH_SECONDS = 120
+#: What a section's collections are called, for a tile's count
+KIND_NOUNS = {"album": "album", "artist": "artist", "playlist": "playlist", "podcast": "podcast",
+              "show": "show", "book": "book", "author": "author", "series": "series", "folder": "folder"}
+
+
+def tab_info(sections: list[dict[str, Any]]) -> dict[str, Any]:
+    """A Browse tile's line and covers, from what its tab holds: "128 albums" for one section of
+    albums, the first sections' names for a tab of several; up to four covers from the start of it."""
+    shown = [s for s in sections if s.get("items") or s.get("tracks")]
+    if not shown:
+        # only a note ("Press Y on a station and choose Favourite..."): nothing in it yet
+        return {"subtitle": "None yet" if any(s.get("notice") for s in sections) else "", "art": []}
+    art: list[str] = []
+    for s in shown:
+        for x in list(s.get("items") or []) + list(s.get("tracks") or []):
+            a = x.get("art") if isinstance(x, dict) else None
+            if isinstance(a, str) and a and a not in art:
+                art.append(a)
+        if len(art) >= 4:
+            break
+    subtitle = ""
+    if len(shown) == 1:
+        s = shown[0]
+        items, tracks = s.get("items") or [], s.get("tracks") or []
+        kinds = {x.get("kind") for x in items}
+        if items and not tracks and len(kinds) == 1 and next(iter(kinds)) in KIND_NOUNS:
+            noun = KIND_NOUNS[next(iter(kinds))]
+            subtitle = f"{len(items):,} series" if noun == "series" else models.count(len(items), noun)
+        elif tracks and not items:
+            subtitle = models.count(len(tracks), "station" if all(t.get("live") for t in tracks) else "song")
+        elif items and len(s["title"]) <= 24:
+            subtitle = f"{len(items):,} {s['title'].strip().lower()}"
+    elif all(s.get("items") and not s.get("tracks") for s in shown) and len(shown[0]["title"]) <= 24:
+        # one list in parts (Genres, then More genres): counted as one
+        subtitle = f"{sum(len(s['items']) for s in shown):,} {shown[0]['title'].strip().lower()}"
+    elif shown:
+        subtitle = " · ".join(s["title"] for s in shown[:3])  # one line on the tile, cut with "…"
+    return {"subtitle": subtitle, "art": art[:4]}
 
 
 def rows_or_tiles(s: dict[str, Any]) -> dict[str, Any]:
@@ -187,6 +236,8 @@ class MusicService:
 
     #: sections this source groups otherwise than TAB_GROUPS says (Spotify's "Your top" is the user's own)
     TAB_GROUP_OVERRIDES: dict[str, str] = {}
+    #: tabs whose Browse tile isn't worth fetching the tab for (thousands of liked songs)
+    BROWSE_INFO_SKIP: frozenset[str] = frozenset()
 
     def center_tabs(self) -> list[dict[str, Any]]:
         """{"id", "title", "group"}; a source can add "subtitle" (a count) and "art" (art ids for a
@@ -208,7 +259,12 @@ class MusicService:
         raise ServiceError("This source has no such tab")
 
     async def cached_tab(self, tab_id: str) -> list[dict[str, Any]]:
-        """tab(tab_id), from the last few minutes when it's one of SHARED_TABS."""
+        """tab(tab_id), from the last few minutes when it's one of SHARED_TABS (or just fetched for its
+        Browse tile: opening the tile then is at once)."""
+        fetched: dict[str, tuple[float, list[dict[str, Any]]]] = self.__dict__.setdefault("_prefetched", {})
+        early = fetched.pop(tab_id, None)
+        if early and time.monotonic() - early[0] < PREFETCH_SECONDS:
+            return early[1]
         if tab_id not in self.SHARED_TABS:
             return await self.tab(tab_id)
         cache: dict[str, tuple[float, list[dict[str, Any]]]] = self.__dict__.setdefault("_tab_cache", {})
@@ -220,6 +276,28 @@ class MusicService:
         if any(s["items"] or s.get("tracks") for s in sections) and not any(s.get("notice") for s in sections):
             cache[tab_id] = (time.monotonic(), sections)
         return sections
+
+    async def browse_info(self, tab_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Each Browse tile's line and covers (tab_info), its tab fetched for it (and kept a moment for
+        opening it); kept ten minutes. A tab that fails or takes too long just has none."""
+        info: dict[str, tuple[float, dict[str, Any]]] = self.__dict__.setdefault("_browse_info", {})
+        fetched: dict[str, tuple[float, list[dict[str, Any]]]] = self.__dict__.setdefault("_prefetched", {})
+        now = time.monotonic()
+
+        async def one(tab_id: str) -> None:
+            hit = info.get(tab_id)
+            if hit and now - hit[0] < TAB_CACHE_SECONDS:
+                return
+            try:
+                sections = await asyncio.wait_for(self.cached_tab(tab_id), BROWSE_INFO_SECONDS)
+            except Exception:  # noqa: BLE001 - a tile without a line is fine
+                return
+            if not any(s.get("notice") for s in sections):
+                fetched[tab_id] = (time.monotonic(), sections)
+            info[tab_id] = (time.monotonic(), tab_info(sections))
+
+        await asyncio.gather(*[one(t) for t in tab_ids])
+        return {t: info[t][1] for t in tab_ids if t in info}
 
     def current(self, collection: dict[str, Any]) -> Optional[dict[str, Any]]:
         """A collection remembered from before (Jump back in) as it is now (renamed, a new picture), or

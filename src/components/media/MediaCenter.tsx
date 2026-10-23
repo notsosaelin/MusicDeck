@@ -18,7 +18,7 @@ import {
 } from "react-icons/fa";
 import { MdForward30, MdRepeatOne, MdReplay10 } from "react-icons/md";
 import { CenterSettings, CenterTabInfo, NowPlayingKind, ServiceInfo, setSetting } from "../../api";
-import { CenterTab, centerTab, leaveMediaCenter } from "../../nav";
+import { CenterTab, browsePreview, centerTab, leaveMediaCenter } from "../../nav";
 import { hasFeature, player } from "../../player";
 import { showPlaylistPicker, toggleStar } from "../TrackMenu";
 import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
@@ -897,7 +897,8 @@ export const MediaCenter: FC = () => {
   const [screenOff, sleep, wake] = useScreenOff();
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
-  const live = state?.active_service ?? null;
+  const preview = useStore(browsePreview).id;
+  const live = preview ?? state?.active_service ?? null;
   const source = state?.services.find((s) => s.id === live);
   const tabs = centerTabs(source);
   // a tab the source (switched since) doesn't have: its first ("library" was a tab of every source once)

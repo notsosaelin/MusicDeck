@@ -9,6 +9,7 @@ import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
 import {
   PLAYER_ROUTE,
+  browsePreview,
   centerTab,
   invalidateBrowserCache,
   navigation,
@@ -83,6 +84,9 @@ export default definePlugin(() => {
     // the media center: centerTab.set({ tab: "playing" }) shows a tab, openMediaCenter() opens it
     centerTab,
     openMediaCenter,
+    // another source's Home, Browse and Search in the media center, the live one left playing:
+    // previewSource("<source id>"), then previewSource() to stop
+    previewSource: (id?: string) => browsePreview.set({ id: id || null }),
     navigation,
     api,
     showTrackMenu,

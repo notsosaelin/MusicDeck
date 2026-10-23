@@ -656,6 +656,12 @@ async def run():
         saved = (await plugin.save_as_playlist(sid, "album", album_one["id"]))["data"]
         check(saved["title"] == "Album One" and saved["subtitle"] == "2 tracks", "save an album as a playlist")
         check(len(await plugin.local_playlists(sid)) == 2, "playlists listed per source")
+        mine = (await plugin.center_tab(sid, "playlists"))["data"][0]["items"]
+        check({"Drive", "Album One"} <= {c["title"] for c in mine}, f"Browse's Playlists has MusicDeck's too: {mine}")
+        state = await plugin.get_state()
+        check(not any(t["id"] == "musicdeck-playlists" for t in next(x for x in state["services"]
+                                                                       if x["id"] == sid)["tabs"]),
+              "no second tile for them where the source has a Playlists tile")
         cover = os.path.join(tmp, "cover-pick.jpg")
         with open(cover, "wb") as f:
             f.write(JPEG)
@@ -967,11 +973,27 @@ async def run():
             check(emby_calls[-2][1] == "/Sessions/Playing" and emby_calls[-2][3]["MediaSourceId"] == "t1"
                   and emby_calls[-1][:2] == ("POST", "/Users/eu/PlayedItems/t1"), "now playing with a session id; played under the user")
             tabs = await media_center_tabs(plugin, eid)
-            check(list(tabs) == ["home", "albums", "artists", "genres", "library"]
+            check(list(tabs) == ["home", "albums", "artists", "playlists", "favourites", "added", "played", "frequent", "random", "genres"]
                   and all(isinstance(v, list) for v in tabs.values()),
-                  f"Emby's (Jellyfin's) media center tabs all open: {tabs}")
+                  f"Emby's (Jellyfin's) media center tabs all open, the library in parts: {tabs}")
             check(tabs["artists"] == [("Artists", "grid", 1, 0)] and tabs["genres"] == [("Genres", "rows", 1, 0)]
-                  and ("Playlists", "grid", 1, 0) in tabs["library"], f"its artists, genres and playlists: {tabs}")
+                  and tabs["playlists"] == [("Playlists", "grid", 1, 0)], f"its artists, genres and playlists: {tabs}")
+            info = (await plugin.browse_info(eid))["data"]
+            check(info["artists"]["subtitle"] == "1 artist" and info["playlists"]["subtitle"] == "1 playlist"
+                  and "home" not in info, f"Browse's tiles say what's in them: {info}")
+            from musicdeck.services.base import tab_info
+            check(tab_info([{"title": "Genres", "items": [{"kind": "list", "id": "a"}] * 3, "tracks": []}])
+                  == {"subtitle": "3 genres", "art": []}
+                  and tab_info([{"title": "New", "items": [{"kind": "album", "art": "x"}], "tracks": []},
+                                {"title": "Charts", "items": [], "tracks": [{"art": "y"}]}])
+                  == {"subtitle": "New · Charts", "art": ["x", "y"]}
+                  and tab_info([{"title": "On air", "items": [], "tracks": [{"live": True}] * 2}])["subtitle"]
+                  == "2 stations"
+                  and tab_info([{"title": "Genres", "items": [{"kind": "list"}] * 2, "tracks": []},
+                                {"title": "More genres", "items": [{"kind": "list"}] * 3, "tracks": []}])["subtitle"]
+                  == "5 genres"
+                  and tab_info([{"title": "", "items": [], "tracks": [], "notice": "Favourite one"}])["subtitle"]
+                  == "None yet", "a tile's line: a count of one kind of thing, or the tab's first sections")
             genre = (await plugin.open_collection(eid, "list", "genre:g1#Rock"))["data"]
             check(genre["title"] == "Rock" and any(c[1] == "/Items" and c[2].get("GenreIds") == "g1" for c in emby_calls),
                   "a genre opens to its albums")
@@ -1110,10 +1132,10 @@ async def run():
             check([c["id"] for c in home[0]["items"]] == ["40", "41"] and [p["id"] for p in await inst.user_playlists()] == ["40"],
                   "smart playlists are shown but can't be added to")
             tabs = await media_center_tabs(plugin, pid)
-            check(list(tabs) == ["home", "albums", "artists", "genres", "library"]
+            check(list(tabs) == ["home", "albums", "artists", "playlists", "favourites", "added", "played", "frequent", "random", "genres"]
                   and all(isinstance(v, list) for v in tabs.values())
-                  and ("Playlists", "grid", 2, 0) in tabs["library"],
-                  f"Plex's media center tabs all open, its playlists in Library: {tabs}")
+                  and tabs["playlists"] == [("Playlists", "grid", 2, 0)],
+                  f"Plex's media center tabs all open, its playlists a tile of their own: {tabs}")
             page = (await plugin.open_collection(pid, "album", "20"))["data"]
             t = page["tracks"][0]
             check(t["starred"] and not page["tracks"][1]["starred"] and t["duration"] == 61 and t["art"] == "/library/metadata/20/thumb/1",
@@ -2909,6 +2931,83 @@ async def run():
               "credentials never sent to the frontend")
         bad = await plugin.test_service(saved["data"]["id"])
         check(not bad["ok"], f"unreachable server reports an error: {bad.get('error')}")
+
+        print("browse tiles of every source")
+        from musicdeck.services.subsonic import SubsonicService as Sub
+        from musicdeck.services.tidal import TidalService
+        from musicdeck.services.spotify import SpotifyService
+        from musicdeck.services.qobuz import QobuzService
+        sub = Sub("s", {"url": "http://h", "username": "u", "token": "t", "salt": "s"}, tmp)
+        album = {"id": "a1", "name": "One", "coverArt": "c1"}
+
+        async def sub_call(method, **kw):
+            return {"getAlbumList2": {"albumList2": {"album": [album]}},
+                    "getPlaylists": {"playlists": {"playlist": [{"id": "p1", "name": "Mix"}]}},
+                    "getStarred2": {"starred2": {"album": [album], "song": [{"id": "t1", "title": "Song"}]}}}[method]
+        sub._call = sub_call
+        opened = {t["id"]: await sub.tab(t["id"]) for t in sub.center_tabs() if t["id"] not in ("home", "genres", "artists")}
+        check([t["id"] for t in sub.center_tabs()] == ["home", "albums", "artists", "playlists", "favourites", "added",
+                                                       "played", "frequent", "rated", "random", "genres"]
+              and all(v and v[0]["display"] == "grid" for v in opened.values())
+              and opened["playlists"][0]["mine"] and opened["frequent"][0]["title"] == "Most played"
+              and {t["group"] for t in sub.center_tabs() if t["id"] in Sub.PICKS} == {"listening"},
+              f"Navidrome's Browse: its library in parts, picks from it: {opened}")
+
+        tidal = TidalService("t", {}, tmp)
+        real_tab = tidal.tab
+
+        async def tidal_tab(tab_id):
+            if tab_id == "library":
+                return [models_section("Playlists", [{"id": "p"}]), models_section("For you", [{"id": "m"}]),
+                        models_section("Albums", [{"id": "a"}]), models_section("Artists", []),
+                        models_section("Favourite tracks", [], [{"id": "t"}])]
+            return await real_tab(tab_id)
+        from musicdeck.models import section as models_section
+        tidal.tab = tidal_tab
+        parts = {t: await tidal.tab(t) for t in ("playlists", "mixes", "albums", "artists", "songs")}
+        check([x["title"] for x in parts["mixes"]] == ["For you"] and parts["songs"][0]["tracks"] == [{"id": "t"}]
+              and all(len(v) == 1 for v in parts.values()), f"TIDAL's library in parts, its mixes their own: {parts}")
+
+        spot = SpotifyService("p", {"refresh_token": "r"}, tmp)
+
+        async def spot_playlists():
+            return [{"id": "p1", "name": "Mine", "images": [], "owner": {}, "tracks": {"total": 1}}]
+
+        async def spot_all(path, **kw):
+            return [{"album": {"id": "a1", "name": "One", "images": [], "artists": []}}]
+
+        async def spot_get(path, **kw):
+            return {"artists": {"items": [{"id": "r1", "name": "Band", "images": []}]}}
+
+        async def spot_open(kind, id):
+            return {"tracks": [{"id": "t1"}]}
+        spot._library_playlists, spot._all, spot._get, spot.open = spot_playlists, spot_all, spot_get, spot_open
+        tabs = {t["id"]: t["group"] for t in spot.center_tabs()}
+        got = {t: await spot.tab(t) for t in ("liked", "playlists", "albums", "artists")}
+        check(tabs == {"home": "explore", "liked": "yours", "playlists": "yours", "albums": "yours", "artists": "yours",
+                       "top": "listening"} and all(len(v[0]["items"]) + len(v[0]["tracks"]) == 1 for v in got.values())
+              and "liked" in SpotifyService.BROWSE_INFO_SKIP, f"Spotify's library in parts: {tabs} {got}")
+
+        qob = QobuzService("q", {"user_id": "1"}, tmp)
+
+        async def qob_get(path, **kw):
+            if path == "album/getFeatured":
+                return {"albums": {"items": [{"id": "a1", "title": "One", "image": {}, "artist": {}}]}}
+            if path == "playlist/getFeatured":
+                return {"playlists": {"items": [{"id": 9, "name": "Picks", "images300": []}]}}
+            if path == "playlist/getUserPlaylists":
+                return {"playlists": {"items": [{"id": 1, "name": "Mine", "images300": []}]}}
+            return {kw["type"]: {"items": []}}
+
+        async def qob_open(kind, id):
+            return {"tracks": [{"id": "t1"}]}
+        qob._get, qob.open = qob_get, qob_open
+        got = {t["id"]: await qob.tab(t["id"]) for t in qob.center_tabs() if t["id"] not in ("home", "genres")}
+        check(list(got) == ["playlists", "albums", "artists", "songs", "picks", "discover:press-awards",
+                            "discover:best-sellers", "discover:ideal-discography", "discover:most-featured"]
+              and got["picks"][0]["items"][0]["title"] == "Picks" and got["discover:best-sellers"][0]["items"]
+              and got["songs"][0]["tracks"] and got["playlists"][0]["mine"],
+              f"Qobuz's Browse: its library in parts, each of its featured lists a tile: {got}")
 
         print("source types")
         from musicdeck.services import CATALOGUE, SERVICE_TYPES as TYPES

@@ -219,24 +219,37 @@ class JellyfinService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
-            ("library", "Library"))
+    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("playlists", "Playlists"),
+            ("favourites", "Favourites"), ("added", "Recently added"), ("played", "Recently played"),
+            ("frequent", "Most played"), ("random", "Random"), ("genres", "Genres"))
+    #: Browse's picks: each a grid of the server's albums in that order
+    PICKS = {"added": dict(SortBy="DateCreated", SortOrder="Descending"),
+             "played": dict(SortBy="DatePlayed", SortOrder="Descending", Filters="IsPlayed"),
+             "frequent": dict(SortBy="PlayCount", SortOrder="Descending", Filters="IsPlayed"),
+             "random": dict(SortBy="Random")}
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
             return [s for s in await self.home() if s["title"] != "Playlists" and not models.is_categories(s)]
+        if tab_id in self.PICKS:
+            albums = await self._items(IncludeItemTypes="MusicAlbum", Limit=60, **self.PICKS[tab_id])
+            return [models.section(dict(self.TABS)[tab_id], [self._album(a) for a in albums], display="grid")]
+        if tab_id == "playlists":
+            playlists = await self._items(IncludeItemTypes="Playlist", SortBy="SortName", **self.PLAYLIST_FILTER)
+            return [models.section("Playlists", [self._playlist(p) for p in playlists], display="grid", mine=True)]
+        if tab_id == "favourites":
+            albums, artists, tracks = await asyncio.gather(
+                self._items(IncludeItemTypes="MusicAlbum", Filters="IsFavorite", SortBy="SortName", Limit=LIST_LIMIT),
+                self._items(IncludeItemTypes="MusicArtist", Filters="IsFavorite", SortBy="SortName", Limit=LIST_LIMIT),
+                self.open("list", "favourite-tracks"), return_exceptions=True)
+            ok = lambda r: r if isinstance(r, list) else []  # noqa: E731
+            return [models.section("Favourite albums", [self._album(a) for a in ok(albums)], display="grid"),
+                    models.section("Favourite artists", [self._artist(a) for a in ok(artists)]),
+                    models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
+                                   display="grid")]
         if tab_id == "albums":
-            lists = [("Recently added", dict(SortBy="DateCreated", SortOrder="Descending")),
-                     ("Most played", dict(SortBy="PlayCount", SortOrder="Descending", Filters="IsPlayed")),
-                     ("Random", dict(SortBy="Random"))]
-            found = await asyncio.gather(*[self._items(IncludeItemTypes="MusicAlbum", Limit=30, **q) for _, q in lists],
-                                         self._items(IncludeItemTypes="MusicAlbum", SortBy="SortName", Limit=LIST_LIMIT),
-                                         return_exceptions=True)
-            sections = [models.section(title, [self._album(a) for a in albums])
-                        for (title, _), albums in zip(lists, found) if isinstance(albums, list)]
-            if isinstance(found[-1], list):
-                sections.append(models.section("All albums", [self._album(a) for a in found[-1]], display="grid"))
-            return sections
+            albums = await self._items(IncludeItemTypes="MusicAlbum", SortBy="SortName", Limit=LIST_LIMIT)
+            return [models.section("All albums", [self._album(a) for a in albums], display="grid")]
         if tab_id == "artists":
             return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
         if tab_id == "genres":

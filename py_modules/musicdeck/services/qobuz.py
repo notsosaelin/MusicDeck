@@ -294,13 +294,34 @@ class QobuzService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("discover", "Discover"), ("genres", "Genres"), ("library", "Library"))
+    TABS = (("home", "Home"), ("playlists", "Playlists"), ("albums", "Albums"), ("artists", "Artists"),
+            ("songs", "Songs"), ("picks", "Playlists by Qobuz")) \
+        + tuple((f"discover:{kind}", title) for kind, title in DISCOVER_FEATURED) + (("genres", "Genres"),)
+    SHARED_TABS = frozenset({"picks", "genres", *(f"discover:{kind}" for kind, _ in DISCOVER_FEATURED)})
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "home":
             # what's yours is the Library tab's
             return [s for s in await self.home()
                     if s["title"] not in ("Favourite albums", "Library") and not models.is_categories(s)]
+        if tab_id == "picks":
+            playlists = await self._get("playlist/getFeatured", type="editor-picks", limit=60)
+            return [models.section("Playlists by Qobuz", [self._playlist(p) for p in
+                                                         (playlists.get("playlists") or {}).get("items", [])],
+                                   display="grid")]
+        if tab_id.startswith("discover:") and tab_id[9:] in dict(DISCOVER_FEATURED):
+            result = await self._get("album/getFeatured", type=tab_id[9:], limit=60)
+            return [models.section(dict(DISCOVER_FEATURED)[tab_id[9:]], [self._album(a) for a in
+                                                                         (result.get("albums") or {}).get("items", [])],
+                                   display="grid")]
+        if tab_id in ("playlists", "albums", "artists", "songs"):
+            # the library's parts, each its own tile
+            sections = {s["title"]: s for s in await self.tab("library")}
+            part = {"playlists": "Playlists", "albums": "Albums", "artists": "Artists", "songs": "Favourite tracks"}
+            found = sections.get(part[tab_id])
+            if not found:
+                raise ServiceError("Qobuz didn't answer; try again")
+            return [{**found, "display": "grid"}]
         if tab_id == "discover":
             kinds = DISCOVER_FEATURED
             albums, playlists = await asyncio.gather(

@@ -10,6 +10,10 @@ import {
   FaExternalLinkAlt,
   FaFeatherAlt,
   FaFire,
+  FaDice,
+  FaPlusCircle,
+  FaBroadcastTower,
+  FaAward,
   FaFolder,
   FaGamepad,
   FaGlobe,
@@ -40,6 +44,7 @@ import {
   Page,
   Section,
   Track,
+  getBrowseInfo,
   getCenterTab,
   isLocalPlaylist,
   openCollection,
@@ -206,36 +211,53 @@ const SECTION_ICONS: Record<string, ReactNode> = {
   mostplayed: <FaFire />,
   toprated: <FaStar />,
   unplayed: <FaRegClock />,
+  liked: <FaHeart />,
+  mixes: <FaRandom />,
+  added: <FaPlusCircle />,
+  played: <FaHistory />,
+  frequent: <FaFire />,
+  rated: <FaStar />,
+  random: <FaDice />,
+  stations: <FaBroadcastTower />,
+  soundtracks: <FaGamepad />,
+  picks: <FaListUl />,
+  "musicdeck-playlists": <FaListUl />,
 };
+
+/** A tile's icon: its own, or its kind's ("discover:best-sellers", "genre:Rock") */
+const iconFor = (id: string) =>
+  SECTION_ICONS[id] ?? (id.startsWith("genre:") ? <FaTags /> : id.startsWith("discover:") ? <FaAward /> : <FaMusic />);
 
 /** Browse's groups, in the order they show: the user's own music first. */
 const BROWSE_GROUPS: { id: NonNullable<CenterTabInfo["group"]>; title: string }[] = [
   { id: "yours", title: "Your music" },
-  { id: "listening", title: "From your listening" },
+  { id: "listening", title: "For you" },
   { id: "explore", title: "Explore" },
   { id: "genres", title: "Top genres" },
   { id: "files", title: "On this Deck" },
 ];
 
+/** A tile's name or line: one line, cut with "…" (tiles in a row stay the same height) */
+const ONE_LINE = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
+
 const TILE_BACK = "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))";
 
-/** Up to four of a section's covers, as one picture: 2 by 2, or one filling the tile. */
+/** Two of a section's covers side by side, filling the wide tile (two squares), or one across it. */
 const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) => {
   const [failed, setFailed] = useState<string[]>([]);
   const shown = art.filter((a) => !failed.includes(a));
-  const four = shown.length >= 4 ? shown.slice(0, 4) : shown.slice(0, 1);
-  if (!four.length) return null;
+  const two = shown.slice(0, 2);
+  if (!two.length) return null;
   return (
     <div
       style={{
         position: "absolute",
         inset: 0,
         display: "grid",
-        gridTemplateColumns: four.length === 4 ? "1fr 1fr" : "1fr",
-        gridTemplateRows: four.length === 4 ? "1fr 1fr" : "1fr",
+        gridTemplateColumns: two.length === 2 ? "1fr 1fr" : "1fr",
       }}
     >
-      {four.map((a) => (
+      {two.map((a) => (
         <img
           key={a}
           src={mediaUrl("art", instanceId, a)}
@@ -268,17 +290,18 @@ const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }
         position: "absolute",
         inset: 0,
         background:
-          "linear-gradient(to top, rgba(10, 13, 18, 0.92) 0%, rgba(10, 13, 18, 0.35) 55%, rgba(10, 13, 18, 0.1) 100%)",
+          "linear-gradient(to top, rgba(10, 13, 18, 0.95) 0%, rgba(10, 13, 18, 0.7) 45%, rgba(10, 13, 18, 0.15) 100%)",
       }}
     />
     {!t.art?.length && (
-      <div style={{ position: "absolute", top: 16, left: 18, fontSize: 26, opacity: 0.6 }}>
-        {SECTION_ICONS[t.id] ?? <FaMusic />}
+      // no covers: its icon in the top corner, clear of the name along the foot
+      <div style={{ position: "absolute", top: 14, right: 16, fontSize: 22, opacity: 0.4, display: "flex" }}>
+        {iconFor(t.id)}
       </div>
     )}
     <div style={{ position: "absolute", left: 18, right: 18, bottom: 14 }}>
-      <div style={{ fontSize: 20, fontWeight: 700, color: "#ffffff" }}>{t.title}</div>
-      {t.subtitle && <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>{t.subtitle}</div>}
+      <div style={{ ...ONE_LINE, fontSize: 18, fontWeight: 700, color: "#ffffff" }}>{t.title}</div>
+      {t.subtitle && <div style={{ ...ONE_LINE, fontSize: 13, opacity: 0.7, marginTop: 2 }}>{t.subtitle}</div>}
     </div>
   </Focusable>
 );
@@ -286,7 +309,7 @@ const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }
 /** A compact tile's picture: one of its covers, or its icon in a circle. */
 const WayInArt: FC<{ instanceId: string; t: CenterTabInfo }> = ({ instanceId, t }) => {
   const [failed, setFailed] = useState(false);
-  const icon = SECTION_ICONS[t.id] ?? (t.id.startsWith("genre:") ? <FaTags /> : <FaMusic />);
+  const icon = iconFor(t.id);
   if (t.art?.[0] && !failed)
     return (
       <img
@@ -350,7 +373,20 @@ const WayInTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> 
       >
         {t.title}
       </div>
-      {t.subtitle && <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>{t.subtitle}</div>}
+      {t.subtitle && (
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.6,
+            marginTop: 2,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {t.subtitle}
+        </div>
+      )}
     </div>
   </Focusable>
 );
@@ -366,10 +402,24 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
   sections,
   stack,
 }) => {
+  // what's in each tile, as it arrives (the tiles show at once, their lines and covers a moment later)
+  const info = useResult(`${instanceId}:browseinfo`, () => getBrowseInfo(instanceId), true);
+  const filled = sections.map((t): CenterTabInfo => {
+    const more = info?.ok ? info.data[t.id] : undefined;
+    return more ? { ...t, subtitle: t.subtitle || more.subtitle, art: t.art?.length ? t.art : more.art } : { ...t };
+  });
   const groups = BROWSE_GROUPS.map((g) => ({
     ...g,
-    tabs: sections.filter((t) => (t.group ?? "explore") === g.id),
+    tabs: filled.filter((t) => (t.group ?? "explore") === g.id),
   })).filter((g) => g.tabs.length);
+  // each tile's covers, as far as it has them, not ones a tile before it shows (two charts led by the same album)
+  const used = new Set<string>();
+  for (const t of groups.flatMap((g) => g.tabs)) {
+    if (!t.art?.length) continue;
+    const fresh = t.art.filter((a) => !used.has(a));
+    if (fresh.length) t.art = [...fresh, ...t.art.filter((a) => used.has(a))];
+    t.art.slice(0, t.group === "yours" ? 2 : 1).forEach((a) => used.add(a));
+  }
   const open = (t: CenterTabInfo) => () => pushCenter(stack, { type: "section", tab: t.id, title: t.title });
   return (
     <>
@@ -383,7 +433,7 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
               display: "grid",
               gridTemplateColumns:
                 g.id === "yours"
-                  ? "repeat(auto-fill, minmax(clamp(220px, 24vw, 340px), 1fr))"
+                  ? "repeat(auto-fill, minmax(clamp(150px, 18vw, 300px), 1fr))"
                   : "repeat(auto-fill, minmax(clamp(200px, 20vw, 280px), 1fr))",
               gap: 16,
             }}

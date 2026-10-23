@@ -352,7 +352,8 @@ class RadioService(MusicService):
                 pass
         return {"facts": facts, "related": related}
 
-    TABS = (("home", "Home"), ("genres", "Genres"), ("countries", "Countries"), ("languages", "Languages"))
+    TABS = (("home", "Home"), ("stations", "Your stations"), ("genres", "Genres"), ("countries", "Countries"),
+            ("languages", "Languages"))
     SHARED_TABS = frozenset({"genres", "countries", "languages"})  # Home has the user's stations
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
@@ -365,6 +366,11 @@ class RadioService(MusicService):
             # the biggest as rows of their stations, the rest to pick from
             return [models.section("Genres", tags[:ROWS_MAX], display="rows"),
                     models.section("More genres", tags[ROWS_MAX:], display="tiles")]
+        if tab_id == "stations":
+            favourites = [{**f, "artist": f.get("artist", "").split(" · ")[0], "starred": True}
+                          for f in self.config.get("favourites") or []]
+            return [models.section("Your stations", [], favourites, display="grid")] if favourites else \
+                [models.notice("Press Y on a station and choose Favourite to keep it here")]
         if tab_id == "countries":
             return [{**s, "display": "tiles"} for s in await self.browse() if s["title"] == "Countries"]
         if tab_id == "languages":

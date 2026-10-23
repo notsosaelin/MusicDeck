@@ -11,7 +11,7 @@ import aiohttp
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import backup, debuglog, lyrics
+from musicdeck import backup, debuglog, lyrics, models
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
 from musicdeck import version
@@ -27,6 +27,8 @@ from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
 
 # Config keys never sent to the frontend; a service storing a secret under another name adds it here
+#: Browse's tile for the playlists made in MusicDeck, on a source without a Playlists tile of its own
+OUR_PLAYLISTS = "musicdeck-playlists"
 SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "secret", "cookies", "auth"}
 # Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
 RESTORED_SIGNED_OUT = "sign_in_again"
@@ -207,11 +209,23 @@ class Plugin:
             "downloadable": bool(instance and instance.downloadable),
             "castable": bool(instance and instance.castable),
             # the media center's tabs for it (MusicService.center_tabs)
-            "tabs": instance.center_tabs() if instance else [{"id": "home", "title": "Home"}],
+            "tabs": self._tabs(service["id"], instance) if instance else [{"id": "home", "title": "Home"}],
             # how Now Playing shows its tracks (MusicService.NOW_PLAYING)
             "now_playing": instance.NOW_PLAYING if instance else "music",
             "status": instance.status() if instance else {},
         }
+
+    def _tabs(self, instance_id: str, instance: MusicService) -> list[dict[str, Any]]:
+        """The source's own tabs, and the playlists made in MusicDeck for it as a Browse tile of their own
+        when the source has no Playlists tile for them to join."""
+        tabs = instance.center_tabs()
+        ours = self.playlists.for_instance(instance_id)
+        if ours and not any(t["id"] == "playlists" for t in tabs):
+            radio = instance.NOW_PLAYING == "radio"
+            tabs = tabs + [{"id": OUR_PLAYLISTS, "title": "Your station lists" if radio else "Your playlists",
+                            "group": "yours", "subtitle": models.count(len(ours), "list" if radio else "playlist"),
+                            "art": [a for a in (c.get("art") for c in ours) if a][:4]}]
+        return tabs
 
     @_when_ready
     async def get_state(self) -> dict[str, Any]:
@@ -399,11 +413,25 @@ class Plugin:
         Home gets what was played lately and MusicDeck's playlists, as home() does; a section of the
         user's playlists ("mine") gets MusicDeck's playlists too."""
         async def work():
+            if tab_id == OUR_PLAYLISTS:
+                return [models.section("Your playlists", self.playlists.for_instance(instance_id), display="grid")]
             sections = await self._instance(instance_id).cached_tab(tab_id)
             if tab_id == "home":
                 return self._with_ours(instance_id, sections)
             ours = self.playlists.for_instance(instance_id)
             return [{**s, "items": ours + s["items"]} if s.get("mine") and ours else s for s in sections]
+        return await _result(work())
+
+    @_when_ready
+    async def browse_info(self, instance_id: str) -> dict[str, Any]:
+        """Lines and covers for Browse's tiles that don't come with their own (MusicService.browse_info),
+        fetched as Browse opens: {tab id: {"subtitle", "art"}}."""
+        async def work():
+            instance = self._instance(instance_id)
+            wanted = [t["id"] for t in self._tabs(instance_id, instance)
+                      if t["id"] not in ("home", OUR_PLAYLISTS) and t["id"] not in instance.BROWSE_INFO_SKIP
+                      and not (t.get("subtitle") or t.get("art"))]
+            return await instance.browse_info(wanted)
         return await _result(work())
 
     @_when_ready
