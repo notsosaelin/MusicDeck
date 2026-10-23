@@ -22,7 +22,7 @@ import { Equalizer } from "../Equalizer";
 import { canCast, prepareCastMenu, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
-import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto } from "./parts";
+import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto, snapRows } from "./parts";
 import {
   CenterStack,
   CollectionPage,
@@ -468,6 +468,7 @@ const Browse: FC<{ stack: CenterStack; instanceId: string; withoutCategories: bo
   const box = useRef<HTMLDivElement>(null);
   const viewKey = view.type === "collection" ? cardKey(view.collection) : view.type === "search" ? view.query : "home";
   useEffect(() => focusInto(box.current, focusKeyFor(stack, views.length - 1)), [viewKey, views.length]);
+  useEffect(() => snapRows(box.current), []);
   return (
     // B goes back a page here, inside the tab: Steam's Tabs would otherwise take it first (to move
     // up to the tab bar, which it still does at the start of a tab)

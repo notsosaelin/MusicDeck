@@ -45,6 +45,7 @@ import { confirmClearQueue } from "../Queue";
 import { saveCollection, showCollectionMenu, showTrackMenu } from "../TrackMenu";
 import {
   Card,
+  CardBlanks,
   Cover,
   Loading,
   Notice,
@@ -211,11 +212,13 @@ const CategoryRow: FC<{ instanceId: string; category: Collection }> = ({ instanc
   const box = useRef<HTMLDivElement>(null);
   const near = useNear(box);
   return (
-    <div ref={box} style={{ minHeight: near ? undefined : 260 }}>
+    <div ref={box}>
       {near ? (
         <CategoryShelf instanceId={instanceId} category={category} />
       ) : (
-        <SectionTitle>{category.title}</SectionTitle>
+        <Shelf title={category.title}>
+          <CardBlanks />
+        </Shelf>
       )}
     </div>
   );
@@ -224,7 +227,12 @@ const CategoryRow: FC<{ instanceId: string; category: Collection }> = ({ instanc
 const CategoryShelf: FC<{ instanceId: string; category: Collection }> = ({ instanceId, category }) => {
   const key = `${instanceId}:${category.kind}:${category.id}`;
   const result = useResult<Page>(key, () => openCollection(instanceId, category.kind, category.id));
-  if (!result) return <SectionTitle>{category.title}</SectionTitle>;
+  if (!result)
+    return (
+      <Shelf title={category.title}>
+        <CardBlanks />
+      </Shelf>
+    );
   if (!result.ok || (!result.data.collections.length && !result.data.tracks.length)) return null;
   const { collections, tracks } = result.data;
   const open = () => pushCenter("home", { type: "collection", collection: category });
@@ -351,7 +359,8 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
 
   return (
     <>
-      <div style={{ display: "flex", gap: 32, alignItems: "flex-end", marginBottom: 28 }}>
+      {/* a block snapRows brings into view whole: moving up to Play shows the cover and title too */}
+      <div className="mc-row-block" style={{ display: "flex", gap: 32, alignItems: "flex-end", marginBottom: 28 }}>
         {pictured && (
           <Cover
             instanceId={instanceId}

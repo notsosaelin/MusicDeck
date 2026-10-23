@@ -21,6 +21,12 @@ export const CENTER_CSS =
 .mc-row.gpfocus, .mc-row:hover { background: rgba(255, 255, 255, 0.12); }
 .mc-row.gpfocus { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .mc-shelf::-webkit-scrollbar { display: none; }
+/* Steam's tab bar sits over the top of the tab's scrolling area: what's scrolled into view must clear
+   it, and bring the title of its row along (Steam heeds the area's padding, not the cards' margins,
+   when it scrolls up), rather than stop half under the bar */
+.mc-center [class*="TabContentsScroll"] { scroll-padding-top: 104px; scroll-padding-bottom: 12px; }
+.mc-card, .mc-tile { scroll-margin-top: 46px; scroll-margin-bottom: 10px; scroll-margin-left: 2.8vw; scroll-margin-right: 2.8vw; }
+.mc-row { scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
 .mc-tile { border-radius: 6px; outline: none; transition: transform 0.12s ease-out; }
 .mc-tile.gpfocus, .mc-tile:hover { transform: scale(1.04); box-shadow: 0 0 0 3px #ffffff, 0 10px 28px rgba(0, 0, 0, 0.55); }
 ` + fieldCss(gamepadDialogClasses as Record<string, string> | undefined);
@@ -58,9 +64,9 @@ export const stopping =
 // ...and never taller than leaves a whole row (cover, title, subtitle) on screen above the now-playing
 // bar, however short the screen or large Steam's UI scale
 const CARD_SIZES = {
-  small: "min(clamp(80px, 10.5vw, 150px), 24vh)",
-  medium: "min(clamp(96px, 14vw, 190px), 28vh)",
-  large: "min(clamp(120px, 20vw, 260px), 32vh)",
+  small: "min(clamp(80px, 10.5vw, 150px), 21vh)",
+  medium: "min(clamp(96px, 14vw, 190px), 25vh)",
+  large: "min(clamp(120px, 20vw, 260px), 28vh)",
 };
 const useCardSize = () => CARD_SIZES[useStore(pluginState)?.center?.cards ?? "medium"] ?? CARD_SIZES.medium;
 
@@ -146,12 +152,12 @@ export const Card: FC<{
 
 /** A titled row that scrolls sideways, as on Steam's home page. */
 export const Shelf: FC<{ title?: string; children: ReactNode }> = ({ title, children }) => (
-  <div style={{ marginBottom: 28 }}>
+  // mc-row-block: what snapRows brings into view whole when the controller enters the row
+  <div className="mc-row-block" style={{ marginBottom: 28 }}>
     {title && <SectionTitle>{title}</SectionTitle>}
     <Focusable
       flow-children="row"
       className="mc-shelf"
-      // room for a focused card to grow without being clipped
       // to the screen's edges, as Steam's own rows: cards scroll off the edge rather than being cut at
       // the page's margin; the padding is room for a focused card to grow
       style={{ display: "flex", gap: 22, overflowX: "auto", padding: "10px 2.8vw 14px", margin: "-10px -2.8vw 0" }}
@@ -442,10 +448,68 @@ export function useNear(ref: RefObject<HTMLElement | null>): boolean {
     // window they'd never come near, and with nothing to focus there the controller can't scroll on
     const observer = new Observer((entries) => entries.some((e) => e.isIntersecting) && setNear(true), {
       root: scrollParent(el),
-      rootMargin: "600px 0px",
+      rootMargin: "1500px 0px", // a few rows ahead: a row's music can take a second to arrive
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, [near]);
   return near;
+}
+
+/**
+ * Where a row's cards will be, while its music loads: blanks shaped like cards (cover, title,
+ * subtitle), so the page doesn't move under the controller when the real ones arrive.
+ */
+export const CardBlanks: FC<{ count?: number }> = ({ count = 6 }) => {
+  const size = useCardSize();
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} style={{ width: size, flexShrink: 0, padding: 2 }}>
+          <div style={{ width: size, height: size, borderRadius: 6, background: "rgba(255, 255, 255, 0.05)" }} />
+          <div
+            style={{
+              marginTop: 10,
+              height: 17,
+              width: "70%",
+              borderRadius: 3,
+              background: "rgba(255, 255, 255, 0.05)",
+            }}
+          />
+          <div
+            style={{ marginTop: 2, height: 14, width: "45%", borderRadius: 3, background: "rgba(255, 255, 255, 0.04)" }}
+          />
+        </div>
+      ))}
+    </>
+  );
+};
+
+/** The height of Steam's tab bar over the top of a tab's scrolling area */
+const TAB_BAR = 58;
+
+/**
+ * Rows of cards scroll as on Steam's home page: entering a row puts it, title and all, just under the
+ * tab bar. Steam's own scrolling (to the nearest edge) lands rows half under the bar when moving up,
+ * by however far the last move went. Lists of tracks keep Steam's scrolling. Returns the cleanup.
+ */
+export function snapRows(container: HTMLElement | null): () => void {
+  if (!container) return () => {};
+  const onFocus = (e: FocusEvent) => {
+    const block = (e.target as HTMLElement | null)?.closest?.(".mc-row-block") as HTMLElement | null;
+    const scroller = block && scrollParent(block);
+    if (!block || !scroller) return;
+    const snap = () => {
+      // moved on meanwhile: that row's own snap has it
+      if (!block.contains(block.ownerDocument.activeElement)) return;
+      const top = scroller.scrollTop + block.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      scroller.scrollTo({ top: Math.max(0, top - TAB_BAR - 8), behavior: "smooth" });
+    };
+    // at once, and again once Steam's own smooth scroll for this move has run, which can end after
+    // this one and undo it
+    window.requestAnimationFrame(snap);
+    window.setTimeout(snap, 320);
+  };
+  container.addEventListener("focusin", onFocus);
+  return () => container.removeEventListener("focusin", onFocus);
 }
