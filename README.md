@@ -43,7 +43,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   same five tabs for every source: Now Playing, Home, Browse, Search and Settings. Browse holds what each
   source has besides its Home: your own music as large tiles with its covers and counts, then the ways in (YouTube Music's New, Charts, Moods and Genres; radio's Genres,
   Countries and Languages; a Navidrome, Jellyfin, Emby or Plex server's Albums, Artists, Genres and Library;
-  local files' Albums, Artists, Genres, Years, Composers and Folders; Qobuz's Discover; Spotify's Your top;
+  local files' Albums, Artists, Songs, Playlists, Favourites, then From your listening (Recently played, Most played, Not played yet, Top rated), Genres and Years, your biggest genres a press away, and Folders with how much space the library takes; Qobuz's Discover; Spotify's Your top;
   Audiobookshelf's Authors and Series...). Settings has the equalizer; what it opens on, background, cover
   and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky. All on the
   controller.

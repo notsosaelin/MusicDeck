@@ -141,10 +141,13 @@ async def run():
         check(len(artist_page["collections"]) == 1, "artist page lists albums")
 
         tabs = await media_center_tabs(plugin, sid)
-        check(list(tabs) == ["home", "albums", "artists", "genres", "years", "folders"],
-              f"local files' media center tabs (no Composers: none tagged): {list(tabs)}")
-        check(tabs["genres"] == [("", "shelf", 0, 0)] and tabs["years"] == [("", "shelf", 0, 0)],
-              f"no genres or years tagged: a note, not an empty page: {tabs['genres']} {tabs['years']}")
+        check(list(tabs) == ["home", "albums", "artists", "songs", "playlists", "folders"],
+              f"local files' media center tabs (nothing tagged with a genre, year or composer: none of those): "
+              f"{list(tabs)}")
+        check(tabs["songs"] == [("Songs", "grid", 0, 3)] and tabs["playlists"] == [("Playlists", "grid", 1, 0)],
+              f"every song, the folder's playlists: {tabs['songs']} {tabs['playlists']}")
+        check((await plugin.center_tab(sid, "genres"))["data"][0]["notice"],
+              "no genres tagged: a note, not an empty page")
         check(tabs["home"] == [("Playlists", "shelf", 1, 0), ("Recently added", "shelf", 2, 0)],
               f"Home: the folder's playlists and what's new, its ways in left to the other tabs: {tabs['home']}")
         check(tabs["albums"] == [("Albums", "grid", 2, 0)] and tabs["artists"] == [("Artists", "grid", 2, 0)],
@@ -229,6 +232,18 @@ async def run():
               f"played: Recently played, Most played (played twice or more): {[s['title'] for s in home2]}")
         check([t["title"] for t in rows["Recently played"]["tracks"]] == ["Hit 1", "Piece"]
               and [t["title"] for t in rows["Most played"]["tracks"]] == ["Piece"], "in the order they were played")
+        groups = {}
+        for t in next(x for x in (await plugin.get_state())["services"] if x["id"] == lid)["tabs"]:
+            groups.setdefault(t["group"], []).append(t["id"])
+        check(groups.get("listening") == ["recentplayed", "mostplayed", "toprated"]
+              and groups.get("genres") == ["genre:Pop"]
+              and groups["explore"] == ["home", "genres", "years"],
+              f"Browse: what's been listened to, and the biggest genres a press away: {groups}")
+        pop = (await plugin.center_tab(lid, "genre:Pop"))["data"]
+        check([(x["title"], len(x["items"]), len(x["tracks"])) for x in pop] == [("Songs", 0, 2)],
+              f"a genre's tile opens its songs: {pop}")
+        unplayed = (await plugin.center_tab(lid, "unplayed"))["data"]
+        check(unplayed[0].get("notice"), f"every album played: none left to suggest: {unplayed}")
         facts = dict((await plugin.track_details(lid, piece))["data"]["facts"])
         check(facts["Plays"].startswith("2 plays, last "), f"plays counted: {facts['Plays']}")
         restarted = type(library)(lid, library.config, library.runtime_dir)

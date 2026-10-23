@@ -146,8 +146,9 @@ export interface TrackDetails {
 export interface CenterTabInfo {
   id: string;
   title: string;
-  /** where it sits on Browse: the user's own music, ways into the catalogue, folders on the Deck */
-  group?: "yours" | "explore" | "files";
+  /** where it sits on Browse: the user's own music, what they've listened to, ways into the catalogue,
+   * the biggest genres, folders on the Deck */
+  group?: "yours" | "listening" | "explore" | "genres" | "files";
   /** what's in it ("128 albums") */
   subtitle?: string;
   /** art ids of a few of its covers or pictures, for its tile */

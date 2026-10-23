@@ -3,6 +3,31 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.11.3
+
+- At the end of a page, a row left half under the tabs is hidden too, so the top edge is as clean as the
+  bottom.
+
+## 0.11.2
+
+- A heading at the bottom of a page (Browse's "On this Deck") no longer shows cut off without its tiles: it
+  shows with them as the page moves down.
+
+## 0.11.1
+
+- Top genres each show a different cover where the library has one, and leave out genres of a single song.
+
+## 0.11.0
+
+**A fuller Browse for local files**
+- Your music: Albums and Artists, plus **Songs** (every track), **Playlists** and **Favourites**, each with
+  its covers.
+- **From your listening:** Recently played, Most played, Not played yet and Top rated, each with a cover.
+- **Top genres:** your biggest genres as tiles of their own, a press from their songs.
+- Folders say how much space the library takes. Genres, Years and Composers only show when the files are
+  tagged with them.
+- Long track lists (every song in a big library) open at once and fill in as you scroll.
+
 ## 0.10.3
 
 - The media center's pages end on whole rows: a row only partly in view at the bottom (a grid's covers,

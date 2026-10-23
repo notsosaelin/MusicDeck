@@ -9,6 +9,7 @@ import {
   FaDownload,
   FaExternalLinkAlt,
   FaFeatherAlt,
+  FaFire,
   FaFolder,
   FaGamepad,
   FaGlobe,
@@ -22,7 +23,9 @@ import {
   FaPlay,
   FaPlus,
   FaPodcast,
+  FaListUl,
   FaRandom,
+  FaRegClock,
   FaSearch,
   FaSmile,
   FaStar,
@@ -196,12 +199,21 @@ const SECTION_ICONS: Record<string, ReactNode> = {
   series: <FaLayerGroup />,
   categories: <FaList />,
   yours: <FaPodcast />,
+  songs: <FaMusic />,
+  playlists: <FaListUl />,
+  favourites: <FaHeart />,
+  recentplayed: <FaHistory />,
+  mostplayed: <FaFire />,
+  toprated: <FaStar />,
+  unplayed: <FaRegClock />,
 };
 
 /** Browse's groups, in the order they show: the user's own music first. */
 const BROWSE_GROUPS: { id: NonNullable<CenterTabInfo["group"]>; title: string }[] = [
   { id: "yours", title: "Your music" },
+  { id: "listening", title: "From your listening" },
   { id: "explore", title: "Explore" },
+  { id: "genres", title: "Top genres" },
   { id: "files", title: "On this Deck" },
 ];
 
@@ -271,8 +283,42 @@ const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }
   </Focusable>
 );
 
-/** One of Explore (or a folder): compact, its icon beside its name and how many. */
-const WayInTile: FC<{ t: CenterTabInfo; open: () => void }> = ({ t, open }) => (
+/** A compact tile's picture: one of its covers, or its icon in a circle. */
+const WayInArt: FC<{ instanceId: string; t: CenterTabInfo }> = ({ instanceId, t }) => {
+  const [failed, setFailed] = useState(false);
+  const icon = SECTION_ICONS[t.id] ?? (t.id.startsWith("genre:") ? <FaTags /> : <FaMusic />);
+  if (t.art?.[0] && !failed)
+    return (
+      <img
+        src={mediaUrl("art", instanceId, t.art[0])}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        style={{ flexShrink: 0, width: 48, height: 48, borderRadius: 4, objectFit: "cover", display: "block" }}
+      />
+    );
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        width: 44,
+        height: 44,
+        borderRadius: "50%",
+        background: "rgba(255, 255, 255, 0.1)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
+        opacity: 0.85,
+      }}
+    >
+      {icon}
+    </div>
+  );
+};
+
+/** One of Explore, a genre, a folder: compact, a cover or its icon beside its name and what's in it. */
+const WayInTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> = ({ instanceId, t, open }) => (
   <Focusable
     className="mc-tile"
     data-mc={sectionKey(t.id)}
@@ -290,24 +336,20 @@ const WayInTile: FC<{ t: CenterTabInfo; open: () => void }> = ({ t, open }) => (
       background: TILE_BACK,
     }}
   >
-    <div
-      style={{
-        flexShrink: 0,
-        width: 44,
-        height: 44,
-        borderRadius: "50%",
-        background: "rgba(255, 255, 255, 0.1)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 18,
-        opacity: 0.85,
-      }}
-    >
-      {SECTION_ICONS[t.id] ?? <FaMusic />}
-    </div>
+    <WayInArt instanceId={instanceId} t={t} />
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: "#ffffff" }}>{t.title}</div>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 600,
+          color: "#ffffff",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {t.title}
+      </div>
       {t.subtitle && <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>{t.subtitle}</div>}
     </div>
   </Focusable>
@@ -350,7 +392,7 @@ export const BrowseIndex: FC<{ instanceId: string; sections: CenterTabInfo[]; st
               g.id === "yours" ? (
                 <LibraryTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
               ) : (
-                <WayInTile key={t.id} t={t} open={open(t)} />
+                <WayInTile key={t.id} instanceId={instanceId} t={t} open={open(t)} />
               ),
             )}
           </Focusable>

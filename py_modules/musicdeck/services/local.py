@@ -73,6 +73,7 @@ LOSSLESS = {"FLAC", "ALAC", "WAV"}
 VARIOUS = "Various artists"
 SHELF = 20  # tracks or albums in a Home row
 LIST_MAX = 100  # tracks in a played or rated list
+GENRE_TILES = 6  # the biggest genres, on Browse
 ART_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_ART_BYTES = 15 * 1024 * 1024
 ARTIST = "artist-"  # an artist's picture's key among the albums' (album keys are hex: no clash)
@@ -238,6 +239,15 @@ def _quality_line(t: dict[str, Any], short: bool = False) -> str:
             return name
         parts = [name, f"{t['bitrate']} kbps" if t.get("bitrate") else "", f"{rate / 1000:g} kHz" if rate else ""]
     return " · ".join(x for x in parts if x)
+
+
+def _size(n: int) -> str:
+    """1536 -> "1.5 KB"; what a library takes up on the Deck"""
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit in ("bytes", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return ""
 
 
 def _number(value: str) -> int:
@@ -890,8 +900,6 @@ class LocalService(MusicService):
 
     # --- media center ---
 
-    TABS = (("home", "Home"), ("albums", "Albums"), ("artists", "Artists"), ("genres", "Genres"),
-            ("years", "Years"), ("composers", "Composers"), ("folders", "Folders"))
     NOW_PLAYING = "library"
 
     def center_tabs(self) -> list[dict[str, Any]]:
@@ -902,34 +910,94 @@ class LocalService(MusicService):
         return self._browse_cache
 
     def _browse_tiles(self) -> list[dict[str, Any]]:
+        """Browse's tiles: the library (albums, artists, songs, playlists, favourites); what's been
+        listened to; the ways in (genres, years); the biggest genres, a press away; the folders."""
         albums = self._albums()
         artists = self._artist_index()
         composers = {t["composer"].lower() for t in self.tracks.values() if t["composer"]}
-        genres = {g.lower() for t in self.tracks.values() for g in t.get("genres") or ([t["genre"]] if t["genre"] else [])}
+        genres: dict[str, list[Any]] = {}
+        for tid, t in self.tracks.items():
+            for genre in t.get("genres") or ([t["genre"]] if t["genre"] else []):
+                genres.setdefault(genre.lower(), [genre, []])[1].append((tid, t))
         decades = {_number(v[0][1]["year"]) // 10 for v in albums.values() if _number(v[0][1]["year"])}
-        # covers: albums with a picture of their own first, then the latest added
+
+        def covers(items: list[tuple[str, dict[str, Any]]], n: int = 4) -> list[str]:
+            """Art ids of the albums these tracks are from, one each, those with a picture of their own first."""
+            seen: dict[str, str] = {}
+            for tid, t in items:
+                seen.setdefault(self._album_key(t), self._art_id(tid, t))
+            return [a for _, a in sorted(seen.items(), key=lambda kv: kv[0] not in self.album_art)][:n]
+
+        # albums with a picture of their own first, then the latest added
         recent = sorted(albums.items(), key=lambda kv: (kv[0] not in self.album_art,
                                                         -max(t.get("added", t["mtime"]) for _, t in kv[1])))
-        info = {
-            "albums": (models.count(len(albums), "album"), [self._art_id(*v[0]) for _, v in recent[:4]]),
-            "artists": (models.count(len(artists), "artist"),
-                        [a for a in (self._artist_art_id(k) for k in artists) if a][:4]),
-            "genres": (models.count(len(genres), "genre"), []),
-            "years": (models.count(len(decades), "decade"), []),
-            "composers": (models.count(len(composers), "composer"), []),
-            "folders": (models.count(len(self._open_folder("")["collections"]), "folder"), []),
-        }
-        tabs = []
+        tabs: list[dict[str, Any]] = []
+
+        def add(id: str, title: str, group: str, subtitle: str = "", art: Optional[list[str]] = None) -> None:
+            tabs.append({"id": id, "title": title, "group": group, **({"subtitle": subtitle} if subtitle else {}),
+                         **({"art": art} if art else {})})
+
+        add("home", "Home", "explore")  # its own tab, not on Browse
         if self.review:
             reviewed = [k for k in self.review if k in albums]
-            tabs.append({"id": "review", "title": "To review", "group": "yours",
-                         "subtitle": models.count(len(reviewed), "album"),
-                         "art": [self._art_id(*albums[k][0]) for k in reviewed[:4]]})
-        for tab in super().center_tabs():
-            if tab["id"] == "composers" and not composers:
-                continue
-            subtitle, art = info.get(tab["id"], ("", []))
-            tabs.append({**tab, **({"subtitle": subtitle} if subtitle else {}), **({"art": art} if art else {})})
+            add("review", "To review", "yours", models.count(len(reviewed), "album"),
+                [self._art_id(*albums[k][0]) for k in reviewed[:4]])
+        add("albums", "Albums", "yours", models.count(len(albums), "album"),
+            [self._art_id(*v[0]) for _, v in recent[:4]])
+        add("artists", "Artists", "yours", models.count(len(artists), "artist"),
+            [a for a in (self._artist_art_id(k) for k in artists) if a][:4])
+        # other covers than Albums' where there are enough
+        add("songs", "Songs", "yours", models.count(len(self.tracks), "song"),
+            [self._art_id(*v[0]) for _, v in (recent[4:8] if len(recent) >= 8 else recent[1:2] or recent[:1])])
+        if self.playlists:
+            listed = [(tid, self.tracks[tid]) for pl in self.playlists.values() for tid in pl["tracks"]
+                      if tid in self.tracks]
+            add("playlists", "Playlists", "yours", models.count(len(self.playlists), "playlist"), covers(listed))
+        favourites = [(tid, self.tracks[tid]) for tid in self.favourites if tid in self.tracks]
+        if favourites:
+            add("favourites", "Favourites", "yours", models.count(len(favourites), "song"), covers(favourites))
+        if composers:
+            add("composers", "Composers", "yours", models.count(len(composers), "composer"))
+
+        # what's been listened to: no counts, which the next play would put out of date
+        played = sorted((tid for tid in self.plays if tid in self.tracks),
+                        key=lambda tid: self.plays[tid].get("last", 0), reverse=True)
+        if played:
+            add("recentplayed", "Recently played", "listening", "What you've played lately",
+                covers([(tid, self.tracks[tid]) for tid in played], 1))
+            often = sorted((tid for tid in played if self.plays[tid].get("count", 0) > 1),
+                           key=lambda tid: -self.plays[tid]["count"])
+            if often:
+                add("mostplayed", "Most played", "listening", "Played more than once",
+                    covers([(tid, self.tracks[tid]) for tid in often], 1))
+            unplayed = [v for v in albums.values() if not any(tid in self.plays for tid, _ in v)]
+            if unplayed:
+                unplayed.sort(key=lambda v: max(t.get("added", t["mtime"]) for _, t in v), reverse=True)
+                add("unplayed", "Not played yet", "listening", "Albums you haven't played",
+                    [self._art_id(*unplayed[0][0])])
+        rated = [(tid, t) for tid, t in self.tracks.items() if t.get("rating", 0) >= 4]
+        if rated:
+            add("toprated", "Top rated", "listening", "Four stars and up", covers(rated, 1))
+
+        if genres:
+            add("genres", "Genres", "explore", models.count(len(genres), "genre"))
+        if decades:
+            add("years", "Years", "explore", models.count(len(decades), "decade"))
+        # the biggest genres (of more than a song), straight in, each with a cover the others haven't used
+        if len(genres) > 1:
+            used: set[str] = set()
+            for name, items in sorted(genres.values(), key=lambda e: -len(e[1]))[:GENRE_TILES]:
+                if len(items) < 2:
+                    break
+                art = covers(items, len(items))
+                pick = next((a for a in art if a not in used), art[:1][0] if art else None)
+                if pick:
+                    used.add(pick)
+                add(f"genre:{name}", name, "genres", models.count(len(items), "song"), [pick] if pick else None)
+
+        size = sum(t.get("size", 0) for t in self.tracks.values())
+        folders = models.count(len(self._open_folder("")["collections"]), "folder")
+        add("folders", "Folders", "files", f"{folders} · {_size(size)}" if size else folders)
         return tabs
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
@@ -945,6 +1013,27 @@ class LocalService(MusicService):
             return [models.notice("MusicBrainz may know these new albums. Y on one, then Look up on MusicBrainz, "
                                   "shows what it would change before anything is written."),
                     models.section("To review", self._album_collections([(k, albums[k]) for k in keys]), display="grid")]
+        if tab_id == "songs":
+            return [models.section("Songs", [], self._open_list("tracks")["tracks"], display="grid")]
+        if tab_id == "playlists":
+            return [models.section("Playlists", [
+                models.collection(pid, "playlist", pl["title"], models.count(len(pl["tracks"]), "track"))
+                for pid, pl in sorted(self.playlists.items(), key=lambda kv: kv[1]["title"].lower())],
+                display="grid")]
+        if tab_id in ("favourites", "recentplayed", "mostplayed", "toprated"):
+            page = self._open_list(tab_id)
+            return [models.section(page["title"], [], page["tracks"], display="grid")] if page["tracks"] \
+                else [models.notice("Nothing here yet")]
+        if tab_id == "unplayed":
+            unplayed = [(k, v) for k, v in self._albums().items() if not any(tid in self.plays for tid, _ in v)]
+            unplayed.sort(key=lambda kv: max(t.get("added", t["mtime"]) for _, t in kv[1]), reverse=True)
+            return [models.section("Not played yet", self._album_collections(unplayed), display="grid")] if unplayed \
+                else [models.notice("Every album has been played")]
+        if tab_id.startswith("genre:"):
+            # a genre's albums, then its songs
+            page = self._open_list(tab_id)
+            return ([models.section("Albums", page["collections"], display="grid")] if page["collections"] else []) \
+                + [models.section("Songs", [], page["tracks"], display="grid")]
         if tab_id in ("albums", "artists", "composers"):
             page = self._open_list(tab_id)
             return [models.section(page["title"], page["collections"], display="grid")]
@@ -1656,6 +1745,7 @@ class LocalService(MusicService):
             self.favourites.add(track_id)
         else:
             self.favourites.discard(track_id)
+        self._browse_cache = None
         tmp = self.favourites_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(sorted(self.favourites), f)
@@ -1668,6 +1758,7 @@ class LocalService(MusicService):
             return
         played = self.plays.get(track_id) or {}
         self.plays[track_id] = {"count": played.get("count", 0) + 1, "last": time.time()}
+        self._browse_cache = None
         tmp = self.plays_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.plays, f)

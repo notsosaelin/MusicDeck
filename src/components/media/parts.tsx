@@ -212,6 +212,8 @@ export const GroupTitle: FC<{ children: ReactNode }> = ({ children }) => (
 
 /** Cards a grid shows at first, and adds each time the controller nears its end */
 const GRID_STEP = 40;
+/** Tracks a list shows at first, and adds as the controller nears its end */
+const LIST_STEP = 150;
 
 /**
  * Every card of a long list (all albums, all artists), wrapping down the page. Made a step at a time as
@@ -265,9 +267,10 @@ export const TrackTable: FC<{
   limit?: number;
 }> = ({ instanceId, tracks, onPlay, onSecondary, secondaryLabel, onOptions, numbered, showAlbum = true, limit }) => {
   const [expanded, setExpanded] = useState(false);
+  const [made, setMade] = useState(LIST_STEP);
   const { queue, index } = useStore(player.state);
   const current = queue[index];
-  const shown = limit && !expanded ? tracks.slice(0, limit) : tracks;
+  const shown = limit && !expanded ? tracks.slice(0, limit) : tracks.slice(0, made);
   return (
     <Focusable className="mc-list" flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {shown.map((t, i) => (
@@ -294,6 +297,9 @@ export const TrackTable: FC<{
         >
           {expanded ? "Show less" : `Show all ${tracks.length}`}
         </Focusable>
+      )}
+      {shown.length < tracks.length && (!limit || expanded) && (
+        <WhenNear key={made} then={() => setMade(made + LIST_STEP)} />
       )}
     </Focusable>
   );
@@ -832,7 +838,7 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
     return rowTop(from);
   };
 
-  // what's only partly in view at the bottom, with everything after it, hidden
+  // what's only partly in view at the bottom, with everything after it, hidden; and what's partly under the tabs
   let hidden: HTMLElement[] = [];
   const conceal = (scroller: HTMLElement | null, at?: number) => {
     if (!scroller || !container.isConnected) return;
@@ -843,8 +849,20 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
     const tops = units.map((u) => u.getBoundingClientRect().top + offset);
     const now = focused();
     let cut = Infinity;
+    // and what's half under the tab bar at the top (the end of a page, scrolled as far as it goes)
+    const underBar = new Set<HTMLElement>();
     units.forEach((u, i) => {
-      if (u.matches(".mc-title")) return;
+      const foot = u.getBoundingClientRect().bottom + offset;
+      if (tops[i] < top - 0.5 && foot > top + 0.5 && !u.contains(now)) underBar.add(u);
+      if (u.matches(".mc-title")) {
+        // a heading at the bottom without its grid's or list's first line whole under it goes too
+        const next = u.nextElementSibling;
+        const first = next?.matches(".mc-grid, .mc-list") ? next.firstElementChild : null;
+        const end = (first ?? u).getBoundingClientRect().bottom + offset;
+        if (tops[i] >= top && tops[i] < bottom && end > bottom && end - tops[i] <= bottom - top)
+          cut = Math.min(cut, tops[i]);
+        return;
+      }
       const box = u.getBoundingClientRect();
       const end = box.bottom + offset;
       // only something that starts in view and could show whole: one taller than the view never is
@@ -859,7 +877,7 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own =
         first && heading?.matches(".mc-title") ? heading.getBoundingClientRect().top + offset : tops[i],
       );
     });
-    const hide = units.filter((u, i) => tops[i] >= cut - 0.5 && !u.contains(now));
+    const hide = units.filter((u, i) => (tops[i] >= cut - 0.5 || underBar.has(u)) && !u.contains(now));
     for (const u of hidden) if (!hide.includes(u)) u.classList.remove("mc-below");
     for (const u of hide) u.classList.add("mc-below");
     hidden = hide;
