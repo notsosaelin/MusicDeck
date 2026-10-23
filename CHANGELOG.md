@@ -3,6 +3,14 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.10.3
+
+- The media center's pages end on whole rows: a row only partly in view at the bottom (a grid's covers,
+  a shelf, a track) stays hidden until the page moves to it, so nothing shows cut in half.
+- Every page scrolls the same way: track lists, search results, recent searches, and the queue and
+  related lists beside Now Playing glide by whole lines like the grids and shelves, instead of Steam's
+  jumpier scrolling.
+
 ## 0.10.2
 
 - Grids in the media center move by whole rows: the top of the page always starts on a row, never half a

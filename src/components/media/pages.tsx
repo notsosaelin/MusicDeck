@@ -814,7 +814,11 @@ const RecentSearches: FC<{ instanceId: string; onSearch: (q: string) => void }> 
   return (
     <>
       <SectionTitle>Recent searches</SectionTitle>
-      <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 720 }}>
+      <Focusable
+        className="mc-list"
+        flow-children="column"
+        style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 720 }}
+      >
         {searches.map((q) => (
           <Focusable
             key={q}
@@ -851,7 +855,12 @@ export const QueueList: FC = () => {
   if (!upcoming.length) return <Notice>Nothing after this track</Notice>;
   return (
     <>
-      <Focusable ref={list} flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Focusable
+        ref={list}
+        className="mc-list"
+        flow-children="column"
+        style={{ display: "flex", flexDirection: "column", gap: 2 }}
+      >
         {upcoming.map(({ i, item }, row) => (
           <TrackLine
             key={`${i}:${item.track.id}`}

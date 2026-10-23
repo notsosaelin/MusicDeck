@@ -474,6 +474,8 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   const room = useFitBelow(page);
   const area = useRef<HTMLDivElement>(null);
   const height = useHeight(area);
+  // the queue, a station's neighbours: scrolled by whole lines, as the browsing tabs are
+  useEffect(() => snapRows(area.current, { under: 0, own: true }), [!!item]);
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const subtitle = item ? [item.track.artist, item.track.album].filter(Boolean).join(" · ") : "";
   // a book's chapters come as its "lyrics"

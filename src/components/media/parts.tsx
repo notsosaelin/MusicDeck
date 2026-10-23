@@ -26,6 +26,8 @@ export const CENTER_CSS =
 .mc-center [class*="TabContentsScroll"] { scroll-padding-top: 104px; scroll-padding-bottom: 12px; }
 .mc-card, .mc-tile { scroll-margin-top: 46px; scroll-margin-bottom: 10px; scroll-margin-left: 2.8vw; scroll-margin-right: 2.8vw; }
 .mc-row { scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
+/* cut off at the bottom of the view: hidden until the page moves to it (snapRows) */
+.mc-below { opacity: 0 !important; transition: opacity 0.15s; }
 /* pills (Lyrics | Queue, a speed) light up as Steam's own do, without a frame; the chosen one stays white */
 .mc-pill { outline: none; transition: background 0.12s; }
 .mc-pill.gpfocus:not(.mc-on), .mc-pill:hover:not(.mc-on) { background: rgba(255, 255, 255, 0.24) !important; }
@@ -186,7 +188,7 @@ export const Shelf: FC<{ title?: string; children: ReactNode }> = ({ title, chil
 );
 
 export const SectionTitle: FC<{ children: ReactNode; right?: ReactNode }> = ({ children, right }) => (
-  <div style={{ display: "flex", alignItems: "baseline", gap: 16, margin: "0 0 12px" }}>
+  <div className="mc-title" style={{ display: "flex", alignItems: "baseline", gap: 16, margin: "0 0 12px" }}>
     <div style={{ fontSize: 18, fontWeight: 700, color: "#ffffff" }}>{children}</div>
     {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
   </div>
@@ -267,7 +269,7 @@ export const TrackTable: FC<{
   const current = queue[index];
   const shown = limit && !expanded ? tracks.slice(0, limit) : tracks;
   return (
-    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <Focusable className="mc-list" flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {shown.map((t, i) => (
         <TrackLine
           key={t.id + i}
@@ -751,20 +753,29 @@ const TAB_BAR = 58;
 /** How long the page takes to glide to a row */
 const GLIDE_MS = 200;
 
+/** What a page is made of, to the scrolling: rows of cards, a grid's cards, a list's lines */
+const UNITS = ".mc-row-block, .mc-grid > *, .mc-list > *";
+
 /**
- * Rows of cards scroll as on Steam's home page: entering a row glides it, title and all, to just
- * under the tab bar, and it stays there. The media center does this scrolling itself rather than
- * share it with Steam's, as two scrolls at once stutter and leave rows half under the bar:
+ * Every page of the media center scrolls the same way, as on Steam's home page, by whole rows:
+ * - Entering a row of cards glides it, title and all, to just under the tab bar, and it stays there.
+ * - In a grid of cards or a list of tracks, the page moves as little as shows the focused line
+ *   whole, always by whole lines: the top of the view on a line's top, never half a line under the tabs.
+ * - What's only partly in view at the bottom fades out, so the page ends on whole rows; it shows as the
+ *   page moves to it.
+ * The media center does this scrolling itself rather than share it with Steam's, as two scrolls at
+ * once stutter and leave rows half under the bar:
  * - Steam scrolls a focused card into view (to the nearest edge, which when moving up lands the row
- *   half under the bar); for cards in rows that's cut down to scrolling along the row.
+ *   half under the bar); for cards in rows that's cut down to scrolling along the row, elsewhere to nothing.
  * - Steam's scroll area notes its position every 250ms and puts it back when the note differs from
  *   the latest one, which in the middle of a scroll is a stale spot: the page jumps back and stays
  *   there. That's turned off while the controller is in the page (its job is coming back to a tab).
  * - Rows that finish loading above change where a row is: the glide aims anew each frame, and a
  *   change after it ends glides the row back.
- * Lists of tracks keep Steam's scrolling. Returns the cleanup.
+ * `under` is how much of the area's top is covered (Steam's tab bar); `own` when the container is the
+ * scrolling area itself. Returns the cleanup.
  */
-export function snapRows(container: HTMLElement | null): () => void {
+export function snapRows(container: HTMLElement | null, { under = TAB_BAR, own = false } = {}): () => void {
   if (!container) return () => {};
   const win = (container.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
   const focused = () => container.ownerDocument.activeElement as HTMLElement | null;
@@ -772,6 +783,7 @@ export function snapRows(container: HTMLElement | null): () => void {
     const el = focused();
     return container.contains(el) ? (el?.closest(".mc-row-block") as HTMLElement | null) : null;
   };
+  const area = own ? container : scrollParent(container);
   let glide: {
     scroller: HTMLElement;
     block: HTMLElement;
@@ -784,46 +796,88 @@ export function snapRows(container: HTMLElement | null): () => void {
   } | null = null;
 
   /**
-   * Where the page scrolls to for a block: a row's top under the tabs; a grid's item (`nearest`) as
-   * little as shows it whole (up under the tabs, or down to the bottom edge), and not at all when it shows.
+   * Where the page scrolls to for a block: a row's top under the tabs; a grid's or list's line
+   * (`nearest`) as little as shows it whole (up under the tabs, or down to the bottom edge), and not at
+   * all when it shows.
    */
   const target = (scroller: HTMLElement, block: HTMLElement, nearest = false) => {
     const view = scroller.getBoundingClientRect();
     const box = block.getBoundingClientRect();
     const top = scroller.scrollTop + box.top - view.top;
     const max = scroller.scrollHeight - scroller.clientHeight;
-    if (!nearest) return Math.max(0, Math.min(top - TAB_BAR - 8, max));
-    // a grid moves by whole rows: the top of the view always on a row's top, never half a row under the tabs
-    const room = scroller.clientHeight - TAB_BAR - 8 - 24;
-    const grid = block.closest(".mc-grid");
-    const rows = grid
+    if (!nearest) return Math.max(0, Math.min(top - under - 8, max));
+    const room = scroller.clientHeight - under - 8 - 24;
+    const line = block.parentElement?.closest(".mc-grid, .mc-list");
+    const rows = line
       ? [
           ...new Set(
-            [...grid.children].map((c) => Math.round(scroller.scrollTop + c.getBoundingClientRect().top - view.top)),
+            [...line.children].map((c) => Math.round(scroller.scrollTop + c.getBoundingClientRect().top - view.top)),
           ),
         ].sort((x, y) => x - y)
       : [top];
-    const rowTop = (y: number) => Math.max(0, Math.min(y - TAB_BAR - 8, max));
-    // the first row: the grid's heading in view with it
-    const heading = grid?.previousElementSibling?.getBoundingClientRect();
-    const first = rows[0] === Math.round(top) && heading ? scroller.scrollTop + heading.top - view.top : null;
-    const showing = scroller.scrollTop + TAB_BAR + 8;
-    if (top < showing) return rowTop(first ?? top); // above: its row right under the tabs
+    const rowTop = (y: number) => Math.max(0, Math.min(y - under - 8, max));
+    // the first line: its heading in view with it
+    const heading = line?.previousElementSibling;
+    const first =
+      rows[0] === Math.round(top) && heading?.matches(".mc-title")
+        ? scroller.scrollTop + heading.getBoundingClientRect().top - view.top
+        : null;
+    const showing = scroller.scrollTop + under + 8;
+    if (top < showing) return rowTop(first ?? top); // above: its line right under the tabs
     if (top + box.height <= scroller.scrollTop + scroller.clientHeight - 24) return scroller.scrollTop; // in view
-    // below: the first row from which it fits
-    const from = rows.find((r) => r <= top && top + box.height - r <= room) ?? top;
+    // below: the first line from which it fits
+    // (the first line with its heading when they fit together)
+    const from =
+      [...(first !== null ? [first] : []), ...rows].find((r) => r <= top && top + box.height - r <= room) ?? top;
     return rowTop(from);
   };
+
+  // what's only partly in view at the bottom, with everything after it, hidden
+  let hidden: HTMLElement[] = [];
+  const conceal = (scroller: HTMLElement | null, at?: number) => {
+    if (!scroller || !container.isConnected) return;
+    const offset = scroller.scrollTop - scroller.getBoundingClientRect().top; // a box's top, in the page
+    const top = (at ?? scroller.scrollTop) + under;
+    const bottom = (at ?? scroller.scrollTop) + scroller.clientHeight;
+    const units = [...container.querySelectorAll<HTMLElement>(`${UNITS}, .mc-title`)];
+    const tops = units.map((u) => u.getBoundingClientRect().top + offset);
+    const now = focused();
+    let cut = Infinity;
+    units.forEach((u, i) => {
+      if (u.matches(".mc-title")) return;
+      const box = u.getBoundingClientRect();
+      const end = box.bottom + offset;
+      // only something that starts in view and could show whole: one taller than the view never is
+      if (!box.height || tops[i] < top || tops[i] >= bottom || end <= bottom || box.height > bottom - top) return;
+      if (u.contains(now)) return;
+      // a grid's or list's first line goes with its heading
+      const line = u.parentElement;
+      const heading = line?.matches(".mc-grid, .mc-list") ? line.previousElementSibling : null;
+      const first = Math.abs((line?.firstElementChild?.getBoundingClientRect().top ?? NaN) - box.top) < 1;
+      cut = Math.min(
+        cut,
+        first && heading?.matches(".mc-title") ? heading.getBoundingClientRect().top + offset : tops[i],
+      );
+    });
+    const hide = units.filter((u, i) => tops[i] >= cut - 0.5 && !u.contains(now));
+    for (const u of hidden) if (!hide.includes(u)) u.classList.remove("mc-below");
+    for (const u of hide) u.classList.add("mc-below");
+    hidden = hide;
+  };
+
   const step = (now: number) => {
     if (!glide) return;
     glide.start ??= now;
     const t = Math.min(1, (now - glide.start) / GLIDE_MS);
     const eased = 1 - Math.pow(1 - t, 3);
-    // a row's top is looked up each frame (rows can move as covers load); a grid item's end point is fixed
+    // a row's top is looked up each frame (rows can move as covers load); a line's end point is fixed
     const to = glide.nearest ? glide.to : target(glide.scroller, glide.block);
     glide.scroller.scrollTop = glide.from + (to - glide.from) * eased;
     if (t < 1) glide.frame = win.requestAnimationFrame(step);
-    else glide = null;
+    else {
+      conceal(glide.scroller);
+      glide = null;
+    }
   };
   const glideTo = (block: HTMLElement, nearest = false) => {
     const scroller = scrollParent(block);
@@ -831,9 +885,11 @@ export function snapRows(container: HTMLElement | null): () => void {
     ownScrolling(scroller);
     if (glide) win.cancelAnimationFrame(glide.frame);
     glide = null;
-    // where it ends is worked out once, from where things are now: an item's target doesn't move as the
+    // where it ends is worked out once, from where things are now: a line's target doesn't move as the
     // page does, so the glide eases straight there
     const to = target(scroller, block, nearest);
+    // what will be cut off where it stops goes now; what comes into view shows as it slides in
+    conceal(scroller, to);
     if (Math.abs(to - scroller.scrollTop) < 1) return;
     glide = { scroller, block, nearest, to, from: scroller.scrollTop, frame: win.requestAnimationFrame(step) };
   };
@@ -851,14 +907,17 @@ export function snapRows(container: HTMLElement | null): () => void {
     const el = e.target as HTMLElement & { mcAlong?: boolean };
     const block = el?.closest?.(".mc-row-block") as HTMLElement | null;
     if (!block) {
-      // an item in a grid: this page scrolls to it, smoothly, not Steam (whose own scrolling judders)
-      const grid = el?.closest?.(".mc-grid");
-      if (!grid || !container.contains(grid)) return;
+      // a card in a grid, a line of a list: this page scrolls to it, smoothly, not Steam (whose own
+      // scrolling judders)
+      const line = el?.closest?.(".mc-grid, .mc-list");
+      if (!line || !container.contains(line)) return;
+      let unit: HTMLElement = el;
+      while (unit.parentElement && unit.parentElement !== line) unit = unit.parentElement;
       if (!el.mcAlong) {
         el.mcAlong = true;
         el.scrollIntoView = () => {};
       }
-      glideTo(el, true);
+      glideTo(unit, true);
       return;
     }
     if (!el.mcAlong) {
@@ -868,18 +927,37 @@ export function snapRows(container: HTMLElement | null): () => void {
     }
     glideTo(block);
   };
+  // scrolled some other way (Steam bringing a button into view, a touch): what's cut off, anew
+  let pending = 0;
+  const onScroll = () => {
+    if (glide || pending) return;
+    pending = win.requestAnimationFrame(() => {
+      pending = 0;
+      if (!glide) conceal(area);
+    });
+  };
   const Observer: typeof ResizeObserver = (win as any).ResizeObserver ?? ResizeObserver;
   const resized = new Observer(() => {
     const block = focusedBlock();
     if (block && !glide) glideTo(block);
+    else if (!glide) conceal(area);
   });
-  resized.observe(container);
+  // the page's own parts, as they come and go (a tab's page, the queue in place of the lyrics)
+  const parts = () => [container, ...container.children].forEach((c) => resized.observe(c));
+  const changed = new MutationObserver(parts);
+  parts();
+  changed.observe(container, { childList: true });
   container.addEventListener("focusin", onFocus);
+  area?.addEventListener("scroll", onScroll, { passive: true });
   return () => {
     container.removeEventListener("focusin", onFocus);
+    area?.removeEventListener("scroll", onScroll);
     resized.disconnect();
+    changed.disconnect();
     if (glide) win.cancelAnimationFrame(glide.frame);
+    if (pending) win.cancelAnimationFrame(pending);
     glide = null;
+    for (const u of hidden) u.classList.remove("mc-below");
   };
 }
 
