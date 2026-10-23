@@ -3,6 +3,17 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.5.1
+
+- Covers found online were saved cut short (the top part of the picture only): the whole picture is
+  saved now. Find the artwork again for any album that got a half cover.
+- The tag editor, the MusicBrainz list and its preview open at their top with the controller on the
+  first field or entry, instead of on the buttons at the bottom.
+- The tag editor puts Track, Disc and Year on one row, so it scrolls less.
+- A MusicBrainz preview says a change shared by several tracks once ("Every track (12): Artist
+  radiohead → Radiohead"), and each entry is a stop for the d-pad, so a long preview scrolls.
+- The MusicBrainz list has only Cancel at its foot (picking a release is the action).
+
 ## 0.5.0
 
 **Local files: a library manager**

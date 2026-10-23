@@ -119,9 +119,16 @@ class MusicBrainz:
                     if resp.status != 200:
                         continue
                     ext = COVER_TYPES.get(resp.content_type)
-                    data = await resp.content.read(MAX_COVER_BYTES + 1)
-                    if ext and 0 < len(data) <= MAX_COVER_BYTES:
-                        return data, ext
+                    if not ext or (resp.content_length or 0) > MAX_COVER_BYTES:
+                        continue
+                    # the whole picture: content.read(n) hands back only what has arrived so far
+                    data = bytearray()
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        data += chunk
+                        if len(data) > MAX_COVER_BYTES:
+                            break
+                    if 0 < len(data) <= MAX_COVER_BYTES and len(data) >= (resp.content_length or 0):
+                        return bytes(data), ext
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 continue
         return None

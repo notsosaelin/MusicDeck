@@ -2,6 +2,7 @@ import { openFilePicker } from "@decky/api";
 import {
   DialogBody,
   DialogButton,
+  DialogFooter,
   DialogHeader,
   Field,
   Focusable,
@@ -15,8 +16,10 @@ import {
 import { FC, ReactNode, useEffect, useRef, useState } from "react";
 import {
   Collection,
+  Change,
   LookupChanges,
   Release,
+  TagField,
   TagInfo,
   TagKind,
   TagResult,
@@ -65,11 +68,41 @@ function reportSaved(what: string, r: TagResult) {
   else notify(what, r.changed === 1 ? "Tags saved" : `Tags saved to ${r.changed} files`);
 }
 
+/**
+ * Puts the controller on the first thing in a dialog's body once it's there: Steam would pick the
+ * footer's button, scrolled to the bottom, with the top of a long dialog out of sight.
+ */
+function useFocusFirst(ready: boolean) {
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ready) body.current?.querySelector<HTMLElement>("[tabindex]")?.focus();
+  }, [ready]);
+  return body;
+}
+
+/** A dialog's footer with only Cancel (lists where picking an entry is the action). */
+const CancelOnly: FC<{ onCancel?: () => void }> = ({ onCancel }) => (
+  <DialogFooter>
+    <DialogButton onClick={onCancel}>Cancel</DialogButton>
+  </DialogFooter>
+);
+
 const Loading: FC = () => (
   <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
     <Spinner style={{ width: 32, height: 32 }} />
   </div>
 );
+
+/** The editor's fields in rows: one each, the numbers next to each other. */
+function fieldRows(fields: TagField[]): TagField[][] {
+  const rows: TagField[][] = [];
+  for (const f of fields) {
+    const last = rows[rows.length - 1];
+    if (NUMERIC.has(f.field) && last && NUMERIC.has(last[0].field)) last.push(f);
+    else rows.push([f]);
+  }
+  return rows;
+}
 
 /** Editing a track's tags, or what an album's tracks share. Only fields changed are written. */
 const TagModal: FC<{ closeModal?: () => void; instanceId: string; kind: TagKind; id: string; title: string }> = ({
@@ -120,26 +153,37 @@ const TagModal: FC<{ closeModal?: () => void; instanceId: string; kind: TagKind;
           <>
             {kind === "album" && (
               <div style={{ fontSize: 13, opacity: 0.6, marginBottom: 8 }}>
-                Written to all {info.files} files. Fields marked Mixed stay as each file has them unless you
-                change them.
+                Written to all {info.files} files. Fields marked Mixed stay as each file has them unless you change
+                them.
               </div>
             )}
-            {info.fields.map((f) => (
-              <TextField
-                key={f.field}
-                label={f.label}
-                value={values[f.field] ?? ""}
-                placeholder={f.mixed ? "Mixed" : f.field === "genre" ? "Several separated by ;" : undefined}
-                mustBeNumeric={NUMERIC.has(f.field) || undefined}
-                onChange={(e) => setValues({ ...values, [f.field]: e.target.value })}
-              />
+            {fieldRows(info.fields).map((row, r) => (
+              // the short numbers (track, disc, year) share a row, so the dialog scrolls less
+              <Focusable key={r} flow-children="row" style={{ display: "flex", gap: 16 }}>
+                {row.map((f, i) => (
+                  <div key={f.field} style={{ flex: 1, minWidth: 0 }}>
+                    <TextField
+                      label={f.label}
+                      value={values[f.field] ?? ""}
+                      // the controller starts at the top: Steam would put it on Save, scrolled to the bottom
+                      focusOnMount={(r === 0 && i === 0) || undefined}
+                      placeholder={f.mixed ? "Mixed" : f.field === "genre" ? "Several separated by ;" : undefined}
+                      mustBeNumeric={NUMERIC.has(f.field) || undefined}
+                      onChange={(e) => setValues({ ...values, [f.field]: e.target.value })}
+                    />
+                  </div>
+                ))}
+              </Focusable>
             ))}
           </>
         )}
       </DialogBody>
       {info?.undo && (
         <div style={{ display: "flex", justifyContent: "flex-start", padding: "0 0 8px" }}>
-          <DialogButton style={{ width: "auto", minWidth: 0, padding: "0 20px" }} onClick={() => run(() => undoTags(instanceId, kind, id))}>
+          <DialogButton
+            style={{ width: "auto", minWidth: 0, padding: "0 20px" }}
+            onClick={() => run(() => undoTags(instanceId, kind, id))}
+          >
             Undo last edit
           </DialogButton>
         </div>
@@ -159,13 +203,7 @@ export const editTags = (instanceId: string, kind: TagKind, id: string, title: s
 
 /** One line of a release: what tells two pressings apart. */
 const releaseLine = (r: Release, files: number) =>
-  [
-    r.artist,
-    r.year,
-    r.country,
-    r.format,
-    `${r.tracks} tracks${r.tracks !== files ? ` (yours: ${files})` : ""}`,
-  ]
+  [r.artist, r.year, r.country, r.format, `${r.tracks} tracks${r.tracks !== files ? ` (yours: ${files})` : ""}`]
     .filter(Boolean)
     .join(" · ");
 
@@ -185,34 +223,39 @@ const LookupModal: FC<{ closeModal?: () => void; instanceId: string; album: Coll
     closeModal?.();
     showModal(<PreviewModal instanceId={instanceId} album={album} release={r} files={files} />);
   };
+  const body = useFocusFirst(!!releases?.length);
   return (
     <ModalRoot closeModal={closeModal} onCancel={closeModal}>
       <DialogHeader>Look up · {album.title}</DialogHeader>
       <DialogBody>
-        {error ? (
-          <div style={{ opacity: 0.7 }}>{error}</div>
-        ) : !releases ? (
-          <Loading />
-        ) : releases.length === 0 ? (
-          <div style={{ opacity: 0.7 }}>MusicBrainz has nothing by that name. Fix the album's name or artist first.</div>
-        ) : (
-          <Focusable flow-children="column">
-            {releases.map((r) => (
-              <Field
-                key={r.id}
-                focusable
-                highlightOnFocus
-                label={r.title}
-                description={releaseLine(r, files)}
-                onActivate={() => pick(r)}
-                onClick={() => pick(r)}
-                onOKActionDescription="See changes"
-              />
-            ))}
-          </Focusable>
-        )}
+        <div ref={body}>
+          {error ? (
+            <div style={{ opacity: 0.7 }}>{error}</div>
+          ) : !releases ? (
+            <Loading />
+          ) : releases.length === 0 ? (
+            <div style={{ opacity: 0.7 }}>
+              MusicBrainz has nothing by that name. Fix the album's name or artist first.
+            </div>
+          ) : (
+            <Focusable flow-children="column">
+              {releases.map((r) => (
+                <Field
+                  key={r.id}
+                  focusable
+                  highlightOnFocus
+                  label={r.title}
+                  description={releaseLine(r, files)}
+                  onActivate={() => pick(r)}
+                  onClick={() => pick(r)}
+                  onOKActionDescription="See changes"
+                />
+              ))}
+            </Focusable>
+          )}
+        </div>
       </DialogBody>
-      <DialogActions primary="Close" onPrimary={() => closeModal?.()} onCancel={closeModal} />
+      <CancelOnly onCancel={closeModal} />
     </ModalRoot>
   );
 };
@@ -232,6 +275,35 @@ const Heading: FC<{ children: ReactNode }> = ({ children }) => (
   </div>
 );
 
+/**
+ * Track changes grouped: one the same on several tracks ("radiohead" → "Radiohead" on all 12) is said
+ * once, with how many; the rest under each file.
+ */
+function groupTrackChanges(tracks: [string, Change[]][]) {
+  const key = (c: Change) => c.join("\u0000");
+  const count = new Map<string, number>();
+  for (const [, list] of tracks) for (const c of list) count.set(key(c), (count.get(key(c)) ?? 0) + 1);
+  const shared: [Change, number][] = [];
+  const seen = new Set<string>();
+  for (const [, list] of tracks)
+    for (const c of list)
+      if ((count.get(key(c)) ?? 0) > 1 && !seen.has(key(c))) {
+        seen.add(key(c));
+        shared.push([c, count.get(key(c))!]);
+      }
+  const own = tracks
+    .map(([file, list]) => [file, list.filter((c) => (count.get(key(c)) ?? 0) === 1)] as [string, Change[]])
+    .filter(([, list]) => list.length > 0);
+  return { shared, own };
+}
+
+/** One entry of a preview: a stop for the controller, so the d-pad scrolls a long one. */
+const Entry: FC<{ children: ReactNode }> = ({ children }) => (
+  <Focusable noFocusRing onActivate={() => {}} style={{ marginBottom: 6 }}>
+    {children}
+  </Focusable>
+);
+
 /** What a release would change, before anything is written. */
 const PreviewModal: FC<{
   closeModal?: () => void;
@@ -247,6 +319,8 @@ const PreviewModal: FC<{
     lookupChanges(instanceId, album.id, release.id).then((r) => (r.ok ? setChanges(r.data) : setError(r.error)));
   }, []);
   const nothing = changes && changes.album.length === 0 && changes.tracks.length === 0;
+  const grouped = changes ? groupTrackChanges(changes.tracks) : { shared: [], own: [] };
+  const body = useFocusFirst(!!changes && !nothing);
   const apply = async () => {
     if (busy.current) return;
     busy.current = true;
@@ -266,42 +340,47 @@ const PreviewModal: FC<{
     <ModalRoot closeModal={closeModal} onCancel={closeModal}>
       <DialogHeader>{release.title}</DialogHeader>
       <DialogBody>
-        {error ? (
-          <div style={{ opacity: 0.7 }}>{error}</div>
-        ) : !changes ? (
-          <Loading />
-        ) : nothing ? (
-          <div style={{ opacity: 0.7 }}>Your files already say what this release does.</div>
-        ) : (
-          <Focusable flow-children="column" noFocusRing>
-            {changes.album.length > 0 && <Heading>Album</Heading>}
-            {changes.album.map((c, i) => (
-              <ChangeLine key={i} change={c} />
-            ))}
-            {changes.tracks.length > 0 && <Heading>Tracks</Heading>}
-            {changes.tracks.map(([file, list]) => (
-              <div key={file} style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 13, opacity: 0.5 }}>{file}</div>
-                {list.map((c, i) => (
-                  <ChangeLine key={i} change={c} />
-                ))}
-              </div>
-            ))}
-            {!changes.matched && (
-              <div style={{ fontSize: 13, opacity: 0.6, marginTop: 12 }}>
-                The release has {release.tracks} tracks and the album {files}, so only the album's details change;
-                each track stays as it is.
-              </div>
-            )}
-          </Focusable>
-        )}
+        <div ref={body}>
+          {error ? (
+            <div style={{ opacity: 0.7 }}>{error}</div>
+          ) : !changes ? (
+            <Loading />
+          ) : nothing ? (
+            <div style={{ opacity: 0.7 }}>Your files already say what this release does.</div>
+          ) : (
+            <Focusable flow-children="column">
+              {changes.album.length > 0 && <Heading>Album</Heading>}
+              {changes.album.map((c, i) => (
+                <Entry key={i}>
+                  <ChangeLine change={c} />
+                </Entry>
+              ))}
+              {changes.tracks.length > 0 && <Heading>Tracks</Heading>}
+              {grouped.shared.map(([c, n], i) => (
+                <Entry key={`shared${i}`}>
+                  <div style={{ fontSize: 13, opacity: 0.5 }}>{n === files ? `Every track (${n})` : `${n} tracks`}</div>
+                  <ChangeLine change={c} />
+                </Entry>
+              ))}
+              {grouped.own.map(([file, list]) => (
+                <Entry key={file}>
+                  <div style={{ fontSize: 13, opacity: 0.5 }}>{file}</div>
+                  {list.map((c, i) => (
+                    <ChangeLine key={i} change={c} />
+                  ))}
+                </Entry>
+              ))}
+              {!changes.matched && (
+                <div style={{ fontSize: 13, opacity: 0.6, marginTop: 12 }}>
+                  The release has {release.tracks} tracks and the album {files}, so only the album's details change;
+                  each track stays as it is.
+                </div>
+              )}
+            </Focusable>
+          )}
+        </div>
       </DialogBody>
-      <DialogActions
-        primary="Apply"
-        onPrimary={apply}
-        primaryDisabled={!changes || !!nothing}
-        onCancel={closeModal}
-      />
+      <DialogActions primary="Apply" onPrimary={apply} primaryDisabled={!changes || !!nothing} onCancel={closeModal} />
     </ModalRoot>
   );
 };
@@ -348,9 +427,7 @@ export function albumManageItems(instanceId: string, album: Collection, info: Ta
       </MenuItem>,
       <MenuItem
         key="lookup"
-        onSelected={() =>
-          showModal(<LookupModal instanceId={instanceId} album={album} files={info?.files ?? 0} />)
-        }
+        onSelected={() => showModal(<LookupModal instanceId={instanceId} album={album} files={info?.files ?? 0} />)}
       >
         Look up on MusicBrainz
       </MenuItem>,

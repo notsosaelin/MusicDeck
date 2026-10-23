@@ -295,6 +295,7 @@ async def run():
         check(renamed["album_id"] not in library.album_art and not os.listdir(library.art_dir), "and lets it go")
 
         mb_calls = []
+        big_cover = JPEG[:-2] + bytes(300_000) + JPEG[-2:]
         mb_release = {"id": "rel1", "title": "Hits 1999", "date": "2004", "artist-credit": [{"name": "Various Artists"}],
                       "release-group": {"id": "rg1", "first-release-date": "1999-03-01", "genres": [{"name": "pop", "count": 3}]},
                       "label-info": [{"label": {"name": "Hit Label"}}],
@@ -314,7 +315,14 @@ async def run():
             if request.path == "/ws/2/release/rel1":
                 return mbweb.json_response(mb_release)
             if request.path == "/release/rel1/front-500":
-                return mbweb.Response(body=JPEG, content_type="image/jpeg")
+                # big, and in pieces with pauses between, as a real download arrives
+                resp = mbweb.StreamResponse(headers={"Content-Type": "image/jpeg", "Content-Length": str(len(big_cover))})
+                await resp.prepare(request)
+                for at in range(0, len(big_cover), 50_000):
+                    await resp.write(big_cover[at:at + 50_000])
+                    await asyncio.sleep(0.01)
+                await resp.write_eof()
+                return resp
             return mbweb.Response(status=404)
         mb_app = mbweb.Application()
         mb_app.router.add_route("*", "/{path:.*}", fake_mb)
@@ -343,6 +351,8 @@ async def run():
             new_hits = applied["album_id"]
             check(applied["changed"] == 3 and applied.get("art") and new_hits in library.album_art,
                   f"applied to every file, and the missing cover found: {applied}")
+            with open(os.path.join(library.art_dir, library.album_art[new_hits]), "rb") as f:
+                check(f.read() == big_cover, "the whole cover is saved, however it arrives")
             hit_tracks = (await plugin.open_collection(lid, "album", new_hits))["data"]["tracks"]
             check([t["title"] for t in hit_tracks] == ["Hit One", "Hit 2", "Hit 3"]
                   and all(library.tracks[t["id"]]["albumartist"] == "Various Artists" for t in hit_tracks),
