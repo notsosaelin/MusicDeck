@@ -3,6 +3,10 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.8.2
+
+- On air doesn't repeat what the line under the station's name says (its place, its first genres).
+
 ## 0.8.1
 
 - Radio's **On air** keeps to what's only there: the song when the station says (and what it played

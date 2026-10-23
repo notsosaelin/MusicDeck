@@ -208,11 +208,14 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
   }, [song?.text, key]);
   const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const facts = Object.fromEntries(details?.facts ?? []);
+  // what the line under the station's name says already (its place, its first genres) isn't said again
+  const said = `${item.track.artist}, ${item.track.album}`.toLowerCase();
+  const told = (text: string) => said.includes(text.toLowerCase().split(",")[0].trim());
   const genres = (facts.Genres ?? "")
     .split(",")
     .map((g: string) => g.trim())
-    .filter(Boolean)
-    .slice(0, 5);
+    .filter((g: string) => g && !said.split(/,|·/).some((x) => x.trim() === g.toLowerCase()))
+    .slice(0, 4);
   const website: string | undefined = facts.Website;
   return (
     <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -238,7 +241,8 @@ export const OnAirPanel: FC<{ item: QueueItem; song: OnAir | null; details: Trac
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {["From", "Language", "Quality", "Today"].map(
             (k) =>
-              facts[k] && (
+              facts[k] &&
+              !(k === "From" && told(facts[k])) && (
                 <Chip key={k} icon={CHIP_ICONS[k]}>
                   {facts[k]}
                 </Chip>
