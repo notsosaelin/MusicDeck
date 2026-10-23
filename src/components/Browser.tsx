@@ -285,7 +285,14 @@ const TrackList: FC<{
           }
           artInstanceId={showArt ? instanceId : undefined}
           active={current?.instanceId === instanceId && current.track.id === t.id}
-          onPlay={() => (from ? playFrom(instanceId, from, tracks, i) : player.playList(instanceId, tracks, i))}
+          onPlay={() =>
+            // a station from a genre, a country, a search plays on its own; from a list of yours, the list
+            t.live && !playlistId
+              ? player.playList(instanceId, [t], 0)
+              : from
+                ? playFrom(instanceId, from, tracks, i)
+                : player.playList(instanceId, tracks, i)
+          }
           {...trackActions(instanceId, t, { playlistId })}
         />
       ))}
@@ -486,12 +493,17 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
       >
         {page && page.tracks.length > 0 && (
           <ButtonRow>
-            <IconButton onClick={() => playFrom(instanceId, collection, page.tracks, 0, false)}>
-              <FaPlay /> Play
-            </IconButton>
-            <IconButton onClick={() => playFrom(instanceId, collection, page.tracks, 0, true)}>
-              <FaRandom /> Shuffle
-            </IconButton>
+            {/* stations: no playing them all at once, unless it's a list of yours */}
+            {(!page.tracks.every((t) => t.live) || isLocalPlaylist(collection.id)) && (
+              <IconButton onClick={() => playFrom(instanceId, collection, page.tracks, 0, false)}>
+                <FaPlay /> Play
+              </IconButton>
+            )}
+            {!page.tracks.every((t) => t.live) && (
+              <IconButton onClick={() => playFrom(instanceId, collection, page.tracks, 0, true)}>
+                <FaRandom /> Shuffle
+              </IconButton>
+            )}
             {canSave(instanceId, collection) && (
               <IconButton label="Save playlist" grow={0.45} onClick={() => saveCollection(instanceId, collection)}>
                 <FaPlus />

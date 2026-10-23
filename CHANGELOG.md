@@ -3,6 +3,20 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.9.1
+
+**Internet radio**
+- Browsing (a genre, a country, a search) shows a grid of stations, not a playlist: A plays that station
+  on its own, Y gives its options. Pages of stations have no Play all or Shuffle.
+- **Your own lists of stations**: Y on a station → Add to playlist (or + while it plays). A list plays from
+  the station you pick, and previous and next move through it.
+- Radio controls: favourite, previous station, play or stop (live radio doesn't pause), next station, and
+  add to a list, in place of shuffle and repeat. Previous and next are greyed out for a station played
+  on its own.
+- Every station's picture fills its square: a square one edge to edge, a wide or tall logo whole on its
+  own background colour (no blur).
+- On air no longer has the LIVE / Listening for line above everything.
+
 ## 0.9.0
 
 **Soulseek** (new source, under File sharing)

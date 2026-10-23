@@ -4,7 +4,10 @@ import {
   FaHeart,
   FaPause,
   FaPlay,
+  FaPlus,
   FaRandom,
+  FaRegHeart,
+  FaStop,
   FaRedo,
   FaStepBackward,
   FaStepForward,
@@ -15,7 +18,7 @@ import {
 import { MdRepeatOne } from "react-icons/md";
 import { OnAir, onAir, setSetting } from "../api";
 import { QueueItem, hasFeature, player } from "../player";
-import { showTrackMenu, toggleStar } from "./TrackMenu";
+import { showPlaylistPicker, showTrackMenu, toggleStar } from "./TrackMenu";
 import { canCast, prepareCastMenu, showCastMenu } from "./CastMenu";
 import { useStore } from "../store";
 import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime, scrollPanelToTop } from "./common";
@@ -141,7 +144,8 @@ export const NowPlaying: FC<{ cover?: number }> = ({ cover = 76 }) => {
       </PanelSectionRow>
       {item && (item.track.live ? <LiveBar /> : <Seek />)}
       {/* nothing loaded: only the card; transport and volume would do nothing */}
-      {item && (
+      {item?.track.live && <RadioButtons />}
+      {item && !item.track.live && (
         <ButtonRow>
           <IconButton
             look="plain"
@@ -207,6 +211,55 @@ export const NowPlaying: FC<{ cover?: number }> = ({ cover = 76 }) => {
         </PanelSectionRow>
       )}
     </PanelSection>
+  );
+};
+
+/**
+ * A station's controls: favourite, the station before and after (in a list of stations; none for one
+ * played alone), play or stop (live radio doesn't pause), add to a list of stations.
+ */
+const RadioButtons: FC = () => {
+  const state = useStore(player.state);
+  const item = state.queue[state.index];
+  const at = player.playOrder.indexOf(state.index);
+  if (!item) return null;
+  return (
+    <ButtonRow>
+      <IconButton
+        look="plain"
+        label={item.track.starred ? "Unfavourite" : "Favourite"}
+        active={!!item.track.starred}
+        disabled={!hasFeature(item.instanceId, "star")}
+        onClick={() => toggleStar(item.instanceId, item.track)}
+        style={SIDE}
+      >
+        {item.track.starred ? <FaHeart /> : <FaRegHeart />}
+      </IconButton>
+      <IconButton
+        look="plain"
+        label="Previous station"
+        disabled={at <= 0}
+        onClick={() => player.previous()}
+        style={SKIP}
+      >
+        <FaStepBackward />
+      </IconButton>
+      <IconButton look="round" label={state.playing ? "Stop" : "Play"} onClick={() => player.toggle()} style={PLAY}>
+        {state.playing ? <FaStop /> : <FaPlay style={{ marginLeft: 3 }} />}
+      </IconButton>
+      <IconButton
+        look="plain"
+        label="Next station"
+        disabled={at < 0 || at >= player.playOrder.length - 1}
+        onClick={() => player.next()}
+        style={SKIP}
+      >
+        <FaStepForward />
+      </IconButton>
+      <IconButton look="plain" label="Add to a list" onClick={() => showPlaylistPicker(item, window)} style={SIDE}>
+        <FaPlus />
+      </IconButton>
+    </ButtonRow>
   );
 };
 

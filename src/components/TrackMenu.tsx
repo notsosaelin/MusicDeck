@@ -69,7 +69,7 @@ function newPlaylist(item: Item, server: boolean) {
  * Sources with server-side playlists (Navidrome) add there; everything else uses MusicDeck's own
  * playlists, kept on the device.
  */
-async function showPlaylistPicker(item: Item, parent: EventTarget) {
+export async function showPlaylistPicker(item: Item, parent: EventTarget) {
   const server = hasFeature(item.instanceId, "playlists");
   let playlists: Collection[];
   if (server) {

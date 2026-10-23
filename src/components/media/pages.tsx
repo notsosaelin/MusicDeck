@@ -71,6 +71,8 @@ import {
   Notice,
   PageButton,
   SectionTitle,
+  StationCard,
+  allStations,
   Shelf,
   Tile,
   TileGrid,
@@ -420,15 +422,26 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     return (
       <Shelf title={s.title}>
         {s.items.map((c) => collectionCard(instanceId, stack, c))}
-        {tracks.map((t, i) => (
-          <TrackCard
-            key={t.id + i}
-            instanceId={instanceId}
-            track={t}
-            onPlay={() => player.playList(instanceId, tracks, i)}
-            onSecondary={() => addToQueue(instanceId, t)}
-          />
-        ))}
+        {tracks.map((t, i) =>
+          t.live ? (
+            // a station plays on its own: a shelf of them isn't a playlist
+            <StationCard
+              key={t.id + i}
+              instanceId={instanceId}
+              track={t}
+              onPlay={() => player.playList(instanceId, [t], 0)}
+              onOptions={(e) => showTrackMenu(instanceId, t, e?.currentTarget)}
+            />
+          ) : (
+            <TrackCard
+              key={t.id + i}
+              instanceId={instanceId}
+              track={t}
+              onPlay={() => player.playList(instanceId, tracks, i)}
+              onSecondary={() => addToQueue(instanceId, t)}
+            />
+          ),
+        )}
       </Shelf>
     );
   if (s.display === "grid")
@@ -542,6 +555,38 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
   const shelves = page.collections.length > 0 && (
     <Shelves instanceId={instanceId} stack={stack} items={page.collections} titled />
   );
+  if (allStations(page.tracks)) {
+    // stations: a grid of them, each played on its own, but in a list of your own stations from there on
+    // (the previous and next stations are the list's)
+    const ownList = !!playlistId;
+    return (
+      <>
+        {shelves}
+        {mixed && <SectionTitle>Stations</SectionTitle>}
+        <Focusable
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(clamp(120px, 13vw, 180px), 1fr))",
+            gap: 18,
+            marginBottom: 28,
+          }}
+        >
+          {page.tracks.map((t, i) => (
+            <StationCard
+              key={t.id + i}
+              instanceId={instanceId}
+              track={t}
+              width="100%"
+              onPlay={() =>
+                ownList && from ? playFrom(instanceId, from, page.tracks, i) : player.playList(instanceId, [t], 0)
+              }
+              onOptions={(e) => showTrackMenu(instanceId, t, e?.currentTarget, { playlistId })}
+            />
+          ))}
+        </Focusable>
+      </>
+    );
+  }
   const tracks = (
     <>
       {page.tracks.length > 0 && (
@@ -607,12 +652,15 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
   const total = page?.tracks.reduce((sum, t) => sum + (t.duration || 0), 0) ?? 0;
   const byline = albumArtist ?? page?.subtitle ?? collection.subtitle;
   // the source's own line may already count them ("114 tracks")
+  const stations = !!page && allStations(page.tracks);
   const facts =
-    page?.tracks.length && !/\b(tracks?|songs?|episodes?)\b/i.test(byline)
-      ? [
-          `${page.tracks.length} ${page.tracks.length === 1 ? "song" : "songs"}`,
-          total ? `${Math.round(total / 60)} min` : "",
-        ]
+    page?.tracks.length && !/\b(tracks?|songs?|episodes?|stations?)\b/i.test(byline)
+      ? stations
+        ? [`${page.tracks.length} ${page.tracks.length === 1 ? "station" : "stations"}`]
+        : [
+            `${page.tracks.length} ${page.tracks.length === 1 ? "song" : "songs"}`,
+            total ? `${Math.round(total / 60)} min` : "",
+          ]
       : [];
 
   return (
@@ -635,7 +683,7 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
           </div>
           <div style={{ fontSize: 16, opacity: 0.75 }}>{[byline, ...facts].filter(Boolean).join(" · ")}</div>
           <Focusable flow-children="row" style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-            {page && page.tracks.length > 0 && (
+            {page && page.tracks.length > 0 && (!stations || isLocalPlaylist(collection.id)) && (
               <>
                 <PageButton
                   primary
@@ -644,9 +692,11 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
                 >
                   <FaPlay /> Play
                 </PageButton>
-                <PageButton label="Shuffle" onClick={() => playFrom(instanceId, collection, page.tracks, 0, true)}>
-                  <FaRandom /> Shuffle
-                </PageButton>
+                {!stations && (
+                  <PageButton label="Shuffle" onClick={() => playFrom(instanceId, collection, page.tracks, 0, true)}>
+                    <FaRandom /> Shuffle
+                  </PageButton>
+                )}
               </>
             )}
             {canSave(instanceId, collection) && page && page.tracks.length > 0 && (

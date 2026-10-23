@@ -72,7 +72,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   each Bluetooth device or TV, switched as you change output), volume levelling from ReplayGain data,
   gapless playback, an optional crossfade, music played quieter or paused in games, and endless radio
   when the queue runs out.
-- **Live radio** with the song on air shown as it plays.
+- **Live radio** with the song on air shown as it plays, stations browsed as stations (each played on its
+  own), lists of your own stations to move through with previous and next, and controls made for radio
+  (favourite, previous and next station, play or stop, add to a list).
 - **ListenBrainz and Last.fm scrobbling** for every source, including plays made offline. Last.fm needs an
   API account of your own (free, at last.fm/api/account/create); you then approve MusicDeck on Last.fm's
   own page. If your Navidrome server already sends plays to Last.fm, link it in one place only, or plays

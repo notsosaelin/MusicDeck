@@ -144,15 +144,6 @@ const heard = new Store<Record<string, { text: string; at: number }[]>>({});
 const HEARD_KEPT = 30;
 
 /** The song on air now, big, and what the station played before it while it was on. */
-const formatListening = (seconds: number) => {
-  const s = Math.floor(seconds);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  return h
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
-    : `${m}:${String(s % 60).padStart(2, "0")}`;
-};
-
 const Label: FC<{ children: ReactNode }> = ({ children }) => (
   <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.5, letterSpacing: "0.06em", marginBottom: 8 }}>
     {children}
@@ -171,11 +162,9 @@ export const OnAirPanel: FC<{
   details: TrackDetails | null | undefined;
   height: number;
 }> = ({ item, song, details, height }) => {
-  const { playing } = useStore(player.state);
-  const { current } = useStore(player.position);
   const key = `${item.instanceId}:${item.track.id}`;
-  // what it played earlier: as many as fit under the rest (LIVE, the song, the station's row)
-  const room = height - 22 - (song ? 76 : 0) - 3 * 26 - 50;
+  // what it played earlier: as many as fit under the rest (the song, the station's details)
+  const room = height - (song ? 76 : 0) - 3 * 26 - 50;
   const earlier = (useStore(heard)[key] ?? [])
     .filter((h) => h.text !== song?.text)
     .slice(0, Math.max(0, Math.floor(room / 26)));
@@ -196,14 +185,6 @@ export const OnAirPanel: FC<{
   ).filter(([, value]) => value);
   return (
     <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, color: "#ff5c5c" }}>
-          {song ? "● ON AIR" : "● LIVE"}
-        </span>
-        {playing && current > 0 && (
-          <span style={{ fontSize: 14, opacity: 0.55 }}>Listening for {formatListening(current)}</span>
-        )}
-      </div>
       {song && (
         <div>
           <div style={{ fontSize: 26, fontWeight: 700, color: "#ffffff", lineHeight: 1.2 }}>

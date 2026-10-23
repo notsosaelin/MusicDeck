@@ -444,11 +444,43 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   return node;
 }
 
+/** The colour along a picture's edge (its background, for a logo), or null when it can't be read. */
+function edgeColour(img: HTMLImageElement): string | null {
+  try {
+    const canvas = img.ownerDocument.createElement("canvas");
+    canvas.width = canvas.height = 16;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, 16, 16);
+    const data = ctx.getImageData(0, 0, 16, 16).data;
+    let r = 0,
+      g = 0,
+      b = 0,
+      n = 0;
+    for (let i = 0; i < 16; i++)
+      for (const [x, y] of [
+        [i, 0],
+        [i, 15],
+        [0, i],
+        [15, i],
+      ]) {
+        const at = (y * 16 + x) * 4;
+        if (data[at + 3] < 128) continue; // see-through: the tile's own colour shows there
+        r += data[at];
+        g += data[at + 1];
+        b += data[at + 2];
+        n++;
+      }
+    return n ? `rgb(${Math.round(r / n)}, ${Math.round(g / n)}, ${Math.round(b / n)})` : null;
+  } catch {
+    return null; // a picture that can't be read back: the station's colour instead
+  }
+}
+
 /**
- * A station's picture, as big as its square: its logo whole (logos are small, often not square, often
- * on a clear background) over a blurred, darkened copy of itself that fills the square; `full` for a
- * song's cover, which fills it outright. No picture (or a broken link): the station's initials on a
- * colour of its own.
+ * A station's picture, filling its square: a square one edge to edge; a wide or tall logo whole, on the
+ * colour of its own edge (its background), so it reads as filling too. A song's cover (`full`) fills.
+ * No picture (or a broken link): the station's initials on a colour of its own.
  */
 export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?: CSSProperties }> = ({
   url,
@@ -457,7 +489,11 @@ export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?
   style,
 }) => {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
+  const [fit, setFit] = useState<{ square: boolean; edge: string | null } | null>(null);
+  useEffect(() => {
+    setFailed(false);
+    setFit(null);
+  }, [url]);
   const shown = url && !failed;
   const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
   const initials = name
@@ -466,44 +502,38 @@ export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join("");
-  const fill: CSSProperties = { position: "absolute", width: "100%", height: "100%", objectFit: "cover" };
+  const whole = !full && fit && !fit.square;
   return (
     <div
       style={{
         position: "relative",
         overflow: "hidden",
         containerType: "size",
-        background: `linear-gradient(135deg, hsl(${hue} 45% 34%), hsl(${(hue + 50) % 360} 50% 16%))`,
+        background:
+          whole && fit.edge
+            ? fit.edge
+            : `linear-gradient(135deg, hsl(${hue} 45% 34%), hsl(${(hue + 50) % 360} 50% 16%))`,
         ...style,
       }}
     >
-      {shown && full && <img src={url} onError={() => setFailed(true)} style={fill} />}
-      {shown && !full && (
-        <>
-          <img
-            src={url}
-            aria-hidden
-            style={{
-              ...fill,
-              inset: "-15%",
-              width: "130%",
-              height: "130%",
-              filter: "blur(26px) brightness(0.5) saturate(1.4)",
-            }}
-          />
-          <img
-            src={url}
-            onError={() => setFailed(true)}
-            style={{
-              position: "absolute",
-              inset: "13%",
-              width: "74%",
-              height: "74%",
-              objectFit: "contain",
-              filter: "drop-shadow(0 8px 22px rgba(0, 0, 0, 0.55))",
-            }}
-          />
-        </>
+      {shown && (
+        <img
+          src={url}
+          crossOrigin="anonymous"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            const ratio = img.naturalWidth / Math.max(img.naturalHeight, 1);
+            setFit({ square: ratio > 0.8 && ratio < 1.25, edge: edgeColour(img) });
+          }}
+          onError={() => setFailed(true)}
+          style={{
+            position: "absolute",
+            inset: whole ? "6%" : 0,
+            width: whole ? "88%" : "100%",
+            height: whole ? "88%" : "100%",
+            objectFit: whole ? "contain" : "cover",
+          }}
+        />
       )}
       {!shown && (
         <div
@@ -586,6 +616,47 @@ export const TileGrid: FC<{ children: ReactNode }> = ({ children }) => (
     {children}
   </Focusable>
 );
+
+/** Live stations, not tracks: a page or shelf of them is shown as stations, played one at a time. */
+export const allStations = (tracks: Track[]) => tracks.length > 0 && tracks.every((t) => t.live);
+
+/** A station on a shelf or in a grid: its picture filling the square, its name, where it is. A plays it. */
+export const StationCard: FC<{
+  instanceId: string;
+  track: Track;
+  onPlay: () => void;
+  onOptions?: (e: any) => void;
+  width?: number | string;
+}> = ({ instanceId, track, onPlay, onOptions, width }) => {
+  const [focused, setFocused] = useState(false);
+  const size = useCardSize();
+  return (
+    <Focusable
+      className="mc-card"
+      noFocusRing
+      onActivate={onPlay}
+      onClick={onPlay}
+      onOKActionDescription="Play"
+      onOptionsButton={onOptions}
+      onOptionsActionDescription={onOptions ? "Options" : undefined}
+      onGamepadFocus={() => setFocused(true)}
+      onGamepadBlur={() => setFocused(false)}
+      style={{ width: width ?? size, flexShrink: 0, padding: 2 }}
+    >
+      <StationArt
+        url={track.art ? mediaUrl("art", instanceId, track.art) : undefined}
+        name={track.title}
+        style={{ width: "100%", aspectRatio: "1", borderRadius: 6 }}
+      />
+      <div style={{ marginTop: 10 }}>
+        <ScrollingText text={track.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
+        {track.artist && (
+          <ScrollingText text={track.artist} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
+        )}
+      </div>
+    </Focusable>
+  );
+};
 
 /** A track on a shelf (a station, a song): its cover, title and artist. A plays it, X queues it. */
 export const TrackCard: FC<{

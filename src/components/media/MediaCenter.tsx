@@ -1,10 +1,14 @@
 import { DropdownItem, Focusable, SliderField, Tabs } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
+  FaHeart,
   FaMoon,
   FaPause,
   FaPlay,
+  FaPlus,
   FaRandom,
+  FaRegHeart,
+  FaStop,
   FaRedo,
   FaStepBackward,
   FaStepForward,
@@ -15,7 +19,8 @@ import {
 import { MdForward30, MdRepeatOne, MdReplay10 } from "react-icons/md";
 import { CenterSettings, CenterTabInfo, NowPlayingKind, ServiceInfo, setSetting } from "../../api";
 import { CenterTab, centerTab, leaveMediaCenter } from "../../nav";
-import { player } from "../../player";
+import { hasFeature, player } from "../../player";
+import { showPlaylistPicker, toggleStar } from "../TrackMenu";
 import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
 import { Equalizer } from "../Equalizer";
@@ -201,6 +206,7 @@ const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean; kind?: Now
   const skip = { height: big ? 48 : 40, fontSize: big ? 20 : 17 };
   // talk skips back and ahead where music shuffles and repeats, with buttons just like them
   const talk = isTalk(kind);
+  if (kind === "radio") return <RadioTransport big={big} focusPlay={focusPlay} />;
   return (
     <Focusable
       flow-children="row"
@@ -251,6 +257,74 @@ const Transport: FC<{ size?: "large" | "normal"; focusPlay?: boolean; kind?: Now
           {state.repeat === "one" ? <MdRepeatOne /> : <FaRedo />}
         </IconButton>
       )}
+    </Focusable>
+  );
+};
+
+/**
+ * A station's controls: favourite it, the station before and after (in a list of your stations; one
+ * played on its own has none), play or stop (live radio doesn't pause: it starts again where it is now),
+ * and add it to a list of stations.
+ */
+const RadioTransport: FC<{ big: boolean; focusPlay?: boolean }> = ({ big, focusPlay }) => {
+  const state = useStore(player.state);
+  const item = state.queue[state.index];
+  const order = player.playOrder;
+  const at = order.indexOf(state.index);
+  const side = { height: big ? 48 : 40, fontSize: big ? 17 : 15 };
+  const skip = { height: big ? 48 : 40, fontSize: big ? 20 : 17 };
+  const starrable = !!item && hasFeature(item.instanceId, "star");
+  return (
+    <Focusable
+      flow-children="row"
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: big ? 380 : 300 }}
+    >
+      <IconButton
+        look="plain"
+        label={item?.track.starred ? "Unfavourite" : "Favourite"}
+        active={!!item?.track.starred}
+        disabled={!starrable}
+        onClick={() => item && toggleStar(item.instanceId, item.track)}
+        style={side}
+      >
+        {item?.track.starred ? <FaHeart /> : <FaRegHeart />}
+      </IconButton>
+      <IconButton
+        look="plain"
+        label="Previous station"
+        disabled={at <= 0}
+        onClick={() => player.previous()}
+        style={skip}
+      >
+        <FaStepBackward />
+      </IconButton>
+      <IconButton
+        look="round"
+        preferredFocus={focusPlay}
+        label={state.playing ? "Stop" : "Play"}
+        onClick={() => player.toggle()}
+        style={{ fontSize: big ? 20 : 17 }}
+      >
+        {state.playing ? <FaStop /> : <FaPlay style={{ marginLeft: 3 }} />}
+      </IconButton>
+      <IconButton
+        look="plain"
+        label="Next station"
+        disabled={at < 0 || at >= order.length - 1}
+        onClick={() => player.next()}
+        style={skip}
+      >
+        <FaStepForward />
+      </IconButton>
+      <IconButton
+        look="plain"
+        label="Add to a list"
+        disabled={!item}
+        onClick={() => item && showPlaylistPicker(item, window)}
+        style={side}
+      >
+        <FaPlus />
+      </IconButton>
     </Focusable>
   );
 };
