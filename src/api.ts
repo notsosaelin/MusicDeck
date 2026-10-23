@@ -176,6 +176,8 @@ export interface ServiceInfo {
 export interface ServiceType {
   type: string;
   display_name: string;
+  /** where "Add a source" lists it: your files and servers, streaming services, radio and podcasts */
+  group: "yours" | "streaming" | "radio" | "other";
 }
 
 /** The media center's choices (settings.DEFAULTS["center"]) */

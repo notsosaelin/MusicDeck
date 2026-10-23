@@ -1,13 +1,14 @@
 import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, ReactNode, useEffect, useRef, useState } from "react";
-import { openMediaCenter } from "../nav";
+import { openMediaCenter, showTab } from "../nav";
 import { player } from "../player";
 import { Store, useStore } from "../store";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "./LyricsView";
 import { NowPlaying } from "./NowPlaying";
 import { Queue, confirmClearQueue } from "./Queue";
 import { Visualizer } from "./media/nowplaying";
-import { watchSize } from "./common";
+import { ButtonRow, IconButton, watchSize } from "./common";
+import { FaCompactDisc, FaMusic, FaSearch } from "react-icons/fa";
 
 /** The second page's view: the song's lyrics or what's up next; kept while the panel is closed. */
 const pageTwo = new Store<{ side: "lyrics" | "queue" }>({ side: "lyrics" });
@@ -74,7 +75,7 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
           <div
             style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-evenly" }}
           >
-            <NowPlaying />
+            {hasSecond ? <NowPlaying /> : <NothingPlaying />}
           </div>
         </div>
         {hasSecond && (
@@ -96,6 +97,30 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
     </div>
   );
 };
+
+/**
+ * Now playing with nothing to play: a quiet note where the player would be, and the two ways to find
+ * something, so the controller has somewhere to go.
+ */
+const NothingPlaying: FC = () => (
+  <PanelSection>
+    <PanelSectionRow>
+      <div style={{ textAlign: "center", padding: "0 0 16px" }}>
+        <FaCompactDisc style={{ fontSize: 34, opacity: 0.3 }} />
+        <div style={{ fontSize: 16, fontWeight: 600, marginTop: 12 }}>Nothing playing</div>
+        <div style={{ fontSize: 13, opacity: 0.55, marginTop: 4 }}>Pick something to listen to</div>
+      </div>
+    </PanelSectionRow>
+    <ButtonRow>
+      <IconButton label="Library" onClick={() => showTab("library")} style={{ height: 40, fontSize: 14 }}>
+        <FaMusic /> Library
+      </IconButton>
+      <IconButton label="Search" onClick={() => showTab("search")} style={{ height: 40, fontSize: 14 }}>
+        <FaSearch /> Search
+      </IconButton>
+    </ButtonRow>
+  </PanelSection>
+);
 
 /** A word in the second page's header: small and grey as Steam's section titles, white when chosen. */
 const HeaderWord: FC<{ on?: boolean; label: string; onPick: () => void; children: ReactNode }> = ({

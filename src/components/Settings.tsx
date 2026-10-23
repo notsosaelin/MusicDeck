@@ -9,6 +9,7 @@ import {
   Field,
   Focusable,
   Menu,
+  MenuGroup,
   MenuItem,
   MenuSeparator,
   ModalRoot,
@@ -48,6 +49,7 @@ import {
   PlaybackSettings,
   PluginState,
   ServiceInfo,
+  ServiceType,
   removeDownloads,
   rescan,
   retryDownloads,
@@ -477,6 +479,14 @@ const LastfmRow: FC<{ lastfm: PluginState["lastfm"] }> = ({ lastfm }) => {
   );
 };
 
+/** "Add a source"'s groups, in its order */
+const SOURCE_GROUPS: { group: ServiceType["group"]; label: string }[] = [
+  { group: "yours", label: "Your files and servers" },
+  { group: "streaming", label: "Streaming services" },
+  { group: "radio", label: "Radio and podcasts" },
+  { group: "other", label: "Other" },
+];
+
 /** The plugin's page in the Decky menu: sources, the active source, and QAM placement. */
 export const Settings: FC = () => {
   const state = useStore(pluginState);
@@ -504,14 +514,27 @@ export const Settings: FC = () => {
   const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
   const services = [...state.services].sort((a, b) => byName(a.name, b.name));
   const types = [...state.service_types].sort((a, b) => byName(a.display_name, b.display_name));
+  // by kind, as submenus (Steam's own menus nest the same way), each A to Z
   const addSource = (e: any) =>
     showContextMenu(
       <Menu label="Add a source">
-        {types.map((t) => (
-          <MenuItem key={t.type} onSelected={() => showModal(<ServiceModal type={t.type} typeName={t.display_name} />)}>
-            {t.display_name}
-          </MenuItem>
-        ))}
+        {SOURCE_GROUPS.map(({ group, label }) => {
+          const inGroup = types.filter((t) => (t.group ?? "other") === group);
+          return (
+            inGroup.length > 0 && (
+              <MenuGroup key={group} label={label}>
+                {inGroup.map((t) => (
+                  <MenuItem
+                    key={t.type}
+                    onSelected={() => showModal(<ServiceModal type={t.type} typeName={t.display_name} />)}
+                  >
+                    {t.display_name}
+                  </MenuItem>
+                ))}
+              </MenuGroup>
+            )
+          );
+        })}
       </Menu>,
       e?.currentTarget ?? window,
     );
@@ -523,6 +546,8 @@ export const Settings: FC = () => {
         {services.length > 1 && (
           <PanelSectionRow>
             <DropdownItem
+              // under its label, full width: its value (a source's name, a choice) is never cut short
+              layout="below"
               label="Playing from"
               rgOptions={services.map((s) => ({ data: s.id, label: s.name }))}
               selectedOption={state.active_service}
@@ -608,6 +633,8 @@ export const Settings: FC = () => {
       <PanelSection title="Games">
         <PanelSectionRow>
           <DropdownItem
+            // under its label, full width: its value (a source's name, a choice) is never cut short
+            layout="below"
             label="In games"
             description={
               state.playback.game_pause

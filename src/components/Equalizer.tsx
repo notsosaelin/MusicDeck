@@ -99,6 +99,8 @@ export const Equalizer: FC = () => {
       </PanelSectionRow>
       <PanelSectionRow>
         <DropdownItem
+          // under its label, full width: its value (a source's name, a choice) is never cut short
+          layout="below"
           label="Preset"
           selectedOption={eq.preset}
           rgOptions={[

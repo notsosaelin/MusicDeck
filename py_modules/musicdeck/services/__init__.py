@@ -8,24 +8,25 @@ from typing import Any, Optional
 
 from .base import MusicService, ServiceError, SignIn, StreamSource
 
-# (type, module, class, name shown in "Add a source"), in the order that list shows them
+# (type, module, class, name shown in "Add a source", its group there: "yours" (files and your own
+# servers), "streaming" (services), "radio" (stations, podcasts, live recordings))
 CATALOGUE = [
-    ("local", "local", "LocalService", "Local files"),
-    ("steam", "steam", "SteamService", "Steam soundtracks"),
-    ("subsonic", "subsonic", "SubsonicService", "Navidrome / Subsonic"),
-    ("jellyfin", "jellyfin", "JellyfinService", "Jellyfin"),
-    ("emby", "emby", "EmbyService", "Emby"),
-    ("plex", "plex", "PlexService", "Plex"),
-    ("audiobookshelf", "audiobookshelf", "AudiobookshelfService", "Audiobookshelf"),
-    ("soundcloud", "soundcloud", "SoundCloudService", "SoundCloud"),
-    ("youtube", "youtube", "YouTubeService", "YouTube Music"),
-    ("bandcamp", "bandcamp", "BandcampService", "Bandcamp"),
-    ("radio", "radio", "RadioService", "Internet radio"),
-    ("podcasts", "podcasts", "PodcastService", "Podcasts"),
-    ("livemusic", "livemusic", "LiveMusicService", "Live Music Archive"),
-    ("qobuz", "qobuz", "QobuzService", "Qobuz"),
-    ("tidal", "tidal", "TidalService", "TIDAL"),
-    ("spotify", "spotify", "SpotifyService", "Spotify"),
+    ("local", "local", "LocalService", "Local files", "yours"),
+    ("steam", "steam", "SteamService", "Steam soundtracks", "yours"),
+    ("subsonic", "subsonic", "SubsonicService", "Navidrome / Subsonic", "yours"),
+    ("jellyfin", "jellyfin", "JellyfinService", "Jellyfin", "yours"),
+    ("emby", "emby", "EmbyService", "Emby", "yours"),
+    ("plex", "plex", "PlexService", "Plex", "yours"),
+    ("audiobookshelf", "audiobookshelf", "AudiobookshelfService", "Audiobookshelf", "yours"),
+    ("soundcloud", "soundcloud", "SoundCloudService", "SoundCloud", "streaming"),
+    ("youtube", "youtube", "YouTubeService", "YouTube Music", "streaming"),
+    ("bandcamp", "bandcamp", "BandcampService", "Bandcamp", "streaming"),
+    ("radio", "radio", "RadioService", "Internet radio", "radio"),
+    ("podcasts", "podcasts", "PodcastService", "Podcasts", "radio"),
+    ("livemusic", "livemusic", "LiveMusicService", "Live Music Archive", "radio"),
+    ("qobuz", "qobuz", "QobuzService", "Qobuz", "streaming"),
+    ("tidal", "tidal", "TidalService", "TIDAL", "streaming"),
+    ("spotify", "spotify", "SpotifyService", "Spotify", "streaming"),
 ]
 
 
@@ -33,9 +34,10 @@ class SourceTypes:
     """The source types by name, as a lookup that imports each one's module on first use.
     Tests can register their own (`types[name] = cls`) and take them away again."""
 
-    def __init__(self, catalogue: list[tuple[str, str, str, str]]):
-        self._where = {t: (module, cls) for t, module, cls, _ in catalogue}
-        self._names = {t: name for t, _, _, name in catalogue}
+    def __init__(self, catalogue: list[tuple[str, str, str, str, str]]):
+        self._where = {t: (module, cls) for t, module, cls, _, _ in catalogue}
+        self._names = {t: name for t, _, _, name, _ in catalogue}
+        self._groups = {t: group for t, _, _, _, group in catalogue}
         self._loaded: dict[str, type[MusicService]] = {}
 
     def get(self, type_: str, default: Any = None) -> Optional[type[MusicService]]:
@@ -52,8 +54,8 @@ class SourceTypes:
         return type_ in self._names
 
     def listing(self) -> list[dict[str, str]]:
-        """[{"type", "display_name"}] for "Add a source", without loading anything."""
-        return [{"type": t, "display_name": name} for t, name in self._names.items()]
+        """[{"type", "display_name", "group"}] for "Add a source", without loading anything."""
+        return [{"type": t, "display_name": name, "group": self._groups.get(t, "other")} for t, name in self._names.items()]
 
     def __setitem__(self, type_: str, cls: type[MusicService]) -> None:
         self._loaded[type_] = cls

@@ -2019,7 +2019,7 @@ async def run():
 
         print("source types")
         from musicdeck.services import CATALOGUE, SERVICE_TYPES as TYPES
-        check(all(TYPES.get(t).type == t and TYPES.get(t).display_name == name for t, _, _, name in CATALOGUE),
+        check(all(TYPES.get(t).type == t and TYPES.get(t).display_name == name for t, _, _, name, _ in CATALOGUE),
               "every catalogued type loads, under its own type and name")
         check(TYPES.get("nonsense") is None and "nonsense" not in TYPES, "unknown types are None")
 
