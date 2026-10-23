@@ -52,6 +52,7 @@ import {
   rescan,
   retryDownloads,
   setGameMusic,
+  lastfmUnlink,
   setListenBrainz,
   setSetting,
   testService,
@@ -63,6 +64,7 @@ import { player } from "../player";
 import { pluginState, refreshState, useStore } from "../store";
 import { invalidateBrowserCache } from "../nav";
 import { ACCENT, DialogActions } from "./common";
+import { linkLastfm } from "../signIn";
 import { ServiceModal } from "./ServiceModal";
 
 const TYPE_ICONS: Record<string, ReactNode> = {
@@ -289,6 +291,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
 };
 
 const LISTENBRAINZ_TOKEN_PAGE = "https://listenbrainz.org/settings/";
+const LASTFM_API_ACCOUNT_PAGE = "https://www.last.fm/api/account/create";
 
 /** The music set to play with games, from every source; each can be removed here. */
 const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
@@ -391,6 +394,81 @@ const ListenBrainzRow: FC<{ user: string; pending: number }> = ({ user, pending 
         <DialogButton
           style={{ minWidth: 0, width: "auto", padding: "8px 18px" }}
           onClick={() => (user ? unlink() : showModal(<ListenBrainzModal />))}
+        >
+          {user ? "Unlink" : "Link…"}
+        </DialogButton>
+      </Field>
+    </PanelSectionRow>
+  );
+};
+
+/**
+ * Linking Last.fm: the user's own API account (Last.fm wants one per app, and there's no MusicDeck one
+ * to share), then their approval on Last.fm's page. With an account given before, only the approval.
+ */
+const LastfmModal: FC<{ hasKey: boolean; closeModal?: () => void }> = ({ hasKey, closeModal }) => {
+  const [key, setKey] = useState("");
+  const [secret, setSecret] = useState("");
+  const ready = hasKey ? !key.trim() || !!secret.trim() : !!key.trim() && !!secret.trim();
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogHeader>Link Last.fm</DialogHeader>
+      <DialogBody>
+        <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 8 }}>
+          {hasKey
+            ? "Uses the API account you gave before. To use another, enter its key and secret."
+            : "Last.fm needs an API account of your own: create one (any name will do), then enter its key and secret."}
+        </div>
+        <TextField
+          value={key}
+          placeholder={hasKey ? "API key (same as before)" : "API key"}
+          onChange={(e) => setKey(e.target.value)}
+        />
+        <TextField
+          bIsPassword
+          value={secret}
+          placeholder={hasKey ? "Shared secret (same as before)" : "Shared secret"}
+          onChange={(e) => setSecret(e.target.value)}
+        />
+        <DialogButton
+          style={{ marginTop: 8 }}
+          onClick={() => Navigation.NavigateToExternalWeb(LASTFM_API_ACCOUNT_PAGE)}
+        >
+          Create an API account
+        </DialogButton>
+      </DialogBody>
+      <DialogActions
+        primary="Sign in"
+        onPrimary={() => {
+          closeModal?.();
+          void linkLastfm(key, secret);
+        }}
+        primaryDisabled={!ready}
+        onCancel={closeModal}
+      />
+    </ModalRoot>
+  );
+};
+
+/** Last.fm scrobbles plays from every source, alongside ListenBrainz. */
+const LastfmRow: FC<{ lastfm: PluginState["lastfm"] }> = ({ lastfm }) => {
+  const { user, pending, has_key } = lastfm;
+  return (
+    <PanelSectionRow>
+      <Field
+        label="Last.fm"
+        description={user ? `${user}${pending ? ` · ${pending} waiting` : ""}` : "Scrobble every source"}
+      >
+        <DialogButton
+          style={{ minWidth: 0, width: "auto", padding: "8px 18px" }}
+          onClick={async () => {
+            if (!user) {
+              showModal(<LastfmModal hasKey={has_key} />);
+              return;
+            }
+            await lastfmUnlink();
+            await refreshState();
+          }}
         >
           {user ? "Unlink" : "Link…"}
         </DialogButton>
@@ -517,6 +595,7 @@ export const Settings: FC = () => {
           </PanelSectionRow>
         )}
         <ListenBrainzRow user={state.listenbrainz?.user ?? ""} pending={state.listenbrainz?.pending ?? 0} />
+        {state.lastfm && <LastfmRow lastfm={state.lastfm} />}
       </PanelSection>
 
       <PanelSection title="Games">

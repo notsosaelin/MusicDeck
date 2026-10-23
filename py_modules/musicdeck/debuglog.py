@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 URL = re.compile(r"(https?://[^\s'\"<>?#]+)\?[^\s'\"<>#]*")
 CREDENTIAL = re.compile(r"(?i)\b(token|access_token|refresh_token|api_?key|password|passwd|secret|"
-                        r"signature|x-plex-token|x-musicdeck-key)(\s*[=:]\s*\"?)([^\s&'\",;]+)")
+                        r"signature|x-plex-token|x-musicdeck-key|sk|api_sig|session_key)(\s*[=:]\s*\"?)([^\s&'\",;]+)")
 BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[\w.~+/=-]{16,}")
 
 

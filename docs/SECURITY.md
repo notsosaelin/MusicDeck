@@ -8,7 +8,7 @@ How MusicDeck protects the accounts and data it handles, what an audit of every 
 
 | Asset | Where it lives |
 | --- | --- |
-| Sign-ins: access and refresh tokens, Subsonic salted tokens, Spotify's stored playback credentials | `settings.json` (mode 600) and `data/spotify/accounts/<user>/`, in folders made 0700 at start-up |
+| Sign-ins: access and refresh tokens, Subsonic salted tokens, Spotify's stored playback credentials, the ListenBrainz token, the Last.fm API secret and session key (never sent to the frontend) | `settings.json` (mode 600) and `data/spotify/accounts/<user>/`, in folders made 0700 at start-up |
 | The signed-in sessions themselves (a Premium account playing through the Spotify helper) | the helper process |
 | Listening history, playlists, favourites, where books and episodes were left | MusicDeck's settings and data folders |
 | The Deck itself (its disk, other programs, its network) | — |

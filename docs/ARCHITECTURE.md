@@ -111,7 +111,7 @@ Details worth knowing:
   cached source (`forget_stream`) and resolves it again, resuming at the same second. Only a second
   failure is reported and skipped. Live streams (radio) reconnect at the live edge instead.
 - **Play reports** go to the source's own server (if it keeps play history and "Report plays" is on)
-  and to ListenBrainz (if linked). A 90-second de-duplication window in `Plugin.scrobble` absorbs
+  and to ListenBrainz and Last.fm (if linked). A 90-second de-duplication window in `Plugin.scrobble` absorbs
   retries and reloads.
 
 ## Module map
@@ -120,7 +120,7 @@ Details worth knowing:
 
 | File | Responsibility |
 | --- | --- |
-| `main.py` | `Plugin`: every RPC endpoint the frontend calls (`browse` gives a source's genres, moods and charts). Owns settings, playlist store, stream server, service instances, the sign-in in progress, ListenBrainz. Endpoints return `{"ok": True, "data": ...}` or `{"ok": False, "error": "message for the user"}` via `_result`. |
+| `main.py` | `Plugin`: every RPC endpoint the frontend calls (`browse` gives a source's genres, moods and charts). Owns settings, playlist store, stream server, service instances, the sign-in in progress, ListenBrainz and Last.fm. Endpoints return `{"ok": True, "data": ...}` or `{"ok": False, "error": "message for the user"}` via `_result`. |
 | `musicdeck/models.py` | The one data model every service returns: Track, Collection, Page, Section. Plain dicts, mirrored by TypeScript types in `src/api.ts`. |
 | `musicdeck/services/base.py` | `MusicService` (the interface every source implements), `StreamSource` (where audio/art comes from), `SignIn` (OAuth/device-code sign-ins), `ServiceError` (errors safe to show the user). |
 | `musicdeck/services/__init__.py` | `CATALOGUE` and `SERVICE_TYPES`: every source type, in "Add a source" order; a type's module is imported the first time it's needed. |
@@ -136,6 +136,7 @@ Details worth knowing:
 | `musicdeck/lyrics.py` | The lyrics shape, LRC parsing, the lyrics sites asked when a source has none: LRCLIB and NetEase at once, LRCLIB's synced lyrics preferred (a failed lookup is an error, not "no lyrics"). |
 | `musicdeck/feeds.py` | A small XML reader and the RSS parser for podcast feeds (Decky's Python has no `xml`). |
 | `musicdeck/listenbrainz.py` | ListenBrainz client with an on-disk queue for listens made offline. |
+| `musicdeck/lastfm.py` | Last.fm client: signed calls (`sign`), the desktop sign-in (token, approval on Last.fm's page, session key), now playing and scrobbles in batches of 50, with an on-disk queue like ListenBrainz's. The user's own API key and secret; a revoked session unlinks. |
 | `musicdeck/audio_output.py` | The output sound plays on (speakers, headphones, a Bluetooth device, HDMI), followed through `pactl subscribe` and read from the default sink's active port (Steam sees the speakers and the headphone jack as one device). With `eq_per_output`, `main.py` keeps an EQ per output in `output_eqs` and `get_state` hands out the one for the output in use; `set_eq` saves to the output an EQ was set on. |
 | `musicdeck/debuglog.py` | Optional verbose log (`musicdeck-debug.log`), toggled in settings; the player's events land here too. |
 | `musicdeck/ytdlp_worker.py` | Runs under the system Python; answers yt-dlp and YouTube Music (ytmusicapi) requests as JSON lines. Started on demand, stopped after 5 idle minutes. |
@@ -167,7 +168,7 @@ Details worth knowing:
 | `components/CastMenu.tsx` | "Play on": this Deck or a device found on the network, opened with X on a volume slider. |
 | `components/Queue.tsx` | The queue in play order, with moving tracks (menu items, or "Move…" mode on the d-pad; see `RowMoving` in common.tsx). |
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists, sleep timer, go to). |
-| `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, games, ListenBrainz, troubleshooting. |
+| `components/Settings.tsx` | The plugin's page in the Decky menu: sources, playback options, games, ListenBrainz and Last.fm, troubleshooting. |
 | `components/ServiceModal.tsx` | Add/edit dialog for a source, with a fields component per source type. |
 | `components/common.tsx` | Shared rows, artwork, dialog footer, and `ScrollingText`: a line that ends in "…" and scrolls (Steam's marquee) while its row is focused, or always in headers and the now-playing card. |
 
@@ -229,7 +230,7 @@ classDiagram
 
 | Where | File | Contents |
 | --- | --- | --- |
-| `~/homebrew/settings/MusicDeck/` | `settings.json` (mode 600) | Preferences, configured sources and their credentials (tokens, never passwords), ListenBrainz token, game music |
+| `~/homebrew/settings/MusicDeck/` | `settings.json` (mode 600) | Preferences, configured sources and their credentials (tokens, never passwords), ListenBrainz token, Last.fm API account and session key, game music |
 | | `playlists.json`, `playlist-art/` | MusicDeck playlists and their custom pictures |
 | `~/homebrew/data/MusicDeck/` | `session.json` | The queue, for "Resume where you left off" |
 | `~/homebrew/data/MusicDeck/` | `offline/` | Downloaded songs and their artwork (named by a hash of source and id) and `index.json`, which maps them back (file names, types and sizes only) |
@@ -240,7 +241,7 @@ classDiagram
 | | `qobuz-app.json`, `soundcloud-client.json` | Public app credentials scraped from the services' web players (refreshed when rejected) |
 | | `spotify/accounts/<username>/` | librespot's reusable credentials, one folder per account |
 | | `yt-dlp-cache/`, `ytdlp-update/` | yt-dlp's cache and self-updated copies |
-| | `listenbrainz-pending.json` | Listens waiting to be sent |
+| | `listenbrainz-pending.json`, `lastfm-pending.json` | Listens waiting to be sent |
 | `~/homebrew/logs/MusicDeck/` | `musicdeck-debug.log` | Only when "Debug log" is on |
 
 The frontend never receives secrets: `Plugin._public_service` removes every key named in

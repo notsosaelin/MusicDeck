@@ -1,5 +1,14 @@
 import { Navigation, Router } from "@decky/ui";
-import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart } from "./api";
+import {
+  ServiceDraft,
+  ServiceInfo,
+  lastfmCancel,
+  lastfmPoll,
+  lastfmStart,
+  signInCancel,
+  signInPoll,
+  signInStart,
+} from "./api";
 import { invalidateBrowserCache } from "./nav";
 import { notify } from "./notify";
 import { refreshState } from "./store";
@@ -121,6 +130,38 @@ export async function signIn(type: string, draft: ServiceDraft) {
           await signInCancel(start.data.login_id);
           return;
         }
+      } else {
+        awaySince = 0;
+      }
+    }
+  } finally {
+    running = false;
+  }
+}
+
+/**
+ * Links Last.fm: opens Last.fm's approval page in Steam's browser, closes it once MusicDeck is
+ * approved, and says so. Leaving the browser without approving gives up after ABANDON_MS.
+ */
+export async function linkLastfm(key: string, secret: string) {
+  if (running) return;
+  running = true;
+  try {
+    const start = await lastfmStart(key, secret);
+    if (!start.ok) return notify("Last.fm", start.error);
+    Navigation.NavigateToExternalWeb(start.data.url);
+    let awaySince = 0;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      const poll = await lastfmPoll();
+      if (poll.status !== "waiting") {
+        await leaveBrowser();
+        await refreshState();
+        return notify("Last.fm", poll.status === "done" ? `Linked as ${poll.user}` : poll.error || "Linking failed");
+      }
+      if (!currentRoute().startsWith(BROWSER_ROUTE)) {
+        awaySince ||= Date.now();
+        if (Date.now() - awaySince > ABANDON_MS) return void (await lastfmCancel());
       } else {
         awaySince = 0;
       }

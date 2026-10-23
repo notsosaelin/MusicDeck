@@ -25,6 +25,9 @@ DEFAULTS: dict[str, Any] = {
                  "game_pause": False, "game_duck": 1.0, "crossfade": 0},
     # ListenBrainz scrobbling for every source; the token never goes to the frontend
     "listenbrainz": {"token": "", "user": ""},
+    # Last.fm scrobbling: the user's own API account (key, secret) and the session the sign-in gave;
+    # only the user name goes to the frontend (lastfm.py)
+    "lastfm": {"key": "", "secret": "", "user": "", "session_key": ""},
     # music that starts with a game: [{"instance_id", "appid", "game", "collection": {id, kind, title, art}}],
     # one per source and game (it only plays while its source is live)
     "game_music": [],

@@ -177,6 +177,8 @@ export interface PluginState {
   planned_types: ServiceType[];
   /** linked ListenBrainz account ("" when not linked) and listens waiting to be sent */
   listenbrainz: { user: string; pending: number };
+  /** has_key: an API account was given before, so linking again needs only the approval */
+  lastfm: { user: string; has_key: boolean; pending: number };
   game_music: GameMusic[];
   offline: DownloadStatus;
   center: CenterSettings;
@@ -300,6 +302,13 @@ export const setGameMusic = callable<
 >("set_game_music");
 export const onAir = callable<[id: string, trackId: string], Result<OnAir | null>>("on_air");
 export const setListenBrainz = callable<[token: string], Result<{ user: string }>>("set_listenbrainz");
+/** Starts linking Last.fm with the user's API account (blanks: the one used before): the approval page */
+export const lastfmStart = callable<[key: string, secret: string], Result<{ url: string }>>("lastfm_start");
+export const lastfmPoll = callable<[], { status: "waiting" | "done" | "error"; user?: string; error?: string }>(
+  "lastfm_poll",
+);
+export const lastfmCancel = callable<[], void>("lastfm_cancel");
+export const lastfmUnlink = callable<[], void>("lastfm_unlink");
 
 // --- casting (py_modules/musicdeck/cast) ---
 

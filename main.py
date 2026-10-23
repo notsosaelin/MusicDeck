@@ -14,6 +14,7 @@ import decky
 from musicdeck import backup, debuglog, lyrics
 from musicdeck.audio_output import OutputWatcher
 from musicdeck.cast import CastManager
+from musicdeck.lastfm import Lastfm, LastfmError
 from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.net import tls
 from musicdeck.offline import OfflineStore
@@ -91,6 +92,8 @@ class Plugin:
         # the output sound plays on ({"id", "name"}), when PipeWire says
         self.output: Optional[dict[str, str]] = None
         self.output_watcher: Optional[OutputWatcher] = None
+        # a Last.fm sign-in waiting for the user to approve it: {"key", "secret", "token"}
+        self.lastfm_link: Optional[dict[str, str]] = None
 
     # --- lifecycle ---
 
@@ -121,6 +124,7 @@ class Plugin:
         self.cast = CastManager(self.server, self.instances.get, decky.emit, self.http, decky.logger)
         self.listenbrainz = ListenBrainz(self.http, os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR,
                                                                  "listenbrainz-pending.json"))
+        self.lastfm = Lastfm(self.http, os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "lastfm-pending.json"))
         try:
             await self.server.start()
             for service in self.settings.services():
@@ -214,6 +218,9 @@ class Plugin:
             "planned_types": PLANNED_TYPES,
             "listenbrainz": {"user": self.settings.get("listenbrainz").get("user", ""),
                              "pending": self.listenbrainz.pending_count()},
+            "lastfm": {"user": self.settings.get("lastfm").get("user", ""),
+                       "has_key": bool(self.settings.get("lastfm").get("key")),
+                       "pending": self.lastfm.pending_count()},
             "game_music": self.settings.get("game_music"),
             "offline": self.offline.status(),
             # only today's choices: one an older version saved (since renamed) would make saving fail
@@ -534,10 +541,73 @@ class Plugin:
         if token and track and instance and "progress" not in instance.features:
             report = self.listenbrainz.listen if submission else self.listenbrainz.now_playing
             asyncio.get_event_loop().create_task(report(token, track, instance.display_name))
+        lastfm = self.settings.get("lastfm")
+        if lastfm.get("session_key") and track and instance and "progress" not in instance.features:
+            asyncio.get_event_loop().create_task(self._report_lastfm(lastfm, track, submission))
         if not self.settings.get("playback").get("scrobble", True) or not instance \
                 or "scrobble" not in instance.features:
             return {"ok": True, "data": None}
         return await _result(self._call(instance_id, lambda s: s.scrobble(track_id, submission)))
+
+    async def _report_lastfm(self, account: dict[str, str], track: dict[str, Any], submission: bool) -> None:
+        if not submission:
+            return await self.lastfm.now_playing(account, track)
+        if not await self.lastfm.scrobble(account, track):
+            # the session was revoked on Last.fm: unlinked, so it shows; the plays wait for a new link
+            decky.logger.info("Last.fm no longer accepts the session; unlinked")
+            self.settings.set("lastfm", {**self.settings.get("lastfm"), "user": "", "session_key": ""})
+            await _announce_change()
+
+    @_when_ready
+    async def lastfm_start(self, key: str, secret: str) -> dict[str, Any]:
+        """Starts linking Last.fm with the user's API account (blank: the one used before). Returns the
+        page where the user approves MusicDeck; lastfm_poll says when they have."""
+        async def work():
+            saved = self.settings.get("lastfm")
+            key_ = (key or "").strip() or saved.get("key", "")
+            secret_ = (secret or "").strip() or (saved.get("secret", "") if key_ == saved.get("key") else "")
+            if not key_ or not secret_:
+                raise ServiceError("Enter the API key and the shared secret")
+            try:
+                token = await self.lastfm.get_token(key_, secret_)
+            except LastfmError as e:
+                raise ServiceError({10: "Last.fm doesn't know that API key",
+                                    13: "That shared secret isn't the API key's"}.get(e.code, str(e))) from e
+            except aiohttp.ClientError as e:
+                raise ServiceError(f"Could not reach Last.fm: {e}") from e
+            self.lastfm_link = {"key": key_, "secret": secret_, "token": token}
+            return {"url": self.lastfm.auth_url(key_, token)}
+        return await _result(work())
+
+    @_when_ready
+    async def lastfm_poll(self) -> dict[str, Any]:
+        """waiting (not approved yet), done (linked: the user name) or error."""
+        link = self.lastfm_link
+        if not link:
+            return {"status": "error", "error": "Linking expired; start again"}
+        try:
+            session = await self.lastfm.get_session(link["key"], link["secret"], link["token"])
+        except LastfmError as e:
+            self.lastfm_link = None
+            return {"status": "error", "error": "Linking timed out; start again" if e.code == 15 else str(e)}
+        except aiohttp.ClientError:
+            return {"status": "waiting"}  # a dropped request; the next poll tries again
+        if not session:
+            return {"status": "waiting"}
+        self.lastfm_link = None
+        self.settings.set("lastfm", {"key": link["key"], "secret": link["secret"], **session})
+        await _announce_change()
+        return {"status": "done", "user": session["user"]}
+
+    @_when_ready
+    async def lastfm_cancel(self) -> None:
+        self.lastfm_link = None
+
+    @_when_ready
+    async def lastfm_unlink(self) -> None:
+        """Stops scrobbling to Last.fm. The API account is kept, so linking again is one approval."""
+        self.settings.set("lastfm", {**self.settings.get("lastfm"), "user": "", "session_key": ""})
+        await _announce_change()
 
     @_when_ready
     async def set_listenbrainz(self, token: str) -> dict[str, Any]:

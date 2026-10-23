@@ -6,6 +6,7 @@ tagged library in a temp dir, then drives main.Plugin and the stream server over
 """
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -1109,6 +1110,80 @@ async def run():
         await plugin.set_listenbrainz("")
         check((await plugin.get_state())["listenbrainz"]["user"] == "", "unlinked")
         await lb_runner.cleanup()
+
+        print("last.fm")
+        from musicdeck import lastfm as fmmod
+        fm = {"approved": False, "up": True, "session_ok": True, "scrobbles": [], "now": []}
+
+        async def fm_api(request):
+            params = dict(request.query) if request.method == "GET" else dict(await request.post())
+            signed = {k: v for k, v in params.items() if k not in ("api_sig", "format")}
+            if params.get("api_key") != "KEY":
+                return lbweb.json_response({"error": 10, "message": "Invalid API key"})
+            if params.get("api_sig") != fmmod.sign(signed, "SECRET"):
+                return lbweb.json_response({"error": 13, "message": "Invalid method signature"})
+            method = params["method"]
+            if method == "auth.getToken":
+                return lbweb.json_response({"token": "TOKEN"})
+            if method == "auth.getSession":
+                if not fm["approved"]:
+                    return lbweb.json_response({"error": 14, "message": "Unauthorized Token"})
+                return lbweb.json_response({"session": {"name": "fmuser", "key": "SK", "subscriber": 0}})
+            if not fm["up"]:
+                return lbweb.json_response({"error": 16, "message": "Temporarily unavailable"})
+            if params.get("sk") != "SK" or not fm["session_ok"]:
+                return lbweb.json_response({"error": 9, "message": "Invalid session key"})
+            (fm["scrobbles"] if method == "track.scrobble" else fm["now"]).append(params)
+            return lbweb.json_response({"ok": True})
+        fm_app = lbweb.Application()
+        fm_app.router.add_route("*", "/2.0/", fm_api)
+        fm_runner = lbweb.AppRunner(fm_app)
+        await fm_runner.setup()
+        fm_site = lbweb.TCPSite(fm_runner, "127.0.0.1", 0)
+        await fm_site.start()
+        fmmod.API = f"http://127.0.0.1:{fm_site._server.sockets[0].getsockname()[1]}/2.0/"
+
+        check(fmmod.sign({"b": "2", "a": "1", "format": "json"}, "s") == hashlib.md5(b"a1b2s").hexdigest(),
+              "signatures: name+value in name order, then the secret, leaving out format")
+        check(not (await plugin.lastfm_start("", ""))["ok"], "linking needs an API account")
+        bad_key = await plugin.lastfm_start("NOPE", "SECRET")
+        bad_secret = await plugin.lastfm_start("KEY", "WRONG")
+        check(not bad_key["ok"] and "API key" in bad_key["error"] and not bad_secret["ok"] and "secret" in bad_secret["error"],
+              "a wrong key or secret is said plainly")
+        started = await plugin.lastfm_start(" KEY ", " SECRET ")
+        check(started["ok"] and started["data"]["url"] == "https://www.last.fm/api/auth/?api_key=KEY&token=TOKEN",
+              "linking opens Last.fm's approval page for the token")
+        check((await plugin.lastfm_poll())["status"] == "waiting", "waits while the user hasn't approved")
+        fm["approved"] = True
+        done = await plugin.lastfm_poll()
+        state = await plugin.get_state()
+        check(done == {"status": "done", "user": "fmuser"} and state["lastfm"] == {"user": "fmuser", "has_key": True, "pending": 0}
+              and "SK" not in json.dumps(state) and "SECRET" not in json.dumps(state),
+              "linked once approved; the secret and session key stay in the backend")
+        account = plugin.settings.get("lastfm")
+        await plugin.lastfm.now_playing(account, song)
+        check(fm["now"][-1]["track"] == "Song" and fm["now"][-1]["duration"] == "200", "now playing sent")
+        await plugin.lastfm.scrobble(account, {**song, "title": "Jingle", "duration": 12})
+        await plugin.lastfm.scrobble(account, {**song, "live": True})
+        check(not fm["scrobbles"], "stations and tracks under 30 seconds aren't scrobbled")
+        fm["up"] = False
+        await plugin.lastfm.scrobble(account, song, timestamp=1000)
+        check(plugin.lastfm.pending_count() == 1, "a play made while Last.fm is down is kept")
+        fm["up"] = True
+        await plugin.lastfm.scrobble(account, {**song, "title": "Next"}, timestamp=2000)
+        sent = fm["scrobbles"][-1]
+        check(plugin.lastfm.pending_count() == 0 and sent["track[0]"] == "Song" and sent["timestamp[0]"] == "1000"
+              and sent["track[1]"] == "Next" and sent["album[1]"] == "Record", "kept plays go with the next, numbered")
+        await plugin.scrobble(sid, "fm1", True, {**song, "id": "fm1", "title": "Other"})
+        await asyncio.sleep(0.3)
+        check(fm["scrobbles"][-1]["track[0]"] == "Other", "plays from any source reach Last.fm")
+        fm["session_ok"] = False
+        await plugin.scrobble(sid, "fm2", True, {**song, "id": "fm2", "title": "Revoked"})
+        await asyncio.sleep(0.3)
+        state = await plugin.get_state()
+        check(state["lastfm"]["user"] == "" and state["lastfm"]["has_key"] and plugin.lastfm.pending_count() == 1,
+              "a revoked session unlinks, keeping the API account and the play for the next link")
+        await fm_runner.cleanup()
 
         print("bandcamp")
         from musicdeck.services import bandcamp as bcmod
