@@ -500,10 +500,14 @@ export const Settings: FC = () => {
   const typeName = (type: string) => state.service_types.find((t) => t.type === type)?.display_name ?? type;
 
   const has = (feature: Feature) => state.services.some((s) => s.features.includes(feature));
+  // sources and the kinds of source to add, A to Z
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+  const services = [...state.services].sort((a, b) => byName(a.name, b.name));
+  const types = [...state.service_types].sort((a, b) => byName(a.display_name, b.display_name));
   const addSource = (e: any) =>
     showContextMenu(
       <Menu label="Add a source">
-        {state.service_types.map((t) => (
+        {types.map((t) => (
           <MenuItem key={t.type} onSelected={() => showModal(<ServiceModal type={t.type} typeName={t.display_name} />)}>
             {t.display_name}
           </MenuItem>
@@ -516,7 +520,17 @@ export const Settings: FC = () => {
   return (
     <>
       <PanelSection title="Sources">
-        {state.services.map((s) => (
+        {services.length > 1 && (
+          <PanelSectionRow>
+            <DropdownItem
+              label="Playing from"
+              rgOptions={services.map((s) => ({ data: s.id, label: s.name }))}
+              selectedOption={state.active_service}
+              onChange={(o) => switchSource(o.data)}
+            />
+          </PanelSectionRow>
+        )}
+        {services.map((s) => (
           <ServiceRow key={s.id} service={s} typeName={typeName(s.type)} active={s.id === state.active_service} />
         ))}
         <PanelSectionRow>
@@ -529,16 +543,6 @@ export const Settings: FC = () => {
       </PanelSection>
 
       <PanelSection title="Playback">
-        {state.services.length > 1 && (
-          <PanelSectionRow>
-            <DropdownItem
-              label="Playing from"
-              rgOptions={state.services.map((s) => ({ data: s.id, label: s.name }))}
-              selectedOption={state.active_service}
-              onChange={(o) => switchSource(o.data)}
-            />
-          </PanelSectionRow>
-        )}
         <PanelSectionRow>
           <DropdownItem
             label="Volume levelling"
@@ -574,16 +578,6 @@ export const Settings: FC = () => {
             onChange={(resume) => setPlayback({ resume })}
           />
         </PanelSectionRow>
-        {has("scrobble") && (
-          <PanelSectionRow>
-            <ToggleField
-              label="Report plays"
-              description="Play counts on the source"
-              checked={state.playback.scrobble}
-              onChange={(scrobble) => setPlayback({ scrobble })}
-            />
-          </PanelSectionRow>
-        )}
         {has("queue_sync") && (
           <PanelSectionRow>
             <ToggleField
@@ -591,6 +585,19 @@ export const Settings: FC = () => {
               description="Pick up on another device"
               checked={state.playback.queue_sync}
               onChange={(queue_sync) => setPlayback({ queue_sync })}
+            />
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Scrobbling">
+        {has("scrobble") && (
+          <PanelSectionRow>
+            <ToggleField
+              label="Report plays"
+              description="Play counts on the source"
+              checked={state.playback.scrobble}
+              onChange={(scrobble) => setPlayback({ scrobble })}
             />
           </PanelSectionRow>
         )}
@@ -649,7 +656,8 @@ export const Settings: FC = () => {
         <PanelSectionRow>
           <ToggleField
             label="Debug log"
-            description={state.debug_log ? state.debug_log_path : undefined}
+            // the file's name: its full path wraps over two lines, and Decky's logs are all in one place
+            description={state.debug_log ? state.debug_log_path.split("/").pop() : undefined}
             checked={state.debug_log}
             onChange={async (on) => {
               pluginState.set({ ...state, debug_log: on });

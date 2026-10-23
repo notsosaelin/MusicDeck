@@ -13,7 +13,7 @@ import decky
 
 from musicdeck import backup, debuglog, lyrics
 from musicdeck.audio_output import OutputWatcher
-from musicdeck.version import VERSION
+from musicdeck import version
 from musicdeck.cast import CastManager
 from musicdeck.lastfm import Lastfm, LastfmError
 from musicdeck.listenbrainz import ListenBrainz
@@ -205,7 +205,7 @@ class Plugin:
     @_when_ready
     async def get_state(self) -> dict[str, Any]:
         return {
-            "version": VERSION,
+            "version": version.current(),
             "services": [self._public_service(s) for s in self.settings.services()],
             "active_service": self.settings.get("active_service"),
             "qam_mode": self.settings.get("qam_mode"),

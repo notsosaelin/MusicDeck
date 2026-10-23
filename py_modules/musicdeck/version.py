@@ -14,5 +14,11 @@ def _read() -> str:
         return "0.0.0"
 
 
+def current() -> str:
+    """The version installed now: a frontend update brings a new package.json without restarting the
+    backend, which read VERSION when it started."""
+    return _read()
+
+
 VERSION = _read()
 USER_AGENT = f"MusicDeck/{VERSION}"
