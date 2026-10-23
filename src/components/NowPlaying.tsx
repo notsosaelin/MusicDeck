@@ -16,7 +16,7 @@ import { MdRepeatOne } from "react-icons/md";
 import { OnAir, onAir, setSetting } from "../api";
 import { QueueItem, hasFeature, player } from "../player";
 import { showTrackMenu, toggleStar } from "./TrackMenu";
-import { canCast, showCastMenu } from "./CastMenu";
+import { canCast, prepareCastMenu, showCastMenu } from "./CastMenu";
 import { useStore } from "../store";
 import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime, scrollPanelToTop } from "./common";
 
@@ -173,7 +173,11 @@ export const NowPlaying: FC = () => {
         <PanelSectionRow>
           {/* X on the volume slider picks where the music plays (this Deck, a speaker, a TV) */}
           <Focusable
-            onSecondaryButton={(e: any) => canCast(item.instanceId) && showCastMenu(e?.currentTarget)}
+            onGamepadFocus={() => canCast(item.instanceId) && prepareCastMenu()}
+            onSecondaryButton={(e: any) => {
+              e?.stopPropagation?.();
+              if (canCast(item.instanceId)) showCastMenu(e?.currentTarget);
+            }}
             onSecondaryActionDescription={canCast(item.instanceId) ? "Cast" : undefined}
           >
             <SliderField

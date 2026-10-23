@@ -1,13 +1,38 @@
 import { Menu, MenuItem, showContextMenu } from "@decky/ui";
-import { FC, useEffect, useState } from "react";
-import { CastDevice, castDevices } from "../api";
+import { FC } from "react";
+import { CastDevice, Result, castDevices } from "../api";
 import { notify } from "../notify";
 import { player } from "../player";
-import { pluginState, useStore } from "../store";
+import { pluginState } from "../store";
 
 /** Tracks from this source can play on speakers and TVs (all but Spotify). */
-export const canCast = (instanceId: string) =>
-  !!pluginState.get()?.services.find((s) => s.id === instanceId)?.castable;
+export const canCast = (instanceId: string) => !!pluginState.get()?.services.find((s) => s.id === instanceId)?.castable;
+
+/** How long a search's devices are shown without searching again */
+const FRESH_MS = 60_000;
+
+/** The last search's devices, and the search running now (one at a time) */
+let found: { result: Result<CastDevice[]>; at: number } | null = null;
+let searching: Promise<Result<CastDevice[]>> | null = null;
+
+function search(): Promise<Result<CastDevice[]>> {
+  searching ??= castDevices()
+    .catch((e) => ({ ok: false as const, error: String(e) }))
+    .then((result) => {
+      found = { result, at: Date.now() };
+      searching = null;
+      return result;
+    });
+  return searching;
+}
+
+/**
+ * Starts looking for speakers and TVs ahead of X being pressed (Now Playing showing, the volume
+ * slider focused), so the list is ready when it's asked for. A recent search counts.
+ */
+export function prepareCastMenu() {
+  if (!found || Date.now() - found.at > FRESH_MS) void search();
+}
 
 const choose = async (device: CastDevice | null) => {
   if (!device) return player.stopCasting();
@@ -15,41 +40,32 @@ const choose = async (device: CastDevice | null) => {
   if (error) notify(`Couldn't play on ${device.name}`, error, player.current);
 };
 
-/** "Play on": this Deck, or a speaker or TV found on the network (searched for as the menu opens). */
-const CastMenu: FC = () => {
-  const { castingTo } = useStore(player.state);
-  const [devices, setDevices] = useState<CastDevice[] | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    castDevices()
-      .then((r) => {
-        if (cancelled) return;
-        if (r.ok) setDevices(r.data);
-        else setError(r.error);
-      })
-      .catch((e) => !cancelled && setError(String(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+/**
+ * "Play on": this Deck, or the speakers and TVs found. Built once, from devices already found: a
+ * context menu that changes while it's open gets "Change Artwork…" added to it by the SteamGridDB
+ * plugin, which takes any re-rendered menu for a game's.
+ */
+const CastMenu: FC<{ result: Result<CastDevice[]> }> = ({ result }) => {
+  const { castingTo } = player.state.get();
   const mark = (on: boolean) => (on ? "✓ " : "");
   return (
     <Menu label="Play on">
       <MenuItem onSelected={() => choose(null)}>{mark(!castingTo)}This Deck</MenuItem>
-      {devices?.map((d) => (
-        <MenuItem key={d.id} onSelected={() => choose(d)}>
-          {mark(castingTo?.name === d.name)}
-          {d.name}
-        </MenuItem>
-      ))}
-      {!devices && !error && <MenuItem disabled>Looking for speakers and TVs…</MenuItem>}
-      {devices?.length === 0 && <MenuItem disabled>No speakers or TVs found</MenuItem>}
-      {error && <MenuItem disabled>{error}</MenuItem>}
+      {result.ok &&
+        result.data.map((d) => (
+          <MenuItem key={d.id} onSelected={() => choose(d)}>
+            {mark(castingTo?.name === d.name)}
+            {d.name}
+          </MenuItem>
+        ))}
+      {result.ok && !result.data.length && <MenuItem disabled>No speakers or TVs found</MenuItem>}
+      {!result.ok && <MenuItem disabled>{result.error}</MenuItem>}
     </Menu>
   );
 };
 
-export function showCastMenu(parent?: EventTarget | null) {
-  showContextMenu(<CastMenu />, parent ?? window);
+/** Opens Play on: at once with the devices found lately, or once a search for them finishes. */
+export async function showCastMenu(parent?: EventTarget | null) {
+  const result = found && Date.now() - found.at <= FRESH_MS ? found.result : await search();
+  showContextMenu(<CastMenu result={result} />, parent ?? window);
 }

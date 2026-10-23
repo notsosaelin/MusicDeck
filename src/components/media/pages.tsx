@@ -513,21 +513,30 @@ const RecentSearches: FC<{ instanceId: string; onSearch: (q: string) => void }> 
 /** What plays next, in play order, beside Now Playing. A plays a track, X takes it out, Y its menu. */
 export const QueueList: FC = () => {
   const { queue, index } = useStore(player.state);
+  const list = useRef<HTMLDivElement>(null);
   const order = player.playOrder;
   const at = order.indexOf(index);
   const upcoming = order.slice(at + 1).map((i) => ({ i, item: queue[i] }));
+  // taking a track out removes the row the controller was on: it moves to the one that took its place
+  const remove = (i: number, row: number) => {
+    player.removeAt(i);
+    window.setTimeout(() => {
+      const rows = list.current?.querySelectorAll<HTMLElement>(".mc-row");
+      if (rows?.length) rows[Math.min(row, rows.length - 1)].focus();
+    }, 50);
+  };
   if (!upcoming.length) return <Notice>Nothing after this track</Notice>;
   return (
     <>
-      <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {upcoming.map(({ i, item }) => (
+      <Focusable ref={list} flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {upcoming.map(({ i, item }, row) => (
           <TrackLine
             key={`${i}:${item.track.id}`}
             instanceId={item.instanceId}
             track={item.track}
             showAlbum={false}
             onPlay={() => player.jumpTo(i)}
-            onSecondary={() => player.removeAt(i)}
+            onSecondary={() => remove(i, row)}
             secondaryLabel="Remove"
             onOptions={(e) => showTrackMenu(item.instanceId, item.track, e?.currentTarget)}
           />

@@ -19,7 +19,7 @@ import { player } from "../../player";
 import { Store, mediaUrl, pluginState, refreshState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
 import { Equalizer } from "../Equalizer";
-import { canCast, showCastMenu } from "../CastMenu";
+import { canCast, prepareCastMenu, showCastMenu } from "../CastMenu";
 import { IconButton, PLAYER_CSS, RowText, formatTime, watchSize } from "../common";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "../LyricsView";
 import { CENTER_CSS, Cover, Notice, SectionTitle, focusInto } from "./parts";
@@ -140,10 +140,18 @@ const Volume: FC = () => {
   const item = state.queue[state.index];
   const icon = state.volume === 0 ? <FaVolumeMute /> : state.volume < 0.5 ? <FaVolumeDown /> : <FaVolumeUp />;
   const castable = !!item && canCast(item.instanceId);
+  // the devices are looked for while Now Playing shows, so X opens the list at once
+  useEffect(() => {
+    if (castable) prepareCastMenu();
+  }, [castable]);
   return (
     <Focusable
       style={{ flex: 1, minWidth: 0 }}
-      onSecondaryButton={(e: any) => castable && showCastMenu(e?.currentTarget)}
+      onGamepadFocus={() => castable && prepareCastMenu()}
+      onSecondaryButton={(e: any) => {
+        e?.stopPropagation?.(); // or Steam's page behind takes the X too ("Change artwork")
+        if (castable) showCastMenu(e?.currentTarget);
+      }}
       onSecondaryActionDescription={castable ? "Cast" : undefined}
     >
       <SliderField

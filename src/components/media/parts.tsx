@@ -1,4 +1,4 @@
-import { Focusable, Spinner } from "@decky/ui";
+import { Focusable, Spinner, gamepadDialogClasses } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
@@ -11,7 +11,8 @@ import { ACCENT, ScrollingText, formatTime } from "../common";
  * (as on Steam's home page), list rows with the library's focus fill, and plain text buttons that
  * light up like Steam's. Class names are prefixed so nothing of Steam's is touched.
  */
-export const CENTER_CSS = `
+export const CENTER_CSS =
+  `
 .mc-card { border-radius: 6px; transition: transform 0.12s ease-out; outline: none; }
 .mc-card .mc-art { border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45); transition: box-shadow 0.12s; }
 .mc-card.gpfocus, .mc-card:hover { transform: scale(1.06); }
@@ -22,16 +23,44 @@ export const CENTER_CSS = `
 .mc-shelf::-webkit-scrollbar { display: none; }
 .mc-tile { border-radius: 6px; outline: none; transition: transform 0.12s ease-out; }
 .mc-tile.gpfocus, .mc-tile:hover { transform: scale(1.04); box-shadow: 0 0 0 3px #ffffff, 0 10px 28px rgba(0, 0, 0, 0.55); }
-/* sliders sit on the page like the rest, not in the grey box Steam's settings give them; focus lights them */
-.mc-center :has([class*="SliderControlPanelGroup"]) { background: transparent !important; }
-.mc-center [class*="SliderControlPanelGroup"].gpfocus { background: rgba(255, 255, 255, 0.08); border-radius: 6px; }
+` + fieldCss(gamepadDialogClasses as Record<string, string> | undefined);
+
+/**
+ * Steam's settings fields (dropdowns, toggles, sliders) on the media center's page rather than in the
+ * grey boxes Steam's settings pages give them: no box at rest, a soft one when focused; a slider shows
+ * focus on its knob instead. Steam's class names are hashed and change between versions; Decky
+ * keeps the map from their names (Field, Background), so these follow along.
+ */
+function fieldCss(dialog: Record<string, string> | undefined): string {
+  const field = dialog?.Field && dialog?.Background ? `.${dialog.Field}.${dialog.Background}` : "";
+  return `
+${field ? `.mc-center ${field} { background: transparent !important; }` : ""}
+${field ? `.mc-center ${field}.gpfocuswithin, .mc-center ${field}.gpfocus { background: rgba(255, 255, 255, 0.07) !important; border-radius: 6px; }` : ""}
+${field ? `.mc-center ${field}:has([class*="SliderControlPanelGroup"]), .mc-center ${field}.gpfocuswithin:has([class*="SliderControlPanelGroup"]) { background: transparent !important; }` : ""}
+${field ? `.mc-center ${field}:has([class*="SliderControlPanelGroup"])::before, .mc-center ${field}:has([class*="SliderControlPanelGroup"])::after { display: none !important; }` : ""}
+.mc-center [class*="SliderControlPanelGroup"] { background: transparent !important; }
+.mc-center [class*="SliderControlPanelGroup"].gpfocus [class~="SliderHandle"] { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.35); }
 `;
+}
+
+/**
+ * A button handler that keeps the press to itself. Steam passes gamepad buttons on up the page, and
+ * the page behind the media center has an X of its own ("Change artwork").
+ */
+export const stopping =
+  (handler: (e?: any) => void) =>
+  (e?: any): void => {
+    e?.stopPropagation?.();
+    handler(e);
+  };
 
 /** A shelf card's width by the Customize choice: about eight, six or four across, whatever the screen and Steam's UI scale */
+// ...and never taller than leaves a whole row (cover, title, subtitle) on screen above the now-playing
+// bar, however short the screen or large Steam's UI scale
 const CARD_SIZES = {
-  small: "clamp(80px, 10.5vw, 150px)",
-  medium: "clamp(96px, 14vw, 190px)",
-  large: "clamp(120px, 20vw, 260px)",
+  small: "min(clamp(80px, 10.5vw, 150px), 24vh)",
+  medium: "min(clamp(96px, 14vw, 190px), 28vh)",
+  large: "min(clamp(120px, 20vw, 260px), 32vh)",
 };
 const useCardSize = () => CARD_SIZES[useStore(pluginState)?.center?.cards ?? "medium"] ?? CARD_SIZES.medium;
 
@@ -96,7 +125,7 @@ export const Card: FC<{
       onActivate={onOpen}
       onClick={onOpen}
       onOKActionDescription="Open"
-      onSecondaryButton={onPlay}
+      onSecondaryButton={onPlay && stopping(onPlay)}
       onSecondaryActionDescription={onPlay ? "Play" : undefined}
       onOptionsButton={onOptions}
       onOptionsActionDescription={onOptions ? "Options" : undefined}
@@ -123,7 +152,9 @@ export const Shelf: FC<{ title?: string; children: ReactNode }> = ({ title, chil
       flow-children="row"
       className="mc-shelf"
       // room for a focused card to grow without being clipped
-      style={{ display: "flex", gap: 22, overflowX: "auto", padding: "10px 12px 14px", margin: "-10px -12px 0" }}
+      // to the screen's edges, as Steam's own rows: cards scroll off the edge rather than being cut at
+      // the page's margin; the padding is room for a focused card to grow
+      style={{ display: "flex", gap: 22, overflowX: "auto", padding: "10px 2.8vw 14px", margin: "-10px -2.8vw 0" }}
     >
       {children}
     </Focusable>
@@ -208,7 +239,7 @@ export const TrackLine: FC<{
       onActivate={onPlay}
       onClick={onPlay}
       onOKActionDescription="Play"
-      onSecondaryButton={onSecondary}
+      onSecondaryButton={onSecondary && stopping(onSecondary)}
       onSecondaryActionDescription={onSecondary ? (secondaryLabel ?? "Add to queue") : undefined}
       onOptionsButton={onOptions}
       onOptionsActionDescription={onOptions ? "Options" : undefined}
@@ -378,7 +409,7 @@ export const TrackCard: FC<{
       onActivate={onPlay}
       onClick={onPlay}
       onOKActionDescription="Play"
-      onSecondaryButton={onSecondary}
+      onSecondaryButton={onSecondary && stopping(onSecondary)}
       onSecondaryActionDescription={onSecondary ? "Add to queue" : undefined}
       onGamepadFocus={() => setFocused(true)}
       onGamepadBlur={() => setFocused(false)}
