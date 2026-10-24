@@ -36,7 +36,8 @@ pnpm build                              # src/ -> dist/index.js
 python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/<platform>/
 bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static musl for x86_64 and arm64 Linux, Windows .exe
 pnpm smoke                              # the built bundle loads, wires its player, unloads cleanly
-python scripts/package.py               # out/MusicDeck-<version>.zip and its .sha256
+python scripts/package.py               # out/MusicDeck-<version>-<platform>.zip (linux-x86_64, linux-arm64,
+                                        # windows-x86_64), each with its own helpers, and their .sha256
 ```
 
 - `vendor.py` installs exactly the versions pinned in `requirements.txt`, pure-Python wheels only
@@ -48,7 +49,8 @@ python scripts/package.py               # out/MusicDeck-<version>.zip and its .s
 ## Install on a device
 
 Enable Decky's developer mode, then **Decky → Settings → Developer → Install plugin from ZIP** with
-`out/MusicDeck-<version>.zip`. Do this once; afterwards use the deploy script.
+the zip for its platform (`out/MusicDeck-<version>-linux-x86_64.zip` for a Steam Deck). Do this once; afterwards
+use the deploy script.
 
 ## Fast iteration: deploy and hot-reload
 
@@ -238,4 +240,4 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py`.
 4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && python scripts/package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
-6. Commit as "Release <version>", tag `v<version>`, and attach `out/MusicDeck-<version>.zip` and its `.sha256`.
+6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.

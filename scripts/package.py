@@ -1,5 +1,12 @@
-"""Builds out/MusicDeck-<version>.zip in the layout Decky expects, for "Install plugin from ZIP" in
-developer mode, and its SHA-256 beside it (out/MusicDeck-<version>.zip.sha256).
+"""Builds one zip per platform in the layout Decky expects, for "Install plugin from ZIP" in developer
+mode, each with its SHA-256 beside it:
+
+    out/MusicDeck-<version>-linux-x86_64.zip    Steam Deck, SteamOS, Bazzite and other x86_64 Linux
+    out/MusicDeck-<version>-linux-arm64.zip     Armada, DroidDeck, Steam Frame and other ARM64 Linux
+    out/MusicDeck-<version>-windows-x86_64.zip  Windows (Windows on Arm runs it too)
+
+Each carries the same plugin with only its own platform's helpers (bin/<platform>/, see
+musicdeck/native.py); the plugin's folder inside is MusicDeck on every one, as Decky expects.
 
     pnpm build && pnpm smoke && python scripts/vendor.py && python scripts/package.py
 """
@@ -33,23 +40,31 @@ for platform_name, names in HELPERS.items():
             fix = "bash scripts/build_spotify_helper.sh" if name.startswith("spotify") else "python scripts/vendor.py"
             raise SystemExit(f"bin/{platform_name}/{name} missing; run `{fix}` first")
 
-out = ROOT / "out" / f"{NAME}-{VERSION}.zip"
-out.parent.mkdir(exist_ok=True)
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-    for name in FILES:
-        z.write(ROOT / name, f"{NAME}/{name}")
-    for directory in DIRS:
-        for path in sorted((ROOT / directory).rglob("*")):
-            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".map":
-                arcname = f"{NAME}/{path.relative_to(ROOT).as_posix()}"
-                if directory == "bin":
-                    # Windows has no executable bit to copy, so mark bundled binaries rwxr-xr-x explicitly
-                    info = zipfile.ZipInfo.from_file(path, arcname)
-                    info.external_attr = 0o100755 << 16
-                    info.compress_type = zipfile.ZIP_DEFLATED
-                    z.writestr(info, path.read_bytes())
-                else:
-                    z.write(path, arcname)
-digest = hashlib.sha256(out.read_bytes()).hexdigest()
-(out.parent / f"{out.name}.sha256").write_text(f"{digest}  {out.name}\n")
-print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)\nsha256 {digest}")
+OUT = ROOT / "out"
+OUT.mkdir(exist_ok=True)
+# zips of this version from before (one for every platform, or another platform list) go
+for old in OUT.glob(f"{NAME}-{VERSION}*.zip*"):
+    old.unlink()
+
+for platform_name in HELPERS:
+    out = OUT / f"{NAME}-{VERSION}-{platform_name}.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in FILES:
+            z.write(ROOT / name, f"{NAME}/{name}")
+        for directory in DIRS:
+            # bin/: only this platform's helpers
+            base = ROOT / "bin" / platform_name if directory == "bin" else ROOT / directory
+            for path in sorted(base.rglob("*")):
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".map":
+                    arcname = f"{NAME}/{path.relative_to(ROOT).as_posix()}"
+                    if directory == "bin":
+                        # Windows has no executable bit to copy, so mark bundled binaries rwxr-xr-x explicitly
+                        info = zipfile.ZipInfo.from_file(path, arcname)
+                        info.external_attr = 0o100755 << 16
+                        info.compress_type = zipfile.ZIP_DEFLATED
+                        z.writestr(info, path.read_bytes())
+                    else:
+                        z.write(path, arcname)
+    digest = hashlib.sha256(out.read_bytes()).hexdigest()
+    (OUT / f"{out.name}.sha256").write_text(f"{digest}  {out.name}\n")
+    print(f"wrote {out.name} ({out.stat().st_size / 1e6:.1f} MB)  sha256 {digest}")

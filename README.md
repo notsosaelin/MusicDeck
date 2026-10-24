@@ -195,8 +195,15 @@ browser first (Spotify's page also offers "Not you?").
 ## Install
 
 Until it's in the Decky store: enable Decky's developer mode, then **Decky → Settings → Developer → Install
-plugin from ZIP** with `MusicDeck-<version>.zip` (its SHA-256 is in the `.sha256` file beside it). What
-changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+plugin from ZIP** with the zip for your system (its SHA-256 is in the `.sha256` file beside it):
+
+| Zip | For |
+| --- | --- |
+| `MusicDeck-<version>-linux-x86_64.zip` | Steam Deck, SteamOS, Bazzite, ChimeraOS and other x86_64 Linux |
+| `MusicDeck-<version>-linux-arm64.zip` | Armada, DroidDeck, Steam Frame and other ARM64 Linux |
+| `MusicDeck-<version>-windows-x86_64.zip` | Windows, on x86_64 or Arm |
+
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Platforms
 
