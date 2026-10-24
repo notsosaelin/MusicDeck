@@ -2,7 +2,8 @@
 
 * pure-Python packages into py_modules/ (Decky adds it to sys.path), and
 * the QuickJS-NG binaries into bin/<platform>/qjs, the JavaScript engine yt-dlp uses for YouTube's
-  challenges (Linux x86_64 and arm64, Windows x86_64).
+  challenges (Linux x86_64 and arm64, Windows x86_64), and
+* on Windows, python.org's embeddable Python into bin/windows-x86_64/python/, for the yt-dlp worker.
 
 aiohttp is not installed: Decky Loader bundles it. certifi is, for the yt-dlp worker (which runs in the
 system's Python); inside Decky's process, Decky's own copy is found first. Every package is pinned to a
@@ -10,12 +11,14 @@ version and the hash of its file on PyPI (requirements.txt), and pip refuses any
 Run before packaging:  python scripts/vendor.py
 """
 import hashlib
+import io
 import pathlib
 import shutil
 import stat
 import subprocess
 import sys
 import urllib.request
+import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REQUIREMENTS = ROOT / "requirements.txt"
@@ -60,4 +63,21 @@ for platform_name, (asset, name, sha256) in QJS.items():
     qjs.chmod(qjs.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 # builds from before per-platform folders
 (ROOT / "bin" / "qjs").unlink(missing_ok=True)
+
+# Windows: python.org's embeddable Python, for the yt-dlp worker (Linux has a system Python; most
+# Windows PCs have none). Its hash is the one python.org publishes for the file.
+PYTHON_URL = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-embed-amd64.zip"
+PYTHON_SHA256 = "a93abe456ab01bd96d7a085b3cdb6566b3063f4241360d114142fbdb07f0a310"
+python_dir = ROOT / "bin" / "windows-x86_64" / "python"
+stamp = python_dir / ".source"
+if not stamp.exists() or stamp.read_text().strip() != PYTHON_SHA256:
+    data = urllib.request.urlopen(PYTHON_URL).read()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != PYTHON_SHA256:
+        raise SystemExit(f"Python download checksum mismatch: {digest}")
+    shutil.rmtree(python_dir, ignore_errors=True)
+    python_dir.mkdir(parents=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        z.extractall(python_dir)
+    stamp.write_text(PYTHON_SHA256 + "\n")
 print("vendored into py_modules/ and bin/")

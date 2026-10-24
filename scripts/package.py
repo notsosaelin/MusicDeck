@@ -31,7 +31,7 @@ if newer:
 # every platform the zip is for (musicdeck/native.py): Linux x86_64 and arm64, Windows x86_64 (which
 # Windows on Arm runs too)
 HELPERS = {"linux-x86_64": ["qjs", "spotify-helper"], "linux-arm64": ["qjs", "spotify-helper"],
-           "windows-x86_64": ["qjs.exe", "spotify-helper.exe"]}
+           "windows-x86_64": ["qjs.exe", "spotify-helper.exe", "python/python.exe"]}
 if not (ROOT / "py_modules" / "yt_dlp").exists():
     raise SystemExit("vendored files missing; run `python scripts/vendor.py` first")
 for platform_name, names in HELPERS.items():

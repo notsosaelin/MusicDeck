@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.20.2
+
+- **Windows: YouTube Music works without installing Python.** It said Python 3.10 wasn't installed: the
+  Windows zip now brings python.org's embeddable Python (3.14.8) for it, and only falls back to an installed
+  Python without it.
+
 ## 0.20.1
 
 - **Windows: Qobuz's library loads.** An album released before 1970 stopped it with "[Errno 22] Invalid

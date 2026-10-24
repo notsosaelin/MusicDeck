@@ -3053,19 +3053,26 @@ async def run():
         finally:
             steammod.native.WINDOWS, steammod._windows_steam = real_steam
         from musicdeck.services import youtube as ytplat
-        real_yt = (ytplat.native.WINDOWS, ytplat.SYSTEM_PYTHONS, ytplat.shutil.which, os.environ.pop("MUSICDECK_PYTHON", None))
+        real_yt = (ytplat.native.WINDOWS, ytplat.SYSTEM_PYTHONS, ytplat.shutil.which, ytplat.native.helper,
+                   os.environ.pop("MUSICDECK_PYTHON", None))
         try:
             ytplat.native.WINDOWS = True
             ytplat.SYSTEM_PYTHONS = [["python3"], ["python"]]
             store_stub = os.path.join(plat, "WindowsApps", "python3.exe")
             ytplat.shutil.which = lambda name: store_stub if name == "python3" else (sys.executable if name == "python" else None)
-            chosen = ytplat._system_python()
+            asked = []
+            ytplat.native.helper = lambda name, runtime_dir: asked.append((name, runtime_dir)) or sys.executable
+            shipped = ytplat._system_python("rt")
+            ytplat.native.helper = lambda name, runtime_dir: None
+            chosen = ytplat._system_python("rt")
+            check(shipped == [sys.executable] and asked == [(os.path.join("python", "python"), "rt")],
+                  f"Windows: the Python MusicDeck ships comes first: {shipped} {asked}")
             check(chosen == [sys.executable],
-                  f"Windows: the Microsoft Store's stand-in python is passed over: {chosen}")
+                  f"without it, the system's; the Microsoft Store's stand-in python is passed over: {chosen}")
         finally:
-            ytplat.native.WINDOWS, ytplat.SYSTEM_PYTHONS, ytplat.shutil.which = real_yt[:3]
-            if real_yt[3]:
-                os.environ["MUSICDECK_PYTHON"] = real_yt[3]
+            ytplat.native.WINDOWS, ytplat.SYSTEM_PYTHONS, ytplat.shutil.which, ytplat.native.helper = real_yt[:4]
+            if real_yt[4]:
+                os.environ["MUSICDECK_PYTHON"] = real_yt[4]
 
         print("albums and artists in the library")
         sub_asked = []

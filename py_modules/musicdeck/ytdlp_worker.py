@@ -18,10 +18,17 @@ Protocol: one JSON object per line on stdin -> one per line on stdout, matched b
   failures                                                                 -> {"id", "error": "..."}
 """
 import json
+import os
 import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+
+# Where its libraries are (a yt-dlp update first, then the plugin's py_modules). PYTHONPATH says the same,
+# but the embeddable Python MusicDeck ships for Windows ignores PYTHONPATH, so the worker adds them itself.
+for _path in reversed([p for p in os.environ.get("MUSICDECK_PATH", "").split(os.pathsep) if p]):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 write_lock = threading.Lock()
 

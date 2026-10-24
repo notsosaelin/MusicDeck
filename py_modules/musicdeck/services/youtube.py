@@ -52,16 +52,18 @@ COMPATIBLE_FORMAT = "bestaudio[ext=m4a]/bestaudio"
 WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ytdlp_worker.py")
 PY_MODULES = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 # A system Python to run yt-dlp in, as a command: Linux's own; on Windows, the py launcher an install
-# from python.org adds, then python on the PATH
+# from python.org adds, then python on the PATH (after the one MusicDeck ships, see _system_python)
 SYSTEM_PYTHONS = ([["py", "-3"], ["python3"], ["python"]] if native.WINDOWS
                   else [["/usr/bin/python3"], ["/usr/local/bin/python3"], ["python3"]])
 
 
-def _system_python() -> Optional[list[str]]:
-    """A complete system Python >= 3.10 (yt-dlp's minimum), as the command that starts it. Windows'
-    "python" that only opens the Microsoft Store (WindowsApps) is passed over."""
+def _system_python(runtime_dir: Optional[str] = None) -> Optional[list[str]]:
+    """A complete Python >= 3.10 (yt-dlp's minimum), as the command that starts it: on Windows first the
+    embeddable one MusicDeck ships (bin/windows-x86_64/python), as most PCs have none; else the system's.
+    Windows' "python" that only opens the Microsoft Store (WindowsApps) is passed over."""
     override = os.environ.get("MUSICDECK_PYTHON")  # for unusual distros (and tests)
-    for candidate in ([[override]] if override else []) + SYSTEM_PYTHONS:
+    shipped = native.helper(os.path.join("python", "python"), runtime_dir) if native.WINDOWS else None
+    for candidate in ([[override]] if override else []) + ([[shipped]] if shipped else []) + SYSTEM_PYTHONS:
         name, args = candidate[0], candidate[1:]
         path = shutil.which(name) if os.sep not in name and "/" not in name else (name if os.path.isfile(name) else None)
         if not path or (native.WINDOWS and "windowsapps" in path.lower()):
@@ -87,7 +89,7 @@ def _clean_env(extra_path: Optional[str] = None) -> dict[str, str]:
     else:
         env.pop("LD_LIBRARY_PATH", None)
     # an installed yt-dlp update (see ytdlp_update.py) shadows the bundled copy
-    env["PYTHONPATH"] = os.pathsep.join(p for p in (extra_path, PY_MODULES) if p)
+    env["PYTHONPATH"] = env["MUSICDECK_PATH"] = os.pathsep.join(p for p in (extra_path, PY_MODULES) if p)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
@@ -114,10 +116,10 @@ class YouTubeWorker:
         async with self.lock:
             if self.proc and self.proc.returncode is None:
                 return
-            python = await asyncio.to_thread(_system_python)
+            python = await asyncio.to_thread(_system_python, self.runtime_dir)
             if not python:
-                raise ServiceError("YouTube playback needs Python 3.10 or newer on this system"
-                                   + (" (python.org)" if native.WINDOWS else ""))
+                raise ServiceError("YouTube needs Python 3.10 or newer on this system"
+                                   + ("; reinstall MusicDeck, which brings one" if native.WINDOWS else ""))
             self.proc = await asyncio.create_subprocess_exec(
                 *python, "-u", WORKER_SCRIPT, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, env=_clean_env(ytdlp_update.active_path(self.runtime_dir)),

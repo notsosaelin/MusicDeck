@@ -213,8 +213,8 @@ What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 | ARM64 Linux: [Armada](https://github.com/armada-os/armada) on ARM handhelds, [DroidDeck](https://github.com/Droid-Deck/DroidDeck) on Android, Steam Frame | Decky 3.3 or newer (Armada and DroidDeck ship it) | Experimental: ARM64 builds of its helpers ship in the zip |
 | Windows (x86_64, and Arm through Windows' emulation) | Decky 3.3's experimental Windows build, e.g. installed by [Playhub](https://github.com/LoZazaMastro/Playhub) | Experimental |
 
-On Windows, some things work differently: YouTube needs Python 3.10 or newer installed (from python.org;
-MusicDeck runs yt-dlp in it); one equalizer for every output (Windows doesn't say which output is in use the
+On Windows, some things work differently: YouTube runs in the Python that comes with MusicDeck's Windows
+zip (python.org's embeddable Python; nothing to install); one equalizer for every output (Windows doesn't say which output is in use the
 way PipeWire does); new music in your folders is found by the hourly check rather than at once; screen off
 and lowering the music in games depend on Steam's game mode, which Windows doesn't have; the Steam
 soundtracks source finds Steam where Windows' registry says it is. Decky's team doesn't support Windows: ask

@@ -30,16 +30,16 @@ def _candidates(platform_name: str) -> list[str]:
     return [platform_name, "windows-x86_64"] if platform_name == "windows-arm64" else [platform_name]
 
 
-def helper(name: str, runtime_dir: str, platform_name: Optional[str] = None) -> Optional[str]:
+def helper(name: str, runtime_dir: Optional[str], platform_name: Optional[str] = None) -> Optional[str]:
     """A helper program built for this platform: in the data folder's bin/ (a side-loaded copy) or the
     plugin's, under bin/<platform>/, made executable if unpacking lost that. None when there's no build
     for this platform. Builds from before per-platform folders sat in bin/ itself, for linux-x86_64."""
     platform_name = platform_name or platform_id()
     exe = name + (".exe" if platform_name.startswith("windows") else "")
-    places = [os.path.join(base, "bin", p, exe) for base in (runtime_dir, PLUGIN_ROOT)
-              for p in _candidates(platform_name)]
+    bases = [b for b in (runtime_dir, PLUGIN_ROOT) if b]
+    places = [os.path.join(base, "bin", p, exe) for base in bases for p in _candidates(platform_name)]
     if platform_name == "linux-x86_64":
-        places += [os.path.join(runtime_dir, "bin", name), os.path.join(PLUGIN_ROOT, "bin", name)]
+        places += [os.path.join(base, "bin", name) for base in bases]
     for path in places:
         if os.path.isfile(path):
             if not WINDOWS and not os.access(path, os.X_OK):
