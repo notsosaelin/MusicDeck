@@ -633,13 +633,6 @@ export class Player {
     return true;
   }
 
-  /** Fills `into` with the sound's waveform now (128 = silence), for the oscilloscope; false as levels(). */
-  waveform(into: Uint8Array): boolean {
-    if (!this.analyser || this.casting) return false;
-    this.analyser.getByteTimeDomainData(into as Uint8Array<ArrayBuffer>);
-    return true;
-  }
-
   /** Back or ahead by `seconds` (talk's skip buttons), within the track. */
   skipBy(seconds: number) {
     const { duration } = this.position.get();
@@ -804,6 +797,10 @@ export class Player {
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.78;
+    // music's low end sits near 0 dB: with the default -100..-30 range it reads full all the time, and
+    // the visualizers' bass never moves
+    this.analyser.minDecibels = -85;
+    this.analyser.maxDecibels = -10;
     let node: AudioNode = this.preamp;
     for (const f of this.filters) node = node.connect(f);
     node.connect(this.analyser).connect(this.ducker).connect(this.ctx.destination);

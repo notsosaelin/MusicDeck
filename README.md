@@ -16,7 +16,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   switch between them like any other source.
 - **Native Quick Access tab:** Now playing, Library, Search and Settings, with a mini player while you
   browse, built from Steam's own components and controller conventions. Now playing is two pages: the
-  player, then below it the song's lyrics (a small visualizer when there are none) or the queue. Settings
+  player, then below it the song's lyrics (when there are none, the cover as a turning record with the music round it) or the queue. Settings
   has what the media center's has: the equalizer, playback, scrobbling, games and the media center's own
   choices (sources are picked in Decky → MusicDeck).
 - **Your music library:** local files as a library, not a folder list: albums (compilations kept whole, discs

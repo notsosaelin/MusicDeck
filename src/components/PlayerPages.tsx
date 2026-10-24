@@ -2,7 +2,7 @@ import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { openMediaCenter, showTab } from "../nav";
 import { player } from "../player";
-import { Store, useStore } from "../store";
+import { Store, mediaUrl, useStore } from "../store";
 import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "./LyricsView";
 import { NowPlaying } from "./NowPlaying";
 import { Queue, confirmClearQueue } from "./Queue";
@@ -274,7 +274,10 @@ const PanelLyrics: FC<{ height: number }> = ({ height }) => {
         <Spinner style={{ width: 32, height: 32 }} />
       </div>,
     );
-  if (!lyrics || "error" in lyrics) return focusable(<Visualizer look="wave" height={height} />);
+  if (!lyrics || "error" in lyrics) {
+    const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
+    return focusable(<Visualizer look="record" height={height} art={art} />);
+  }
   return focusable(
     <>
       {lyrics.synced ? (

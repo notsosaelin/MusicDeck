@@ -3,6 +3,14 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.19.0
+
+- **A new visualizer in the Quick Access panel:** the song's cover as a record, turning while the music plays
+  and slowing to a stop when it pauses, with the music as spokes round it (the bass at the top) in the
+  cover's own colour, and a glow behind that swells with the bass. It fills the page instead of a thin line
+  across it.
+- The visualizers read the music over a wider range, so loud bass no longer holds the low end at full.
+
 ## 0.18.1
 
 - Songs say nothing about their lyrics any more: no "Lyrics aren't available right now" under the visualizer
