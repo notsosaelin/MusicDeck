@@ -1,9 +1,11 @@
 """Installs the plugin's third-party pieces into the plugin folder:
 
 * pure-Python packages into py_modules/ (Decky adds it to sys.path), and
-* the QuickJS-NG binary into bin/qjs, the JavaScript engine yt-dlp uses for YouTube's challenges.
+* the QuickJS-NG binaries into bin/<platform>/qjs, the JavaScript engine yt-dlp uses for YouTube's
+  challenges (Linux x86_64 and arm64, Windows x86_64).
 
-aiohttp and certifi are not installed: Decky Loader bundles them. Every package is pinned to a
+aiohttp is not installed: Decky Loader bundles it. certifi is, for the yt-dlp worker (which runs in the
+system's Python); inside Decky's process, Decky's own copy is found first. Every package is pinned to a
 version and the hash of its file on PyPI (requirements.txt), and pip refuses anything else.
 Run before packaging:  python scripts/vendor.py
 """
@@ -20,9 +22,16 @@ REQUIREMENTS = ROOT / "requirements.txt"
 PY_MODULES = ROOT / "py_modules"
 
 QJS_VERSION = "v0.17.0"
-QJS_URL = f"https://github.com/quickjs-ng/quickjs/releases/download/{QJS_VERSION}/qjs-linux-x86_64"
-# Pinned: upstream publishes no checksums, so this is the hash of the official release asset.
-QJS_SHA256 = "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5"
+QJS_RELEASE = f"https://github.com/quickjs-ng/quickjs/releases/download/{QJS_VERSION}"
+# One per platform MusicDeck ships for (bin/<platform>/, see musicdeck/native.py): the release asset and
+# its hash. Pinned: upstream publishes no checksums, so these are the hashes of the official assets.
+# Windows on Arm runs the x86_64 build (QuickJS-NG publishes none for it).
+QJS = {
+    "linux-x86_64": ("qjs-linux-x86_64", "qjs", "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5"),
+    "linux-arm64": ("qjs-linux-aarch64", "qjs", "3372133484edf50a69f3c67903af41206d22a061e930e3cfb63269272ef56d2e"),
+    "windows-x86_64": ("qjs-windows-x86_64.exe", "qjs.exe",
+                       "2aeabf0092c3262d6b2609824418f7dd7ed1f1df939f73b2b15645230cac0d77"),
+}
 
 # Force portable pure-Python wheels: building on Windows/macOS must not pull in compiled wheels for
 # the build machine (e.g. charset-normalizer's mypyc build) that can't load on the Deck.
@@ -38,13 +47,17 @@ subprocess.check_call([
 for extra in ("bin", "share"):
     shutil.rmtree(PY_MODULES / extra, ignore_errors=True)
 
-qjs = ROOT / "bin" / "qjs"
-if not qjs.exists() or hashlib.sha256(qjs.read_bytes()).hexdigest() != QJS_SHA256:
-    qjs.parent.mkdir(exist_ok=True)
-    data = urllib.request.urlopen(QJS_URL).read()
+for platform_name, (asset, name, sha256) in QJS.items():
+    qjs = ROOT / "bin" / platform_name / name
+    if qjs.exists() and hashlib.sha256(qjs.read_bytes()).hexdigest() == sha256:
+        continue
+    qjs.parent.mkdir(parents=True, exist_ok=True)
+    data = urllib.request.urlopen(f"{QJS_RELEASE}/{asset}").read()
     digest = hashlib.sha256(data).hexdigest()
-    if digest != QJS_SHA256:
-        raise SystemExit(f"QuickJS download checksum mismatch: {digest}")
+    if digest != sha256:
+        raise SystemExit(f"QuickJS download checksum mismatch for {asset}: {digest}")
     qjs.write_bytes(data)
     qjs.chmod(qjs.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+# builds from before per-platform folders
+(ROOT / "bin" / "qjs").unlink(missing_ok=True)
 print("vendored into py_modules/ and bin/")

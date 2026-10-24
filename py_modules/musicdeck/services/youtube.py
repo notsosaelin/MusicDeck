@@ -20,18 +20,16 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .. import debuglog, models, ytdlp_update
+from .. import debuglog, models, native, ytdlp_update
 from ..background import spawn
 from ..cache import Cache
 from .base import LocalLikes, MusicService, ServiceError, StreamSource, rows_or_tiles
 
-PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 # Shipped in the plugin's bin/; a copy in the data folder also works (e.g. updated or side-loaded)
 QJS_NAME = "qjs"
 # Once the fast path has failed, go straight to QuickJS for a while instead of paying twice
@@ -53,21 +51,26 @@ COMPATIBLE_FORMAT = "bestaudio[ext=m4a]/bestaudio"
 
 WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ytdlp_worker.py")
 PY_MODULES = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-SYSTEM_PYTHONS = ["/usr/bin/python3", "/usr/local/bin/python3", "python3"]
+# A system Python to run yt-dlp in, as a command: Linux's own; on Windows, the py launcher an install
+# from python.org adds, then python on the PATH
+SYSTEM_PYTHONS = ([["py", "-3"], ["python3"], ["python"]] if native.WINDOWS
+                  else [["/usr/bin/python3"], ["/usr/local/bin/python3"], ["python3"]])
 
 
-def _system_python() -> Optional[str]:
-    """A complete system Python >= 3.10 (yt-dlp's minimum)."""
+def _system_python() -> Optional[list[str]]:
+    """A complete system Python >= 3.10 (yt-dlp's minimum), as the command that starts it. Windows'
+    "python" that only opens the Microsoft Store (WindowsApps) is passed over."""
     override = os.environ.get("MUSICDECK_PYTHON")  # for unusual distros (and tests)
-    for candidate in ([override] if override else []) + SYSTEM_PYTHONS:
-        path = shutil.which(candidate) if os.sep not in candidate else (candidate if os.path.isfile(candidate) else None)
-        if not path:
+    for candidate in ([[override]] if override else []) + SYSTEM_PYTHONS:
+        name, args = candidate[0], candidate[1:]
+        path = shutil.which(name) if os.sep not in name and "/" not in name else (name if os.path.isfile(name) else None)
+        if not path or (native.WINDOWS and "windowsapps" in path.lower()):
             continue
         try:
-            out = subprocess.run([path, "-c", "import sys; print(sys.version_info >= (3, 10))"],
-                                 capture_output=True, text=True, timeout=10, env=_clean_env())
+            out = subprocess.run([path, *args, "-c", "import sys; print(sys.version_info >= (3, 10))"],
+                                 capture_output=True, text=True, timeout=10, env=_clean_env(), **native.NO_WINDOW)
             if out.stdout.strip() == "True":
-                return path
+                return [path, *args]
         except (OSError, subprocess.SubprocessError):
             continue
     return None
@@ -113,11 +116,12 @@ class YouTubeWorker:
                 return
             python = await asyncio.to_thread(_system_python)
             if not python:
-                raise ServiceError("YouTube playback needs the system's Python 3.10 or newer")
+                raise ServiceError("YouTube playback needs Python 3.10 or newer on this system"
+                                   + (" (python.org)" if native.WINDOWS else ""))
             self.proc = await asyncio.create_subprocess_exec(
-                python, "-u", WORKER_SCRIPT, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                *python, "-u", WORKER_SCRIPT, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, env=_clean_env(ytdlp_update.active_path(self.runtime_dir)),
-                limit=8 * 1024 * 1024)
+                limit=8 * 1024 * 1024, **native.NO_WINDOW)
             assert self.proc.stdout
             await asyncio.wait_for(self.proc.stdout.readline(), 30)  # {"ready": true}
             debuglog.debug("youtube", "worker started", python=python)
@@ -233,18 +237,9 @@ class YouTubeService(LocalLikes, MusicService):
         self._lyrics_ids: Cache[Optional[str]] = Cache(LYRICS_IDS_TTL, LYRICS_IDS_KEPT)
         self.worker = YouTubeWorker(runtime_dir)
         self.update_status = ""
-        self.qjs_path = next((p for p in (os.path.join(runtime_dir, "bin", QJS_NAME),
-                                          os.path.join(PLUGIN_ROOT, "bin", QJS_NAME)) if os.path.isfile(p)), None)
+        self.qjs_path = native.helper(QJS_NAME, runtime_dir)
 
     async def start(self) -> None:
-        if self.qjs_path:
-            # zips extracted on some systems lose the executable bit
-            mode = os.stat(self.qjs_path).st_mode
-            if not mode & stat.S_IXUSR:
-                try:
-                    os.chmod(self.qjs_path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                except OSError:
-                    pass
         debuglog.debug("youtube", "javascript engine", qjs=self.qjs_path)
 
         if ytdlp_update.check_due(self.runtime_dir):

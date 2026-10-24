@@ -3027,6 +3027,46 @@ async def run():
               and {t["group"] for t in sub.center_tabs() if t["id"] in Sub.PICKS} == {"listening"},
               f"Navidrome's Browse: its library in parts, picks from it: {opened}")
 
+        print("platforms")
+        from musicdeck import native
+        check([native.platform_id(s, m) for s, m in [("Linux", "x86_64"), ("Linux", "aarch64"), ("Windows", "AMD64"),
+                                                     ("Windows", "ARM64"), ("Darwin", "arm64")]]
+              == ["linux-x86_64", "linux-arm64", "windows-x86_64", "windows-arm64", "macos-arm64"],
+              "each system and CPU named as bin/ names them")
+        plat = tempfile.mkdtemp()
+        for rel in ("bin/linux-arm64/fakejs", "bin/windows-x86_64/fakejs.exe", "bin/fakehelper"):
+            os.makedirs(os.path.join(plat, os.path.dirname(rel)), exist_ok=True)
+            open(os.path.join(plat, rel), "wb").close()
+        found = [native.helper(n, plat, p) for p, n in [("linux-arm64", "fakejs"), ("windows-arm64", "fakejs"),
+                                                          ("linux-x86_64", "fakehelper"), ("linux-arm64", "fakehelper")]]
+        check(found[0].endswith(os.path.join("linux-arm64", "fakejs"))
+              and found[1].endswith(os.path.join("windows-x86_64", "fakejs.exe"))
+              and found[2] == os.path.join(plat, "bin", "fakehelper") and found[3] is None,
+              f"each platform's helper; Windows on Arm runs x86_64's; only x86_64 Linux has the old layout: {found}")
+        from musicdeck.services import steam as steammod
+        real_steam = (native.WINDOWS, steammod._windows_steam)
+        os.makedirs(os.path.join(plat, "Steam", "steamapps"))
+        try:
+            steammod.native.WINDOWS, steammod._windows_steam = True, lambda: [os.path.join(plat, "Steam")]
+            check(steammod.steam_roots(plat) == [os.path.realpath(os.path.join(plat, "Steam"))],
+                  "Steam found where Windows' registry says it is")
+        finally:
+            steammod.native.WINDOWS, steammod._windows_steam = real_steam
+        from musicdeck.services import youtube as ytplat
+        real_yt = (ytplat.native.WINDOWS, ytplat.SYSTEM_PYTHONS, ytplat.shutil.which, os.environ.pop("MUSICDECK_PYTHON", None))
+        try:
+            ytplat.native.WINDOWS = True
+            ytplat.SYSTEM_PYTHONS = [["python3"], ["python"]]
+            store_stub = os.path.join(plat, "WindowsApps", "python3.exe")
+            ytplat.shutil.which = lambda name: store_stub if name == "python3" else (sys.executable if name == "python" else None)
+            chosen = ytplat._system_python()
+            check(chosen == [sys.executable],
+                  f"Windows: the Microsoft Store's stand-in python is passed over: {chosen}")
+        finally:
+            ytplat.native.WINDOWS, ytplat.SYSTEM_PYTHONS, ytplat.shutil.which = real_yt[:3]
+            if real_yt[3]:
+                os.environ["MUSICDECK_PYTHON"] = real_yt[3]
+
         print("albums and artists in the library")
         sub_asked = []
 

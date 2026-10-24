@@ -1,16 +1,31 @@
 #!/usr/bin/env bash
-# Builds bin/spotify-helper as a fully static x86_64 Linux binary (musl), so it runs on SteamOS,
-# Bazzite and other distros without depending on their libraries.
+# Builds the Spotify helper for every platform MusicDeck ships for, into bin/<platform>/ (see
+# musicdeck/native.py): fully static Linux binaries (musl) for x86_64 and arm64, so they run on
+# SteamOS, Bazzite, Armada, DroidDeck and other distros without depending on their libraries, and a
+# Windows x86_64 .exe (Windows on Arm runs it through its emulation).
 #
-# Needs: rustup with the x86_64-unknown-linux-musl target, cargo-zigbuild, and zig on PATH.
-#   rustup target add x86_64-unknown-linux-musl
+# Needs: rustup with the targets below, cargo-zigbuild, and zig (on PATH, or `pip install ziglang`).
+#   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu
 #   cargo install --locked cargo-zigbuild
-# Works from Linux or WSL.
+# Works from Linux or WSL. Pass platforms to build only those: build_spotify_helper.sh linux-arm64
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/musicdeck-build/spotify-helper}"
+declare -A TARGETS=(
+  [linux-x86_64]=x86_64-unknown-linux-musl
+  [linux-arm64]=aarch64-unknown-linux-musl
+  [windows-x86_64]=x86_64-pc-windows-gnu
+)
+PLATFORMS=("${@:-linux-x86_64 linux-arm64 windows-x86_64}")
 cd "$ROOT/backend/spotify-helper"
-CARGO_TARGET_DIR="$TARGET_DIR" cargo zigbuild --release --locked --target x86_64-unknown-linux-musl
-mkdir -p "$ROOT/bin"
-install -m 0755 "$TARGET_DIR/x86_64-unknown-linux-musl/release/spotify-helper" "$ROOT/bin/spotify-helper"
-echo "built $ROOT/bin/spotify-helper"
+for platform in ${PLATFORMS[@]}; do
+  target="${TARGETS[$platform]}"
+  CARGO_TARGET_DIR="$TARGET_DIR" cargo zigbuild --release --locked --target "$target"
+  exe=spotify-helper
+  [[ "$platform" == windows-* ]] && exe=spotify-helper.exe
+  mkdir -p "$ROOT/bin/$platform"
+  install -m 0755 "$TARGET_DIR/$target/release/$exe" "$ROOT/bin/$platform/$exe"
+  echo "built $ROOT/bin/$platform/$exe"
+done
+# builds from before per-platform folders
+rm -f "$ROOT/bin/spotify-helper"

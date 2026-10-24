@@ -13,8 +13,8 @@ remote debugging enabled (Decky settings → Developer) plus `pip install websoc
 it still copies the files; reload from Decky's developer settings instead.
 
 The plugin folder is owned by root, but its py_modules/ and dist/ are writable by the user Decky
-installs as, which is all this needs. Binaries (spotify-helper, qjs) go to the plugin's data folder,
-where MusicDeck also looks for them.
+installs as, which is all this needs. Binaries (spotify-helper, qjs) for the device's CPU go to the
+plugin's data folder (bin/<platform>/), where MusicDeck also looks for them.
 """
 import asyncio
 import json
@@ -58,10 +58,14 @@ def upload(device: str, backend: bool) -> None:
     # a running helper keeps its binary busy, and the old backend must not see half-copied files
     ssh(device, f"pkill -x spotify-helper; cd {plugin} && find py_modules -mindepth 1 -delete; "
                 f"tar xzf {data}/backend.tgz --overwrite -C {plugin} && rm {data}/backend.tgz")
-    for binary in (ROOT / "bin").glob("*"):
-        scp(device, binary, f"{data}/bin/{binary.name}")
-        ssh(device, f"chmod 755 {data}/bin/{binary.name}")
-    print("backend copied")
+    # the helpers built for the device's CPU (bin/<platform>/, see musicdeck/native.py); copies from
+    # before per-platform folders go
+    platform_name = "linux-arm64" if ssh(device, "uname -m").strip() in ("aarch64", "arm64") else "linux-x86_64"
+    ssh(device, f"mkdir -p {data}/bin/{platform_name} && rm -f {data}/bin/qjs {data}/bin/spotify-helper")
+    for binary in (ROOT / "bin" / platform_name).glob("*"):
+        scp(device, binary, f"{data}/bin/{platform_name}/{binary.name}")
+        ssh(device, f"chmod 755 {data}/bin/{platform_name}/{binary.name}")
+    print(f"backend copied ({platform_name})")
 
 
 async def reload(device: str, backend: bool) -> None:

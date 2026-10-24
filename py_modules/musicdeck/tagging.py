@@ -11,6 +11,7 @@ dot-file the library scan skips.
 """
 import os
 import shutil
+import time
 from typing import Any, Optional
 
 try:
@@ -127,6 +128,21 @@ def _write_key(tags: Any, key: str, values: Optional[list[str]]) -> None:
         del tags[key]
 
 
+def _replace(temp: str, path: str) -> None:
+    """The edited copy in the file's place. Windows refuses while another program has the file open (the
+    stream server sending it to the player): a few tries, then a reason."""
+    for attempt in range(6):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            if os.name != "nt":
+                raise TagError("MusicDeck isn't allowed to write in this folder")
+            if attempt == 5:
+                raise TagError("The file is in use; try again when it isn't playing")
+            time.sleep(0.25)
+
+
 def _save_atomically(path: str, change: Any) -> None:
     """Runs change(audio) on a copy of the file, saves it, then puts the copy in the file's place."""
     directory, name = os.path.split(path)
@@ -144,7 +160,7 @@ def _save_atomically(path: str, change: Any) -> None:
             audio.save()
         except Exception as e:
             raise TagError(f"Couldn't save the tags: {e}")
-        os.replace(temp, path)
+        _replace(temp, path)
     finally:
         if os.path.exists(temp):
             os.remove(temp)

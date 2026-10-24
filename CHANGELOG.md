@@ -3,6 +3,17 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.20.0
+
+**ARM and Windows, experimental.** Decky Loader 3.3 runs on ARM64 Linux and Windows, and so does MusicDeck now:
+- **ARM64 Linux** (Armada on ARM handhelds, DroidDeck on Android, Steam Frame): the zip carries ARM64 builds of
+  the Spotify helper and YouTube's JavaScript engine, and MusicDeck picks the ones for the device it's on.
+- **Windows** (Decky's Windows build, e.g. through Playhub; Windows on Arm too): Windows builds of both helpers,
+  started without console windows; YouTube runs in an installed Python 3.10 or newer (python.org); the Steam
+  soundtracks source finds Steam's folder from the registry; editing tags waits a moment for a file Windows
+  has open, then says it's in use.
+- The Steam Deck and other x86_64 SteamOS-like systems work as before.
+
 ## 0.19.0
 
 - **A new visualizer in the Quick Access panel:** the song's cover as a record, turning while the music plays

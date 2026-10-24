@@ -10,8 +10,9 @@ main.py                    Decky backend entry point: the Plugin class and every
 py_modules/musicdeck/      backend package (services/, stream server, settings, playlists, ...)
 py_modules/<others>/       vendored third-party packages (not in git; see scripts/vendor.py)
 src/                       frontend (TypeScript + React, built by rollup into dist/index.js)
-backend/spotify-helper/    Rust source of bin/spotify-helper
-bin/                       built native helpers: spotify-helper, qjs (not in git)
+backend/spotify-helper/    Rust source of the Spotify helper
+bin/<platform>/            built native helpers, spotify-helper and qjs, per platform (linux-x86_64,
+                           linux-arm64, windows-x86_64; not in git; see musicdeck/native.py)
 scripts/                   vendor, package, deploy, helper build, CDP tool
 tests/test_backend.py      backend test suite (no device, no network)
 tests/ui/                  frontend logic tests (Node's test runner; Steam's pieces are stand-ins)
@@ -23,7 +24,8 @@ decky.pyi                  type stubs for Decky's `decky` module (from the plugi
 
 - Node 18+ and pnpm 9 (`npx -y pnpm@9` works without installing)
 - Python 3.10+ (for scripts and tests)
-- For the Spotify helper: Rust (rustup), the `x86_64-unknown-linux-musl` target, cargo-zigbuild
+- For the Spotify helper: Rust (rustup), the `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`
+  and `x86_64-pc-windows-gnu` targets, cargo-zigbuild
   and zig. Linux or WSL.
 
 ## Build
@@ -31,8 +33,8 @@ decky.pyi                  type stubs for Decky's `decky` module (from the plugi
 ```sh
 pnpm install
 pnpm build                              # src/ -> dist/index.js
-python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/qjs
-bash scripts/build_spotify_helper.sh    # bin/spotify-helper (static musl binary)
+python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/<platform>/
+bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static musl for x86_64 and arm64 Linux, Windows .exe
 pnpm smoke                              # the built bundle loads, wires its player, unloads cleanly
 python scripts/package.py               # out/MusicDeck-<version>.zip and its .sha256
 ```

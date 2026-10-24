@@ -31,7 +31,7 @@ flowchart LR
     SS --> SV
   end
   W["ytdlp_worker.py<br/>(system Python, on demand)"]
-  H["bin/spotify-helper<br/>(Rust, librespot)"]
+  H["bin/&lt;platform&gt;/spotify-helper<br/>(Rust, librespot)"]
   NET[("Music services<br/>on the internet / LAN")]
 
   UI -- "callable(): browse, search, settings" --> PL
@@ -48,7 +48,7 @@ flowchart LR
 | Frontend (`src/`) | Steam's shared JS context ("SharedJSContext") | While the plugin is loaded, independent of the QAM being open | UI, the audio player, EQ, queue, sleep timer |
 | Backend (`main.py`, `py_modules/musicdeck/`) | Decky's plugin process (a frozen Python 3) | Plugin load → unload | Talks to services, stores settings, serves audio and art over loopback |
 | yt-dlp worker | System Python (`/usr/bin/python3`) | Started on first YouTube stream | Runs yt-dlp, which needs stdlib modules Decky's Python lacks |
-| Spotify helper | Native binary (`bin/spotify-helper`) | Started on first Spotify request | Holds the librespot session; serves decrypted audio and Spotify's own catalogue reads |
+| Spotify helper | Native binary (`bin/<platform>/spotify-helper`) | Started on first Spotify request | Holds the librespot session; serves decrypted audio and Spotify's own catalogue reads |
 
 ### Why playback lives in Steam's browser engine
 
@@ -150,7 +150,8 @@ Details worth knowing:
 | `musicdeck/debuglog.py` | Optional verbose log (`musicdeck-debug.log`), toggled in settings; the player's events land here too. |
 | `musicdeck/ytdlp_worker.py` | Runs under the system Python; answers yt-dlp and YouTube Music (ytmusicapi) requests as JSON lines. Started on demand, stopped after 5 idle minutes. |
 | `musicdeck/ytdlp_update.py` | Keeps yt-dlp current from PyPI (checksum-verified, rolled back if the new version fails). |
-| `backend/spotify-helper/` | Rust crate for `bin/spotify-helper` (librespot). `main.rs`: control protocol and audio server; `reads.rs`: catalogue reads over Spotify's own client API. |
+| `musicdeck/native.py` | The platform (`linux-x86_64`, `linux-arm64`, `windows-x86_64`...) and its helpers in `bin/<platform>/` (`helper()`; Windows on Arm falls back to the x86_64 builds), and `NO_WINDOW`: every helper process starts without a console window on Windows. Decky's Python is the same on every platform (Decky 3.3 freezes 3.14 with the same standard library for Linux x86_64 and arm64 and Windows); what differs is handled where it's used: the yt-dlp worker's Python (`py -3` or `python` on Windows, never the Microsoft Store's stand-in), Steam's folder (the registry on Windows), tag edits replacing a file Windows has open (retried). PipeWire's output detection and inotify are simply unavailable there. |
+| `backend/spotify-helper/` | Rust crate for the Spotify helper (librespot). `main.rs`: control protocol and audio server; `reads.rs`: catalogue reads over Spotify's own client API. |
 
 ### Frontend (`src/`)
 

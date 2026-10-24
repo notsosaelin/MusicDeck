@@ -30,7 +30,7 @@ import re
 import time
 from typing import Any, Optional
 
-from .. import models
+from .. import models, native
 from .base import MusicService, ServiceError, StreamSource
 from .local import (AUDIO_EXTENSIONS, COVER_EXTENSIONS, COVER_NAMES, _hash, extract_embedded_art, read_lyrics,
                     read_tags)
@@ -91,11 +91,27 @@ def _read_vdf(path: str) -> dict[str, Any]:
         return {}
 
 
-def steam_roots(home: str) -> list[str]:
-    """Steam's data folder: the native install, its ~/.steam link, and the Flatpak."""
+def _windows_steam() -> list[str]:
+    """Where Steam is installed on Windows: as the registry says (Steam writes it on every start), then
+    the installer's default folder."""
     found = []
-    for candidate in (os.path.join(home, ".local", "share", "Steam"), os.path.join(home, ".steam", "steam"),
-                      os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam")):
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            found.append(os.path.normpath(str(winreg.QueryValueEx(key, "SteamPath")[0])))
+    except (ImportError, OSError):
+        pass
+    program_files = os.environ.get("ProgramFiles(x86)") or os.environ.get("ProgramFiles") or r"C:\Program Files (x86)"
+    return found + [os.path.join(program_files, "Steam")]
+
+
+def steam_roots(home: str) -> list[str]:
+    """Steam's data folder: the native install, its ~/.steam link, and the Flatpak; on Windows, its
+    install folder."""
+    found = []
+    for candidate in ((*_windows_steam(),) if native.WINDOWS else ()) + (
+            os.path.join(home, ".local", "share", "Steam"), os.path.join(home, ".steam", "steam"),
+            os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam")):
         real = os.path.realpath(candidate)
         if os.path.isdir(os.path.join(real, "steamapps")) and real not in found:
             found.append(real)

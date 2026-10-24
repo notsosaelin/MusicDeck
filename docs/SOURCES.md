@@ -287,7 +287,7 @@ source (`MusicService.remove`).
   videos, albums, artists and community playlists, plus plain YouTube videos via yt-dlp when
   "Include all YouTube videos" is on.
 - **Audio**: yt-dlp. It first tries without a JavaScript engine, then with the bundled QuickJS-NG
-  (`bin/qjs`, checksum-pinned in `scripts/vendor.py`) when YouTube requires its signature challenge.
+  (`bin/<platform>/qjs`, checksum-pinned in `scripts/vendor.py`) when YouTube requires its signature challenge.
 - **The worker**: both libraries run in `ytdlp_worker.py` on the system Python (Decky's Python
   lacks modules yt-dlp needs), each imported on first use. It holds nearly all the memory YouTube
   takes (about 80 MB with both loaded, measured on a Deck), so it starts on the first YouTube
@@ -460,7 +460,7 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
      in `spotify/accounts/<username>/` (the sign-in runs in a scratch folder that becomes it).
   2. *Web API*: the public app shared by spotify-player and ncspot, or the user's own developer app
      (Client ID field), for library, search and changes. Only its refresh token is stored.
-- **Helper** (`bin/spotify-helper`, Rust, static musl build): JSON-lines control on stdin/stdout;
+- **Helper** (`bin/<platform>/spotify-helper`, Rust; static musl builds for Linux, a Windows .exe): JSON-lines control on stdin/stdout;
   `GET /track/<id>` serves the decrypted original Ogg Vorbis file with byte ranges, `/info/<id>`
   returns Spotify's loudness values from the file header.
 - **Session reads** (`reads.rs`): playlists, the playlist library (rootlist), albums, artists and
@@ -475,7 +475,7 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
   again when it tries.
 - **Requirements**: Spotify Premium. Some newer accounts can't get audio keys through librespot
   ("audio key error"); that is a librespot/Spotify limitation.
-- Build: `scripts/build_spotify_helper.sh` (cargo-zigbuild, static x86_64 musl).
+- Build: `scripts/build_spotify_helper.sh` (cargo-zigbuild: x86_64 and arm64 musl, x86_64 Windows).
 
 ---
 

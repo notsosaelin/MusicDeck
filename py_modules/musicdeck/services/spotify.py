@@ -29,12 +29,11 @@ from urllib.parse import urlencode
 import aiohttp
 from aiohttp import web
 
-from .. import debuglog, models
+from .. import debuglog, models, native
 from ..cache import Cache
 from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource
 
-PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 HELPER_NAME = "spotify-helper"
 REPLY_LIMIT = 64 * 1024 * 1024
 API = "https://api.spotify.com/v1"
@@ -94,16 +93,8 @@ def _session(timeout: float = 20) -> aiohttp.ClientSession:
 
 
 def helper_path(runtime_dir: str) -> Optional[str]:
-    """Shipped in the plugin's bin/; a copy in the data folder also works (e.g. side-loaded)."""
-    for p in (os.path.join(runtime_dir, "bin", HELPER_NAME), os.path.join(PLUGIN_ROOT, "bin", HELPER_NAME)):
-        if os.path.isfile(p):
-            if not os.access(p, os.X_OK):
-                try:
-                    os.chmod(p, 0o755)
-                except OSError:
-                    pass
-            return p
-    return None
+    """Built for this platform, in the plugin's bin/ (see native.py)."""
+    return native.helper(HELPER_NAME, runtime_dir)
 
 
 def account_dir(runtime_dir: str, username: str) -> str:
@@ -158,7 +149,7 @@ class SpotifyHelper:
                 self.proc.kill()  # alive but no longer read: replies would never arrive
             binary = helper_path(self.runtime_dir)
             if not binary:
-                raise ServiceError("The Spotify helper is missing; reinstall MusicDeck")
+                raise ServiceError(f"MusicDeck has no Spotify helper for this system ({native.platform_id()})")
             os.makedirs(self.cache_dir, exist_ok=True)
             env = dict(os.environ)
             env.pop("LD_LIBRARY_PATH", None)  # static binary; never pick up Decky's bundled libraries
@@ -167,7 +158,7 @@ class SpotifyHelper:
                 binary, "--cache", self.cache_dir, stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env,
                 # replies are one JSON line each, and a big playlist or discography runs to megabytes
-                limit=REPLY_LIMIT)
+                limit=REPLY_LIMIT, **native.NO_WINDOW)
             assert self.proc.stdout
             ready = json.loads(await asyncio.wait_for(self.proc.stdout.readline(), 15))
             self.port = int(ready["port"])
