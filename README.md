@@ -76,6 +76,10 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Downloads:** download a MusicDeck playlist and it plays with no connection (and no data used), from
   your own servers, SoundCloud, YouTube, Bandcamp, podcasts and the Live Music Archive. Each song is kept
   once however many playlists hold it, and goes when the last one lets it go.
+- **Plug in a music player:** an MP3 player, an iPod in disk mode, a USB stick or a phone set to "File
+  transfer" shows up in Decky → MusicDeck as a source while it's plugged in, as on the Xbox: pick it to
+  browse and play what's on it. MusicDeck only reads it (no tag edits). Phones need a system with GVfs in
+  game mode (Bazzite has it); on others, USB storage only.
 - **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My
   Collection on TIDAL, Add to favourites on Qobuz and your servers. SoundCloud, YouTube Music, Bandcamp and the
   Live Music Archive keep likes on the Deck, listed under Liked songs (Browse, and the panel's Library).

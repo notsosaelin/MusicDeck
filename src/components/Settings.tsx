@@ -35,8 +35,10 @@ import {
   FaServer,
   FaSoundcloud,
   FaShareAlt,
+  FaMobileAlt,
   FaSpotify,
   FaSyncAlt,
+  FaUsb,
   FaSteam,
   FaYoutube,
 } from "react-icons/fa";
@@ -133,6 +135,13 @@ const describeStatus = (s: ServiceInfo): string => {
             s.status.uploading ? `uploading ${s.status.uploading}` : "",
           )
         : s.status.error || "Connecting…";
+    case "device": {
+      const n = s.status.tracks ?? 0;
+      return parts(
+        s.device === "mtp" ? "Phone" : "USB",
+        s.status.scanning ? `Reading… ${s.status.found} files` : `${n} track${n === 1 ? "" : "s"}`,
+      );
+    }
     case "local": {
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;
       if (s.status.art?.running)
@@ -285,8 +294,9 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
     showContextMenu(
       <Menu label={service.name}>
         {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
-        <MenuItem onSelected={edit}>Edit</MenuItem>
-        {service.type === "local" || service.type === "steam" ? (
+        {/* a plugged-in device comes and goes by itself: nothing to edit or remove */}
+        {!service.device && <MenuItem onSelected={edit}>Edit</MenuItem>}
+        {service.type === "local" || service.type === "steam" || service.device ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
             Rescan library
           </MenuItem>
@@ -304,10 +314,12 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
             Find missing lyrics
           </MenuItem>
         )}
-        <MenuSeparator />
-        <MenuItem tone="destructive" onSelected={remove}>
-          Remove
-        </MenuItem>
+        {!service.device && <MenuSeparator />}
+        {!service.device && (
+          <MenuItem tone="destructive" onSelected={remove}>
+            Remove
+          </MenuItem>
+        )}
       </Menu>,
       e?.currentTarget ?? window,
     );
@@ -317,7 +329,11 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
       <Field
         focusable
         highlightOnFocus
-        icon={<span style={{ color: active ? ACCENT : undefined }}>{TYPE_ICONS[service.type]}</span>}
+        icon={
+          <span style={{ color: active ? ACCENT : undefined }}>
+            {service.device === "mtp" ? <FaMobileAlt /> : service.device ? <FaUsb /> : TYPE_ICONS[service.type]}
+          </span>
+        }
         label={
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {service.name}
@@ -718,7 +734,8 @@ export const Settings: FC = () => {
   }, []);
 
   if (!state) return null;
-  const typeName = (type: string) => state.service_types.find((t) => t.type === type)?.display_name ?? type;
+  const typeName = (type: string) =>
+    state.service_types.find((t) => t.type === type)?.display_name ?? (type === "device" ? "Plugged in" : type);
 
   // sources and the kinds of source to add, A to Z
   const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });

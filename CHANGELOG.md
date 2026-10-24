@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.23.0
+
+- **Plug in a music player**: an MP3 player, an iPod in disk mode, a USB stick, or a phone set to File
+  transfer appears in Decky → MusicDeck as a source while it's plugged in; pick it and play what's on it.
+  MusicDeck only reads it. When it's unplugged, the source you had before comes back.
+
 ## 0.22.0
 
 - **SoulSync**: play the library of the SoulSync you run. Add it with its address and an admin API key

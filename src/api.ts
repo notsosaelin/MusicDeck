@@ -179,6 +179,8 @@ export interface ServiceInfo {
   type: string;
   name: string;
   config: Record<string, any>;
+  /** a plugged-in music player, stick ("usb") or phone ("mtp"): a source only while it's there */
+  device?: "usb" | "mtp" | null;
   has_credentials: boolean;
   status: Record<string, any>;
   features: Feature[];

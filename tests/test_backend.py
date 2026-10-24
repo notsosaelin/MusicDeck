@@ -1731,6 +1731,46 @@ async def run():
         finally:
             main.SERVICE_TYPES.pop("fakestations", None)
 
+        print("plugged-in devices")
+        from musicdeck import devices as devmod
+        mounts = "\n".join([
+            "/dev/nvme0n1p3 / btrfs rw 0 0",
+            "/dev/mmcblk0p1 /run/media/deck/SD\\040Card btrfs rw 0 0",
+            "/dev/sdb1 /run/media/deck/WALKMAN vfat rw 0 0",
+            "/dev/sdc2 /run/media/deck/John\\040's\\040iPod hfsplus ro 0 0",
+            "/dev/sdd1 /mnt/backup ext4 rw 0 0",
+        ])
+        usb = devmod.usb_storage(mounts, "deck", {"/dev/sdb1": "1234-ABCD"})
+        check([(d["name"], d["kind"], d["paths"]) for d in usb]
+              == [("WALKMAN", "usb", ["/run/media/deck/WALKMAN"]), ("John 's iPod", "usb", ["/run/media/deck/John 's iPod"])]
+              and usb[0]["id"] == devmod.usb_storage(mounts, "deck", {"/dev/sdb1": "1234-ABCD"})[0]["id"],
+              f"USB players and iPods mounted for the user, not the SD card or internal drives; the same id each plug: {usb}")
+        if os.name != "nt":  # GVfs's folder names ("mtp:host=...") can't exist on Windows
+            gvfs = tempfile.mkdtemp()
+            os.makedirs(os.path.join(gvfs, "mtp:host=Google_Pixel_8_1A2B", "Internal shared storage", "Music"))
+            os.makedirs(os.path.join(gvfs, "mtp:host=Google_Pixel_8_1A2B", "Internal shared storage", "DCIM"))
+            os.makedirs(os.path.join(gvfs, "mtp:host=Old_Walkman", "Storage Media"))
+            phones = devmod.phone_storage(gvfs)
+            check([(p["name"], [os.path.basename(x) for x in p["paths"]]) for p in phones]
+                  == [("Google Pixel 8 1A2B", ["Music"]), ("Old Walkman", ["Storage Media"])],
+                  f"a phone's Music folder (not its photos); a player with none, whole: {phones}")
+        live_before = plugin.settings.get("active_service")
+        stick = {"id": "devtest00001", "name": "WALKMAN", "kind": "usb", "paths": [lib]}
+        await plugin._devices_changed([stick])
+        state = await plugin.get_state()
+        row = next((s for s in state["services"] if s["id"] == stick["id"]), None)
+        check(row is not None and row["device"] == "usb" and row["type"] == "device"
+              and "tags" not in row["features"] and "artwork" not in row["features"]
+              and not plugin.settings.find_service(stick["id"]),
+              f"a plugged-in player is a source while it's there, read only, and not saved: {row}")
+        await plugin.set_active_service(stick["id"])
+        check(plugin.settings.get("active_service") == stick["id"], "it can be the live source")
+        await plugin._devices_changed([])
+        state = await plugin.get_state()
+        check(plugin.settings.get("active_service") == live_before and stick["id"] not in plugin.instances
+              and all(s["id"] != stick["id"] for s in state["services"]),
+              "unplugged: gone, and the source live before it is live again")
+
         print("songs liked on the Deck")
         from musicdeck import models
         from musicdeck.services.base import LIKED_LIST, LocalLikes, MusicService as LikesBase

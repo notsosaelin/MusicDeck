@@ -24,6 +24,8 @@ from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError, StreamSource
 from musicdeck.services.base import LIKED_LIST, LocalLikes
+from musicdeck.devices import DeviceWatcher
+from musicdeck.services.device import DeviceService
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
 
@@ -99,6 +101,11 @@ class Plugin:
         self.output_watcher: Optional[OutputWatcher] = None
         # a Last.fm sign-in waiting for the user to approve it: {"key", "secret", "token"}
         self.lastfm_link: Optional[dict[str, str]] = None
+        # music players, sticks and phones plugged in now, each a source while it's there (not saved):
+        # {id: service}; and the source that was live before one was switched to, to go back to
+        self.devices: dict[str, dict[str, Any]] = {}
+        self.before_device: Optional[str] = None
+        self.device_watcher: Optional[DeviceWatcher] = None
 
     # --- lifecycle ---
 
@@ -139,6 +146,8 @@ class Plugin:
             self._sync_offline()  # finishes downloads an earlier session left
             self.output_watcher = OutputWatcher(self._output_changed, decky.logger)
             self.output_watcher.start()
+            self.device_watcher = DeviceWatcher(self._devices_changed, decky.logger)
+            self.device_watcher.start()
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
@@ -147,6 +156,8 @@ class Plugin:
         await cancel_all()
         if self.output_watcher:
             await self.output_watcher.stop()
+        if self.device_watcher:
+            await self.device_watcher.stop()
         await self.cast.disconnect()
         await self.offline.stop()
         for instance in list(self.instances.values()):
@@ -169,7 +180,7 @@ class Plugin:
         old = self.instances.pop(service["id"], None)
         if old:
             await old.stop()
-        cls = SERVICE_TYPES.get(service["type"])
+        cls = DeviceService if service.get("device") else SERVICE_TYPES.get(service["type"])
         if cls is None:
             decky.logger.warning(f"Skipping service of unknown type {service['type']}")
             return
@@ -189,6 +200,39 @@ class Plugin:
         if stored:
             stored["config"] = dict(config)
             self.settings.save()
+
+    def _known(self, instance_id: Any) -> Optional[dict[str, Any]]:
+        """A configured source, or a device plugged in now."""
+        if not isinstance(instance_id, str):
+            return None
+        return self.settings.find_service(instance_id) or self.devices.get(instance_id)
+
+    async def _devices_changed(self, found: list[dict[str, Any]]) -> None:
+        """Devices plugged in become sources, unplugged ones stop being; the live one unplugged hands
+        back to the source that was live before."""
+        now = {d["id"]: d for d in found}
+        for device_id in [i for i in self.devices if i not in now]:
+            gone = self.devices.pop(device_id)
+            async with self.lifecycle:
+                instance = self.instances.pop(device_id, None)
+                if instance:
+                    await instance.stop()
+            if self.settings.get("active_service") == device_id:
+                back = self.before_device if self._known(self.before_device) else None
+                self.settings.set("active_service", back or next((s["id"] for s in self.settings.services()), None))
+            decky.logger.info(f"Unplugged: {gone['name']}")
+        for device in found:
+            service = {"id": device["id"], "type": DeviceService.type, "name": device["name"],
+                       "config": {"paths": device["paths"], "kind": device["kind"]}, "device": device["kind"]}
+            if self.devices.get(device["id"]) != service:
+                new = device["id"] not in self.devices
+                self.devices[device["id"]] = service
+                await self._start_instance(service)
+                if new:
+                    decky.logger.info(f"Plugged in: {device['name']} ({device['kind']}, {len(device['paths'])} folders)")
+                    spawn(decky.emit("source_note", device["id"], "Plugged in: pick it in Decky → MusicDeck"),
+                          "device note")
+        await _announce_change()
 
     def _instance(self, instance_id: str) -> MusicService:
         instance = self.instances.get(instance_id)
@@ -216,6 +260,8 @@ class Plugin:
             # the track menu's words for a favourite (MusicService.LIKE_WORDS)
             "like_words": instance.LIKE_WORDS if instance else MusicService.LIKE_WORDS,
             "status": instance.status() if instance else {},
+            # a plugged-in device ("usb" or "mtp"), a source only while it's there
+            "device": service.get("device"),
         }
 
     def _tabs(self, instance_id: str, instance: MusicService) -> list[dict[str, Any]]:
@@ -234,7 +280,8 @@ class Plugin:
     async def get_state(self) -> dict[str, Any]:
         return {
             "version": version.current(),
-            "services": [self._public_service(s) for s in self.settings.services()],
+            "services": [self._public_service(s) for s in self.settings.services()]
+                        + [self._public_service(s) for s in self.devices.values()],
             "active_service": self.settings.get("active_service"),
             "qam_mode": self.settings.get("qam_mode"),
             "volume": self.settings.get("volume"),
@@ -350,7 +397,10 @@ class Plugin:
 
     @_when_ready
     async def set_active_service(self, instance_id: str) -> None:
-        if self.settings.find_service(instance_id):
+        if self._known(instance_id):
+            current = self.settings.get("active_service")
+            if instance_id in self.devices and current not in self.devices:
+                self.before_device = current
             self.settings.set("active_service", instance_id)
             await _announce_change()
 
@@ -475,7 +525,7 @@ class Plugin:
 
     @_when_ready
     async def search(self, instance_id: str, query: str) -> dict[str, Any]:
-        if self.settings.find_service(instance_id):
+        if self._known(instance_id):
             self.recents.add_search(instance_id, query)
         async def work():
             return self._liked(instance_id, await self._instance(instance_id).search(query))
@@ -1177,7 +1227,7 @@ class Plugin:
     @_when_ready
     async def played_collection(self, instance_id: str, collection: dict[str, Any]) -> None:
         """An album or playlist was played: it leads the source's "Jump back in" row."""
-        if self.settings.find_service(instance_id):
+        if self._known(instance_id):
             self.recents.add(instance_id, collection)
 
     # --- music that starts with a game (src/games.ts plays it) ---

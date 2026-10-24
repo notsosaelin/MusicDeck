@@ -113,6 +113,21 @@ source (`MusicService.remove`).
   first, then the rest of the library, shuffled.
 - **Security**: `open("folder", path)` refuses paths outside the configured folders.
 
+## Plugged-in devices (`device.py`, `devices.py`)
+
+- **What**: an MP3 player, iPod (disk mode), USB stick or phone, played as a source while it's plugged in
+  (not saved; `Plugin.devices`). Read only: Local files' scanner on its folders without tag editing,
+  artwork or look-ups (`DeviceService`). Its id comes from the file system's UUID or the phone's MTP name,
+  so its index, favourites and playlists are there again next time.
+- **USB storage**: SteamOS and Bazzite mount it under `/run/media/<user>/` themselves; `/proc/self/mounts`
+  says what's mounted there from a `/dev/sd*` device (the SD card and internal drives aren't "plugged in").
+- **Phones (MTP)**: GVfs lists them (`gio mount -li`, with the session bus given explicitly: Decky's
+  process doesn't have it); MusicDeck mounts those not yet mounted and plays each storage's Music,
+  Download and Podcasts folders from `/run/user/<uid>/gvfs/mtp:host=.../`. Needs GVfs in game mode
+  (Bazzite) and the phone set to File transfer. Reading over MTP is slow: the first look at a phone takes a while.
+- **Unplugged**: its source goes; if it was live, the source live before it is live again.
+- Polled every 3 s (`DeviceWatcher`). Linux only.
+
 ## Steam soundtracks (`steam.py`, `src/steam.ts`)
 
 - **What's installed** comes from Steam's own records: `steamapps/libraryfolders.vdf` lists every
