@@ -1,0 +1,9 @@
+cdrskin, the CD burner MusicDeck burns audio CDs with (musicdeck/burn.py), is libburn's:
+
+  libburn 1.5.8, https://files.libburnia-project.org/releases/libburn-1.5.8.tar.gz
+  SHA-256 8e24dd99f5b7cafbecf0116d61b619ee89098e20263e6f47c793aaf4a98d6473
+  signed by Thomas Schmitt <scdbackup@gmx.net>, key 44BC 9FD0 D688 EB00 7C4D D029 E9CB DFC0 ABC0 A854
+  (libburn-1.5.8.tar.gz.sig beside it)
+
+Licence: GPL-2.0-or-later (the tarball's COPYING). bin/<platform>/cdrskin is built from that tarball,
+unchanged, by scripts/build_cdrskin.sh (static, musl, with zig); its source is the tarball above.

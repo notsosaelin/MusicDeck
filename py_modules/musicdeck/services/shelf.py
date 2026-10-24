@@ -13,16 +13,20 @@ What's on a device is read only (no tag edits, artwork or look-ups: the files ar
 Copying (`copy_to`) goes either way: the Deck's music to a device, a device's to the Deck, into
 <artist>/<album>/ under the device's Music folder or the library's first folder, files as they are. An
 iPod's goes into its own library (IpodService, ipod.py) instead, as iTunes would put it there.
+
+Burning (`burn`): an album, artist or playlist written to a blank CD-R or CD-RW in a drive as an audio
+CD (burn.py, with cdrskin), its titles as CD-Text.
 """
 import asyncio
 import json
 import os
 import random
 import shutil
+import tempfile
 import time
 from typing import Any, Callable, Optional
 
-from .. import models, trash
+from .. import burn, cd, models, trash
 from .audiocd import AudioCdService
 from .base import ServiceError, StreamSource
 from .device import DeviceService, _size as device_size
@@ -96,6 +100,10 @@ class LocalLibrary(LocalService):
         self.devices: Callable[[], list[dict[str, Any]]] = lambda: []
         self.copying: Optional[asyncio.Task[None]] = None
         self.copy_progress = {"running": False, "done": 0, "total": 0, "to": "", "error": ""}
+        self.burning: Optional[asyncio.Task[None]] = None
+        # stage: "converting" (songs into CD audio), "erasing" (a CD-RW), "burning"; percent of the stage
+        self.burn_progress: dict[str, Any] = {"running": False, "stage": "", "done": 0, "total": 0, "percent": 0,
+                                              "title": "", "error": ""}
         for name in READ_ONLY:
             if hasattr(self, name):
                 setattr(self, name, self._read_only(getattr(self, name)))
@@ -273,7 +281,7 @@ class LocalLibrary(LocalService):
         return await device["instance"].collection_action(kind, inner, call)
 
     def status(self) -> dict[str, Any]:
-        return {**super().status(), "copy": dict(self.copy_progress)}
+        return {**super().status(), "copy": dict(self.copy_progress), "burn": dict(self.burn_progress)}
 
     # --- copying between the Deck and a device ---
 
@@ -409,6 +417,105 @@ class LocalLibrary(LocalService):
             self.copy_progress.update(running=False, error=str(e) or type(e).__name__)
             if self.announce:
                 self.announce(f"Copying to {name} stopped: {self.copy_progress['error']}")
+
+    # --- burning CDs ---
+
+    async def burn_plan(self, kind: str, item_id: str, ids: Optional[list[str]] = None,
+                        title: str = "") -> dict[str, Any]:
+        return (await self._plan(kind, item_id, ids, title))[0]
+
+    async def _plan(self, kind: str, item_id: str, ids: Optional[list[str]],
+                    title: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """What burning a track, album, artist or playlist (or the songs `ids`) to CD would be: {"drive",
+        "songs", "minutes", "capacity" (the disc's minutes), "erase" (a CD-RW with something on it),
+        "title", "artist"}; or why it can't be (a ServiceError)."""
+        cdrskin = burn.burner(self.runtime_dir)
+        if not cdrskin:
+            raise ServiceError("Burning CDs needs cdrskin, which this build doesn't have")
+        if not shutil.which("ffmpeg"):
+            raise ServiceError("Burning CDs needs ffmpeg")
+        if self.burn_progress["running"]:
+            raise ServiceError(f"Still burning {self.burn_progress['title']}")
+        files, playlist, _ = await self._files(kind, item_id, ids, title)
+        drives = cd.drives()
+        if not drives:
+            raise ServiceError("There's no CD drive plugged in")
+        discs = [(d, await asyncio.to_thread(burn.probe, cdrskin, d)) for d in drives]
+        usable = [(d, disc) for d, disc in discs if disc.usable]
+        if not usable:
+            if any(disc.status == "full" for _, disc in discs):
+                raise ServiceError("The CD in the drive has something on it, and a CD-R can't be erased: "
+                                   "put in a blank CD-R, or a CD-RW")
+            if any(disc.status == "unsuitable" or (disc.media and not disc.media.startswith("CD"))
+                   for _, disc in discs):
+                raise ServiceError("Audio CDs are burned on CD-R or CD-RW, not DVDs")
+            raise ServiceError("Put a blank CD in the drive")
+        drive, disc = usable[0]
+        needed = burn.frames_needed([float(f.get("duration") or 0) for f in files])
+        minutes = -(-needed // (burn.FRAMES_PER_SECOND * 60))
+        if needed > (disc.frames or burn.CD_80):
+            raise ServiceError(f"That's {models.count(minutes, 'minute')} of music, and the CD holds {disc.minutes}")
+        album, artist = self._disc_names(kind, files, playlist)
+        return {"drive": drive, "songs": len(files), "minutes": minutes, "capacity": disc.minutes,
+                "erase": disc.status != "blank", "title": album, "artist": artist}, files
+
+    def _disc_names(self, kind: str, files: list[dict[str, Any]], playlist: str) -> tuple[str, str]:
+        """The CD's title and artist for its CD-Text: an album's own, a playlist's name (by "Various
+        Artists" unless it's all one artist's)."""
+        artists = {f.get("albumartist") or f.get("artist") or "" for f in files}
+        artist = artists.pop() if len(artists) == 1 else "Various Artists"
+        if kind == "album" and files:
+            return files[0].get("album") or "Untitled", artist
+        if kind == "artist":
+            return artist, artist
+        return playlist or (files[0].get("album") if kind == "track" and files else "") or "Mix", artist
+
+    async def burn(self, kind: str, item_id: str, ids: Optional[list[str]] = None, title: str = "") -> str:
+        """Burns a track, album, artist or playlist (or the songs `ids`) to the blank CD in the drive, in
+        the background; returns what to tell the user."""
+        if self.copy_progress["running"]:
+            raise ServiceError(f"Still copying to {self.copy_progress['to']}")
+        plan, files = await self._plan(kind, item_id, ids, title)
+        self.burn_progress = {"running": True, "stage": "converting", "done": 0, "total": len(files), "percent": 0,
+                              "title": plan["title"], "error": ""}
+        self.burning = asyncio.ensure_future(self._burn(files, plan))
+        return f"Burning {plan['title']} to CD ({models.count(len(files), 'song')}, {plan['minutes']} min)"
+
+    async def _burn(self, files: list[dict[str, Any]], plan: dict[str, Any]) -> None:
+        progress = self.burn_progress
+        work = tempfile.mkdtemp(prefix="burn-", dir=self.runtime_dir)
+        cdrskin = burn.burner(self.runtime_dir) or "cdrskin"
+        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+        try:
+            wavs, sizes = [], []
+            for n, f in enumerate(files, 1):
+                wav = os.path.join(work, f"{n:02d}.wav")
+                frames = await asyncio.to_thread(burn.to_cd_audio, ffmpeg, f["path"], wav)
+                wavs.append(wav)
+                sizes.append(frames * burn.FRAME / 1024 / 1024)
+                progress.update(done=n, percent=round(100 * n / len(files)))
+            sheet = os.path.join(work, "cdtext.v07t")
+            with open(sheet, "w", encoding="latin-1") as fh:
+                fh.write(burn.cdtext_sheet(plan["title"], plan["artist"], files))
+            if plan["erase"]:
+                progress.update(stage="erasing", percent=0)
+                await asyncio.to_thread(burn.erase, cdrskin, plan["drive"])
+            progress.update(stage="burning", done=0, percent=0)
+            total = sum(sizes) or 1
+
+            def on_progress(track: int, written: int, _: int) -> None:
+                before = sum(sizes[:max(0, track - 1)])
+                progress.update(done=track, percent=min(100, round(100 * (before + written) / total)))
+            await asyncio.to_thread(burn.burn, cdrskin, plan["drive"], wavs, sheet, on_progress)
+            progress.update(running=False, percent=100, done=len(files))
+            if self.announce:
+                self.announce(f"Burned {plan['title']} to CD")
+        except Exception as e:  # noqa: BLE001 - a disc that won't take it, a drive unplugged: said, not raised
+            progress.update(running=False, error=str(e) or type(e).__name__)
+            if self.announce:
+                self.announce(f"Burning {plan['title']} stopped: {progress['error']}")
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
     async def remove_from_device(self, kind: str, item_id: str) -> str:
         """Deletes a track, album, artist or playlist's songs from the device they're on (from an iPod's

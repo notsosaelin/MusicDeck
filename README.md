@@ -84,6 +84,10 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   tagged FLAC (with ffmpeg, which Bazzite has). No Local files source yet? Plugging something in adds one on
   ~/Music. Players whose firmware calls them by a code name can be renamed in Decky → MusicDeck, under
   Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only.
+- **Burn a CD:** with a CD drive plugged in and a blank CD-R or CD-RW in it, Y on an album, artist or
+  playlist in Local files → Burn to CD writes it as an audio CD any CD player plays, gapless, with its titles
+  (CD-Text) for car stereos and players that show them. It says first how long it is and whether a CD-RW is
+  erased. Linux only; uses cdrskin (bundled when built, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
 - **In your Library:** Decky → MusicDeck → More → Show in your Library puts MusicDeck in the Steam library;
   Play there opens the media center.
 - **Delete, safely:** Y on a song, album, folder or playlist file in Local files deletes it to the trash;
@@ -256,7 +260,7 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 
 Not planned yet:
 
-- **Burning CDs.** Investigated: possible on Linux with a bundled burner (cdrskin); next.
+- **Data and MP3 CDs** (files rather than CD audio): would need xorriso besides cdrskin.
 
 Not possible:
 
@@ -288,6 +292,7 @@ Built on the work of [librespot](https://github.com/librespot-org/librespot) and
 
 GPL-3.0-or-later. Bundled: mutagen (GPL-2.0+), yt-dlp and yt-dlp-ejs (Unlicense), ytmusicapi (MIT),
 requests (Apache-2.0), QuickJS-NG (MIT), hls.js (Apache-2.0), librespot (MIT, in spotify-helper), hashab
-(dstaley/hashab, public domain: The Unlicense, in backend/hashab). The iPod code follows libgpod
+(dstaley/hashab, public domain: The Unlicense, in backend/hashab), cdrskin (libburn 1.5.8, GPL-2.0+, built
+unchanged from its release: backend/cdrskin/UPSTREAM). The iPod code follows libgpod
 (LGPL-2.1-or-later): ipod_schema.py is generated from its itdb_sqlite_queries.h, ipod_sqlite.py is ported
 from its itdb_sqlite.c, and ipod_artwork.py from its db-artwork-writer.c and ithumb-writer.c.

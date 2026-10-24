@@ -11,7 +11,7 @@ import aiohttp
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import backup, debuglog, lyrics, models, native
+from musicdeck import backup, burn, cd, debuglog, lyrics, models, native
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
 from musicdeck import version
@@ -387,6 +387,8 @@ class Plugin:
             "user_home": decky.DECKY_USER_HOME,
             # the platform (native.py): the Library entry's stand-in program differs on Windows
             "platform": native.platform_id(),
+            # a CD drive plugged in, and a burner: Local files offers Burn to CD
+            "can_burn": bool(cd.drives()) and bool(burn.burner(decky.DECKY_PLUGIN_RUNTIME_DIR)),
             # MusicDeck in the Steam library: {"enabled", "appid" of its shortcut} (src/libraryEntry.ts)
             "library_entry": self.settings.get("library_entry"),
             "server": {"base": self.server.base_url, "key": self.server.key},
@@ -539,6 +541,40 @@ class Plugin:
             return await instance.copy_to(kind, item_id, target)
         return await _result(work())
 
+    def _burn_args(self, item_id: str) -> tuple[Optional[list[str]], str]:
+        """A MusicDeck playlist's songs and name (what Local files burns for it); (None, "") otherwise."""
+        if not PlaylistStore.is_ours(item_id):
+            return None, ""
+        try:
+            page = self.playlists.page(item_id)
+        except KeyError:
+            raise ServiceError("Playlist not found")
+        return [t["id"] for t in page["tracks"]], page["title"]
+
+    @_when_ready
+    async def burn_plan(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
+        """What burning an album, artist or playlist of Local files to the CD in the drive would be (its
+        songs, minutes, the disc's, whether a CD-RW gets erased), for the user to say yes to."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id)):
+                raise ServiceError("Only Local files burns CDs")
+            ids, title = self._burn_args(item_id)
+            return await instance.burn_plan("playlist" if ids is not None else kind, item_id, ids, title)
+        return await _result(work())
+
+    @_when_ready
+    async def burn_cd(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
+        """Burns an album, artist or playlist of Local files to the CD in the drive as an audio CD; in the
+        background, a toast when it's done."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id)):
+                raise ServiceError("Only Local files burns CDs")
+            ids, title = self._burn_args(item_id)
+            return await instance.burn("playlist" if ids is not None else kind, item_id, ids, title)
+        return await _result(work())
+
     @_when_ready
     async def eject_device(self, device_id: str) -> dict[str, Any]:
         """Ejects a plugged-in device ("Safely remove"): its index stops first, so nothing holds it open."""
@@ -549,6 +585,8 @@ class Plugin:
             library = next(iter(self._libraries()), None)
             if library and library.copy_progress.get("running"):
                 raise ServiceError(f"Still copying to {library.copy_progress['to']}")
+            if library and library.burn_progress.get("running") and entry["kind"] in ("cd", "disc"):
+                raise ServiceError(f"Still burning {library.burn_progress['title']}")
             instance = self.device_instances.get(device_id)
             if isinstance(instance, AudioCdService) and instance.rip_progress.get("running"):
                 raise ServiceError("Still ripping that CD")

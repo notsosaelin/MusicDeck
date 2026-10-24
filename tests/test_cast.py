@@ -441,8 +441,9 @@ async def manager_tests(http, path):
         fake.server.close()
 
 
-# standard modules Decky's frozen Python leaves out; importing one stops the whole backend loading
-MISSING_IN_DECKY = ("xml.etree", "xml.dom", "sqlite3", "tkinter")
+# standard modules Decky's frozen Python leaves out; importing one stops the whole backend loading (sqlite3 is
+# in it: _sqlite3 and libsqlite3 ship with Decky 3.x on every platform)
+MISSING_IN_DECKY = ("xml.etree", "xml.dom", "tkinter")
 
 
 def decky_python_tests():

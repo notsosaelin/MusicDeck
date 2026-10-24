@@ -27,6 +27,8 @@ import {
   ejectDevice,
   renameDevice,
   onDevice,
+  burnPlan,
+  burnCd,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
 import { notify } from "../notify";
@@ -193,6 +195,45 @@ function copyItems(instanceId: string, kind: string, id: string): ReactNode[] {
     ));
 }
 
+const BURNABLE = ["album", "artist", "playlist"];
+
+/**
+ * Burn to CD (Local files, with a CD drive and a burner: services/shelf.py, burn.py): an album, artist or
+ * playlist as an audio CD. What it would be is asked first: its length, the disc's, and that a CD-RW with
+ * something on it is erased.
+ */
+function burnItems(instanceId: string, kind: string, id: string): ReactNode[] {
+  const state = pluginState.get();
+  const local = state?.services.find((s) => s.id === instanceId)?.type === "local";
+  if (!local || !state?.can_burn || onDevice(id) || !BURNABLE.includes(kind) || id.startsWith("deleted:")) return [];
+  const start = async () => {
+    const plan = await burnPlan(instanceId, kind, id);
+    if (!plan.ok) return notify("Can't burn a CD", plan.error);
+    const p = plan.data;
+    showModal(
+      <ConfirmModal
+        strTitle={`Burn ${p.title} to CD?`}
+        strDescription={
+          `${p.songs} song${p.songs === 1 ? "" : "s"}, ${p.minutes} of the CD's ${p.capacity} minutes, as an audio CD ` +
+          "any CD player plays, with its titles (CD-Text)." +
+          (p.erase ? " The CD-RW is erased first: what's on it now goes." : "")
+        }
+        strOKButtonText="Burn"
+        bDestructiveWarning={p.erase}
+        onOK={async () => {
+          const r = await burnCd(instanceId, kind, id);
+          notify(r.ok ? "Burning a CD" : "Can't burn a CD", r.ok ? r.data : r.error);
+        }}
+      />,
+    );
+  };
+  return [
+    <MenuItem key="burn" onSelected={start}>
+      Burn to CD
+    </MenuItem>,
+  ];
+}
+
 const DELETABLE = ["track", "album", "folder", "playlist"];
 
 /**
@@ -278,7 +319,7 @@ function deviceMenu(c: Collection, target: EventTarget) {
 /** Whether an album, artist or playlist can be copied somewhere (to a device, or from one to the Deck). */
 export const canCopy = (instanceId: string, c: Collection) =>
   (c.kind === "album" || c.kind === "artist" || c.kind === "playlist") &&
-  copyItems(instanceId, c.kind, c.id).length > 0;
+  (copyItems(instanceId, c.kind, c.id).length > 0 || burnItems(instanceId, c.kind, c.id).length > 0);
 
 /** Context about where the menu was opened, for page-specific items. */
 export interface MenuContext {
@@ -535,6 +576,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
         </MenuItem>
         <MenuItem onSelected={() => pickArtwork(c)}>Set artwork</MenuItem>
         {copyItems(instanceId, "playlist", c.id)}
+        {burnItems(instanceId, "playlist", c.id)}
         {c.art?.startsWith("mdart:") && (
           <MenuItem
             onSelected={async () => {
@@ -580,6 +622,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
     showContextMenu(
       <Menu label={c.title}>
         {copies}
+        {burnItems(instanceId, "artist", c.id)}
         {copies.length > 0 && manage.length > 0 && <MenuSeparator />}
         {manage}
       </Menu>,
@@ -596,6 +639,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
             <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
           )}
           {copyItems(instanceId, c.kind, c.id)}
+          {burnItems(instanceId, c.kind, c.id)}
           {manage.length > 0 && <MenuSeparator />}
           {manage}
           {canDelete(instanceId, c) && <MenuSeparator />}

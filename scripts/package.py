@@ -13,6 +13,7 @@ musicdeck/native.py); the plugin's folder inside is MusicDeck on every one, as D
 import hashlib
 import json
 import pathlib
+import shutil
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -40,6 +41,13 @@ for platform_name, names in HELPERS.items():
             fix = ("bash scripts/build_spotify_helper.sh" if name.startswith("spotify")
                    else "bash scripts/build_hashab.sh" if name.startswith("hashab") else "python scripts/vendor.py")
             raise SystemExit(f"bin/{platform_name}/{name} missing; run `{fix}` first")
+# cdrskin (burning CDs, Linux): bundled when built, with where its source is (GPL-2.0+); without it, a
+# build burns no CDs unless the system has cdrskin
+for platform_name in ("linux-x86_64", "linux-arm64"):
+    if (ROOT / "bin" / platform_name / "cdrskin").exists():
+        shutil.copyfile(ROOT / "backend" / "cdrskin" / "UPSTREAM", ROOT / "bin" / platform_name / "cdrskin.UPSTREAM")
+    else:
+        print(f"note: no bin/{platform_name}/cdrskin (bash scripts/build_cdrskin.sh): that build burns no CDs")
 
 OUT = ROOT / "out"
 OUT.mkdir(exist_ok=True)

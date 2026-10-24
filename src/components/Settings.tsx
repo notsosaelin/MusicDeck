@@ -142,6 +142,14 @@ const describeStatus = (s: ServiceInfo): string => {
     case "local": {
       const copy = s.status.copy;
       if (copy?.running) return `Copying to ${copy.to}… ${copy.done} of ${copy.total}`;
+      const burn = s.status.burn;
+      if (burn?.running)
+        return burn.stage === "converting"
+          ? `Getting ${burn.title} ready for the CD… ${burn.done} of ${burn.total}`
+          : burn.stage === "erasing"
+            ? "Erasing the CD-RW…"
+            : `Burning ${burn.title}… ${burn.percent}%`;
+      if (burn?.error) return `Burning stopped: ${burn.error}`;
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;
       if (s.status.art?.running)
         return s.status.art.total

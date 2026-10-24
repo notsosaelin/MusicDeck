@@ -245,6 +245,8 @@ export interface PluginState {
   platform?: string;
   /** MusicDeck in the Steam library (src/libraryEntry.ts): on or off, and its shortcut's app id */
   library_entry?: { enabled: boolean; appid: number };
+  /** a CD drive is plugged in and there's a burner (burn.py): Local files offers Burn to CD */
+  can_burn?: boolean;
   server: { base: string; key: string };
   service_types: ServiceType[];
   planned_types: ServiceType[];
@@ -298,6 +300,21 @@ export const removeFromDevice = callable<[instanceId: string, kind: string, item
 export const deleteFromLibrary = callable<[instanceId: string, kind: string, itemId: string], Result<string>>(
   "delete_from_library",
 );
+/** What burning an album, artist or playlist to CD would be, for the user to say yes to (services/shelf.py). */
+export interface BurnPlan {
+  drive: string;
+  songs: number;
+  minutes: number;
+  /** the disc's minutes */
+  capacity: number;
+  /** a CD-RW with something on it: erased first */
+  erase: boolean;
+  title: string;
+  artist: string;
+}
+export const burnPlan = callable<[instanceId: string, kind: string, itemId: string], Result<BurnPlan>>("burn_plan");
+/** Burns an album, artist or playlist of Local files to the CD in the drive, in the background. */
+export const burnCd = callable<[instanceId: string, kind: string, itemId: string], Result<string>>("burn_cd");
 /** Ejects a plugged-in device ("Safely remove"), or opens a CD drive's tray. */
 export const ejectDevice = callable<[deviceId: string], Result<string>>("eject_device");
 /** Whether an id (a track's, an album's...) is of something on a plugged-in device (services/shelf.py). */

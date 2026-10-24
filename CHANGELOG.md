@@ -3,6 +3,15 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.30.0
+
+- **Burn to CD**: an album, artist or playlist in Local files (Y → Burn to CD) written to a blank CD-R or
+  CD-RW as an audio CD, gapless (Session At Once), with CD-Text: the album's and each song's title and
+  artist, which car stereos and many players show. MusicDeck checks the disc first (blank, a CD-RW to
+  erase, how many minutes it holds) and says what it'll do; the Deck doesn't sleep while it burns, and
+  Decky → MusicDeck shows how far it's got. Linux, with a CD drive; burned by cdrskin (libburn's), which
+  builds bundle once it's built for them (scripts/build_cdrskin.sh). Not tried with a real burner yet.
+
 ## 0.29.0
 
 - **Album covers on the iPod's screen**: songs MusicDeck puts on an iPod show their album's cover there (Now
