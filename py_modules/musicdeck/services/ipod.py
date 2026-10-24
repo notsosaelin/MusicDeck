@@ -12,7 +12,7 @@ import asyncio
 import os
 from typing import Any, Callable, Optional
 
-from .. import ipod
+from .. import ipod, models
 from ..itunesdb import ITunesDBError
 from .base import ServiceError
 from .device import DeviceService
@@ -74,7 +74,8 @@ class IpodService(DeviceService):
                       "artist": f["artist"], "albumartist": f["albumartist"], "album": f["album"],
                       "track": f["track"], "disc": f["disc"], "year": str(f["year"] or ""), "genre": f["genre"],
                       "genres": [f["genre"]] if f["genre"] else [], "composer": f["composer"], "label": "",
-                      "compilation": f["compilation"], "rating": f["rating"], "duration": f["duration"], "rg": None,
+                      "compilation": f["compilation"], "rating": f["rating"], "duration": f["duration"],
+                      "rg": models.gain(f["gain"]),  # its Sound Check, as ReplayGain
                       "format": "ALAC" if "Lossless" in f["filetype"] else FORMATS.get(ext, ext[1:].upper()),
                       "bits": 16 if lossless else 0, "rate": f["rate"], "bitrate": f["bitrate"], "channels": 2,
                       "ipod": f["path"]}
@@ -124,6 +125,18 @@ class IpodService(DeviceService):
                 raise ServiceError(str(e)) from e
         self.rescan()
         return gone
+
+    async def rename(self, name: str) -> None:
+        """Renames the iPod itself (ipod.rename), as iTunes does."""
+        if not self.info:
+            raise ServiceError("This iPod couldn't be read")
+        async with self.sync_lock:
+            try:
+                await asyncio.to_thread(ipod.rename, self.info, name, self.backup_dir)
+            except ITunesDBError as e:
+                raise ServiceError(str(e)) from e
+        self.ipod_name = name
+        self.rescan()
 
     def status(self) -> dict[str, Any]:
         return {**super().status(), "model": self.describe(), "why_not": self.why_not()}

@@ -157,6 +157,7 @@ Details worth knowing:
 | `musicdeck/ipod_sqlite.py`, `ipod_schema.py` | The nano 5G-7G's SQLite libraries (iTunes Library.itlp) and their signed checksums, ported from libgpod's itdb_sqlite.c; the iPod's own post-process SQL. |
 | `musicdeck/aes.py` | AES-128 (block and CBC), for the nano 5G's hash72. |
 | `backend/hashab` | dstaley/hashab (public domain): the nano 6G/7G's hashAB, as a small helper (`main.c`), built by `scripts/build_hashab.sh` into `bin/<platform>/hashab`. |
+| `musicdeck/ipod_artwork.py` | Covers on an iPod's screen: its cover sizes (SysInfoExtended or libgpod's table), the ArtworkDB read and written, pictures scaled by ffmpeg into the .ithmb files; ported from libgpod. |
 | `musicdeck/ipod.py` | Which iPod is plugged in (SysInfo, model number, USB product id, FireWire ID from the USB serial), whether it can be synced, and syncing it: converting, copying into `iPod_Control/Music/Fnn`, writing its database safely (the old one kept on the Deck). |
 | `musicdeck/services/ipod.py` | `IpodService`: an iPod in Local files' Devices, its index from its database, `put`/`take_off` for copies and removals. |
 | `musicdeck/cd.py` | Audio CDs through Linux's CD-ROM ioctls: disc status, table of contents, raw audio frames (`AudioReader`), the MusicBrainz disc ID, and `TrackWav`, a track as a WAV read on demand (a `StreamSource.reader`, which the stream server serves with byte ranges). |

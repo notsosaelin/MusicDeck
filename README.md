@@ -91,8 +91,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   and say how much room they have left. A data CD of MP3s plays too, and an iPhone's synced music (read only).
 - **iPods:** an iPod with Apple's software shows in Devices by its own name and model, and music copied to
   it goes into its library as iTunes put it there, so the iPod's menus play it (FLAC converted to Apple
-  Lossless; playlists, and plays made on the iPod, kept). Every iPod with a disk mode syncs, the nano 5th-7th
-  generation included (a nano 5G once it's been synced with iTunes); see [docs/IPOD.md](docs/IPOD.md).
+  Lossless; playlists, and plays made on the iPod, kept), with its album's cover on the iPod's screen and its
+  ReplayGain as Sound Check. Renaming it renames the iPod itself. Every iPod with a disk mode syncs, the nano
+  5th-7th generation included (a nano 5G once it's been synced with iTunes); see [docs/IPOD.md](docs/IPOD.md).
 - **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My
   Collection on TIDAL, Add to favourites on Qobuz and your servers. SoundCloud, YouTube Music, Bandcamp and the
   Live Music Archive keep likes on the Deck, listed under Liked songs (Browse, and the panel's Library).
@@ -255,8 +256,7 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 
 Not planned yet:
 
-- **Album covers on an iPod's screen** for songs MusicDeck puts there (its separate artwork database).
-- **Burning CDs.** Not investigated.
+- **Burning CDs.** Investigated: possible on Linux with a bundled burner (cdrskin); next.
 
 Not possible:
 
@@ -289,5 +289,5 @@ Built on the work of [librespot](https://github.com/librespot-org/librespot) and
 GPL-3.0-or-later. Bundled: mutagen (GPL-2.0+), yt-dlp and yt-dlp-ejs (Unlicense), ytmusicapi (MIT),
 requests (Apache-2.0), QuickJS-NG (MIT), hls.js (Apache-2.0), librespot (MIT, in spotify-helper), hashab
 (dstaley/hashab, public domain: The Unlicense, in backend/hashab). The iPod code follows libgpod
-(LGPL-2.1-or-later): ipod_schema.py is generated from its itdb_sqlite_queries.h, and ipod_sqlite.py is ported
-from its itdb_sqlite.c.
+(LGPL-2.1-or-later): ipod_schema.py is generated from its itdb_sqlite_queries.h, ipod_sqlite.py is ported
+from its itdb_sqlite.c, and ipod_artwork.py from its db-artwork-writer.c and ithumb-writer.c.

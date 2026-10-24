@@ -503,6 +503,14 @@ class Plugin:
             return
         names = dict(self.settings.get("device_names") or {})
         name = " ".join(name.split())[:60]
+        instance = self.device_instances.get(instance_id)
+        if name and isinstance(instance, IpodService) and not instance.why_not():
+            # an iPod is renamed itself, as iTunes does (its About screen says it too); the Deck's name goes
+            try:
+                await instance.rename(name)
+                name = ""
+            except ServiceError as e:
+                decky.logger.warning(f"Renaming the iPod: {e}")
         if name:
             names[instance_id] = name
         else:

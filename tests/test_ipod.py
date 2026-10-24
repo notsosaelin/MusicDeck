@@ -167,6 +167,16 @@ def sync() -> None:
                      done.append)
     check(again == 0 and len(ITunesDB.parse(open(os.path.join(itunes, "iTunesDB"), "rb").read()).tracks) == 4,
           "a song already on it isn't added twice")
+    check(itunesdb.sound_check(-6.54) == 4508 and itunesdb.sound_check_gain(4508) == -6.54
+          and itunesdb.sound_check_gain(0) is None, "ReplayGain as the iPod's Sound Check, and back")
+    ipod.add(info, [{"path": song, "title": "Loud", "artist": "Band C", "album": "Live",
+                     "rg": {"track": -6.54, "album": -6.0}}], "", backups, done.append)
+    loud = ITunesDB.parse(open(os.path.join(itunes, "iTunesDB"), "rb").read()).tracks[-1]
+    check(loud.fields()["gain"] == -6.54, "a song's ReplayGain put on as its Sound Check")
+    ipod.remove(info, {loud.fields()["path"]}, backups)
+    ipod.rename(info, "Sam's iPod", backups)
+    renamed = open(os.path.join(itunes, "iTunesDB"), "rb").read()
+    check(ITunesDB.parse(renamed).name == "Sam's iPod" and signed_right(renamed), "the iPod itself renamed")
     if shutil.which("ffmpeg"):
         flac = os.path.join(music, "lossless.flac")
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", song, flac], check=True)
@@ -201,7 +211,7 @@ async def reading(root: str) -> None:
     await service.start()
     await service.scan_task
     titles = sorted(t["title"] for t in service.tracks.values())
-    check(service.name() == "Test iPod" and service.describe() == "iPod classic" and "Zebra" in titles,
+    check(service.name() == "Sam's iPod" and service.describe() == "iPod classic" and "Zebra" in titles,
           f"its songs, its name and model: {service.name()}, {service.describe()}, {titles}")
     albums = service._albums()
     check(len([k for k, v in albums.items() if v[0][1]["album"] == "B Side"]) <= 1,
@@ -320,9 +330,103 @@ def nanos() -> None:
     check(keys[0][:1] == b"\x30" and keys[1] == (keys[0][1] - 0x2D) // 2, f"with the iPod's sort functions: {keys}")
 
 
+class FlatScaler:
+    """ipod_artwork's ffmpeg stand-in: a 300x200 cover, every picture one colour."""
+
+    def prepare(self, data):
+        return "cover", 300, 200
+
+    def scale(self, path, width, height, fmt):
+        return struct.pack("<H", 0xF800) * (width * height)
+
+
+def covers() -> None:
+    print("album covers on the iPod's screen (the ArtworkDB), against libgpod")
+    from musicdeck import ipod_artwork as art
+    check([f.id for f in art.cover_formats("classic_1")] == [1060, 1068, 1055, 1061]
+          and art.cover_formats("shuffle_2") == [] and art.sparse("nano_3") and not art.sparse("video_1"),
+          "each iPod's cover sizes, in libgpod's order; none for a shuffle; shared covers from the nano 3G on")
+    xml = ("<plist><dict><key>AlbumArt</key><array>"
+           "<dict><key>FormatId</key><integer>3001</integer><key>RenderWidth</key><integer>240</integer>"
+           "<key>RenderHeight</key><integer>240</integer><key>PixelFormat</key><string>4C353635</string>"
+           "<key>AlignRowBytes</key><true/><key>BackColor</key><string>FFFFFF00</string></dict>"
+           "<dict><key>FormatId</key><integer>3002</integer><key>RenderWidth</key><integer>58</integer>"
+           "<key>RenderHeight</key><integer>58</integer><key>PixelFormat</key><string>4C353635</string></dict>"
+           "<dict><key>FormatId</key><integer>3003</integer><key>RenderWidth</key><integer>58</integer>"
+           "<key>RenderHeight</key><integer>58</integer><key>PixelFormat</key><string>32767579</string></dict>"
+           "</array><key>SupportsSparseArtwork</key><true/></dict></plist>")
+    found = art.cover_formats("nano_6", xml)
+    check([(f.id, f.row_align, f.back) for f in found] == [(3002, 0, (0, 0, 0)), (3001, 4, (255, 255, 255))]
+          and art.sparse("", xml), f"or SysInfoExtended's (a nano 6G/7G's), RGB565 ones: {found}")
+    png = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 640, 480)
+    jpeg = b"\xff\xd8\xff\xe0" + struct.pack(">H", 4) + b"JF" + b"\xff\xc0" + struct.pack(">HBHH", 11, 8, 300, 500)
+    check(art.image_size(png) == (640, 480) and art.image_size(jpeg) == (500, 300), "a PNG's and a JPEG's size")
+    fmt = art.Format(1, 320, 320)
+    check(art.fitted(300, 200, fmt) == (320, 214) and art.fitted(200, 300, fmt) == (214, 320),
+          "fitted inside the frame as libgpod does")
+    frame, h_pad, v_pad = art.packed(b"\x01\x02" * 2, 2, 1, art.Format(1, 4, 3, back=(255, 255, 255)))
+    check(len(frame) == 24 and (h_pad, v_pad) == (1, 1) and frame[8:16] == b"\xff\xff\x01\x02\x01\x02\xff\xff",
+          "centred, the rest the format's background")
+    theirs = fixture("classic-ArtworkDB")
+    check(art.ArtworkDB.parse(theirs).to_bytes() == theirs, "libgpod's ArtworkDB read and written back byte for byte")
+
+    root = pretend_ipod("xB147", fixture("classic-iTunesDB"))
+    control = os.path.join(root, "iPod_Control")
+    db = ITunesDB.parse(fixture("classic-iTunesDB"))
+    image = bytes(struct.unpack_from("<I", theirs, theirs.find(b"mhii") + 0x30)[0] - 1)  # the cover's size, as there
+    staged = art.add_covers(control, "classic_1", "", db.tracks, [(t, image) for t in db.tracks], root,
+                            FlatScaler())
+    for written, final in staged:
+        os.replace(written, final)
+    ours = bytearray(open(os.path.join(control, "Artwork", "ArtworkDB"), "rb").read())
+    want = bytearray(theirs)
+    for data in (ours, want):  # the mhii's date (when it was made), and its song id (libgpod's test dbids)
+        at = data.find(b"mhii")
+        while at >= 0:
+            data[at + 0x14:at + 0x1C] = bytes(8)
+            data[at + 0x28:at + 0x2C] = bytes(4)
+            at = data.find(b"mhii", at + 4)
+    check(ours == want, "the same ArtworkDB as libgpod writes for the same covers (one per album)")
+    links = [struct.unpack_from("<I", t.header, 0x160)[0] for t in db.tracks]
+    check(links == [100, 101, 101] and all(t.header[0xA4] == 1 for t in db.tracks),
+          f"its tracks pointing at their album's cover: {links}")
+    sizes = {n: os.path.getsize(os.path.join(control, "Artwork", n)) for n in os.listdir(os.path.join(control, "Artwork"))}
+    check(sizes.get("F1060_1.ithmb") == 2 * 320 * 320 * 2 and sizes.get("F1061_1.ithmb") == 2 * 56 * 56 * 2,
+          f"each cover's pictures in the .ithmb files: {sizes}")
+    staged = art.prune(control, db.tracks[:1])
+    for written, final in staged:
+        os.replace(written, final)
+    left = art.ArtworkDB.parse(open(os.path.join(control, "Artwork", "ArtworkDB"), "rb").read())
+    check([p.id for p in left.pictures] == [100], "an album taken off takes its cover from the ArtworkDB")
+    left = art.ArtworkDB.parse(theirs)
+    art._prune(left, db.tracks[2:])
+    check([(p.id, p.song_id) for p in left.pictures] == [(101, db.tracks[2].dbid)],
+          "a shared cover whose first song went is kept for the others")
+    if shutil.which("ffmpeg"):
+        music = tempfile.mkdtemp()
+        song = os.path.join(music, "song.wav")
+        make_wav(song)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x48", "-frames:v",
+                        "1", os.path.join(music, "cover.png")], check=True)
+        fresh = pretend_ipod("xB147")
+        info = ipod.identify(fresh)
+        ipod.add(info, [{"path": song, "title": "Red", "artist": "Band", "album": "Colours"}], "",
+                 tempfile.mkdtemp(), lambda n: None)
+        track = ITunesDB.parse(open(os.path.join(fresh, "iPod_Control", "iTunes", "iTunesDB"), "rb").read()).tracks[0]
+        pictures = art.ArtworkDB.parse(open(os.path.join(fresh, "iPod_Control", "Artwork", "ArtworkDB"), "rb").read())
+        with open(os.path.join(fresh, "iPod_Control", "Artwork", "F1061_1.ithmb"), "rb") as f:
+            middle = struct.unpack("<H", f.read()[(28 * 56 + 28) * 2:][:2])[0]
+        check(len(pictures.pictures) == 1 and struct.unpack_from("<I", track.header, 0x160)[0] == 100
+              and middle >> 11 == 31 and middle & 0x7FF == 0,
+              "synced with the folder's cover.jpg/png: on the iPod, red (scaled by ffmpeg)")
+    else:
+        print("  (no ffmpeg here: a real cover not tried)")
+
+
 if __name__ == "__main__":
     format_against_libgpod()
     identify()
+    covers()
     nanos()
     ipod_root = sync()
     asyncio.run(reading(ipod_root))

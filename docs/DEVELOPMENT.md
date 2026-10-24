@@ -159,7 +159,7 @@ against libgpod itself (after changing `itunesdb.py`), on Linux or WSL:
 
 ```sh
 sh scripts/libgpod_check/setup.sh       # libgpod 0.8.3 unpacked into ~/gpod (no root), gpodtool built
-python3 scripts/libgpod_check/check.py  # libgpod writes, we read; we write, libgpod reads
+python3 scripts/libgpod_check/check.py  # libgpod writes, we read; we write, libgpod reads (covers too)
 python3 scripts/libgpod_check/check.py --fixtures   # and refresh tests/fixtures/ipod
 ```
 

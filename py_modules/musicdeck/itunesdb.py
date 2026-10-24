@@ -23,6 +23,7 @@ written here against libgpod itself.
 Times are Mac times (seconds since 1904). Little-endian throughout, but for the old Shuffle's iTunesSD.
 """
 import hashlib
+import math
 import os
 import random
 import re
@@ -182,7 +183,7 @@ class Track:
                 "duration": _u32(h, 0x28) / 1000, "track": _u32(h, 0x2C), "year": _u32(h, 0x34),
                 "bitrate": _u32(h, 0x38), "rate": _u32(h, 0x3C) >> 16, "plays": _u32(h, 0x50),
                 "played": unix_time(_u32(h, 0x58)), "disc": _u32(h, 0x5C), "added": unix_time(_u32(h, 0x68)),
-                "album_id": _u32(h, 0x120), "artist_id": _u32(h, 0x1E0)}
+                "album_id": _u32(h, 0x120), "artist_id": _u32(h, 0x1E0), "gain": sound_check_gain(_u32(h, 0x4C))}
 
     def to_bytes(self) -> bytes:
         header = bytearray(self.header)
@@ -415,7 +416,8 @@ class ITunesDB:
     def add_track(self, info: dict[str, Any]) -> Track:
         """A new track, at the end. info: title, artist, album, albumartist, genre, composer, path (from
         the iPod's root, "/"-separated), filetype ("MPEG audio file"...), size, duration (s), track,
-        tracks, disc, discs, year, bitrate (kbps), rate (Hz), rating (0-5), compilation."""
+        tracks, disc, discs, year, bitrate (kbps), rate (Hz), rating (0-5), compilation, gain (ReplayGain's,
+        dB: the iPod's Sound Check)."""
         now = time.time()
         dbid = random.getrandbits(64) or 1
         ext = os.path.splitext(info["path"])[1][1:5].upper().ljust(4)
@@ -438,6 +440,8 @@ class ITunesDB:
         _put32(h, 0x34, int(info.get("year") or 0) if str(info.get("year") or "0").isdigit() else 0)
         _put32(h, 0x38, int(info.get("bitrate") or 0))
         _put32(h, 0x3C, (int(info.get("rate") or 44100) & 0xFFFF) << 16)
+        if info.get("gain") is not None:
+            _put32(h, 0x4C, sound_check(float(info["gain"])))
         _put32(h, 0x5C, int(info.get("disc") or 0))
         _put32(h, 0x60, int(info.get("discs") or 0))
         _put32(h, 0x68, mac_time(now))
@@ -468,6 +472,18 @@ class ITunesDB:
             raise ITunesDBError("The iPod's database has no list of tracks")
         tracks.tracks.append(track)
         return track
+
+    def rename(self, name: str) -> None:
+        """The iPod's name (its master playlist's), as iTunes shows it and the iPod's About says."""
+        master = next((p for p in self.playlists() if p.master), None)
+        if master is None:
+            raise ITunesDBError("The iPod's database has no main playlist")
+        for kind in (2, 3):
+            s = self.section(kind)
+            for p in s.playlists if s else []:
+                if p.master:
+                    kept = [m for m in p.mhods if read_mhod(m)[0] != TITLE]
+                    p.mhods = [string_mhod(TITLE, name)] + kept  # first, where iTunes and libgpod put it
 
     def remove_tracks(self, ids: set[int]) -> list[Track]:
         """Takes tracks out of the database and every playlist; returns them (their files are the caller's)."""
@@ -807,6 +823,16 @@ def write_hashab(data: bytearray, sign: Any, current: int = 0) -> None:
     if len(signature) != 57:
         raise ITunesDBError("The hashab helper gave a signature of the wrong size")
     data[0xAB:0xE4] = signature
+
+
+def sound_check(gain_db: float) -> int:
+    """Sound Check's value for a volume change in dB (libgpod: 1000 * 10^(-dB/10)); ReplayGain's is one."""
+    return max(1, min(0xFFFFFFFF, round(1000 * 10 ** (-gain_db / 10))))
+
+
+def sound_check_gain(value: int) -> Optional[float]:
+    """The volume change a Sound Check value is, in dB (None for 0: none)."""
+    return round(-10 * math.log10(value / 1000), 2) if value else None
 
 
 def guid_bytes(text: str) -> Optional[bytes]:

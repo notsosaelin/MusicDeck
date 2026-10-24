@@ -294,7 +294,9 @@ class LocalLibrary(LocalService):
         if not t or not os.path.isfile(t["path"]):
             return None
         from_apple = isinstance(source, IpodService) or (device_id and self._device(device_id)["kind"] == "ios")
+        own = source.album_art.get(source._album_key(t))  # the album's picture, set or found on the Deck
         return {**t, "tid": inner, "from": device_id, "from_ipod": bool(from_apple),
+                "cover": os.path.join(source.art_dir, own) if own and source.art_dir else "",
                 "artist_folder": source._album_artist(t) or "Unknown artist",
                 "album_folder": t["album"] or "Unknown album"}
 

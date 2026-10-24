@@ -3,6 +3,18 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.29.0
+
+- **Album covers on the iPod's screen**: songs MusicDeck puts on an iPod show their album's cover there (Now
+  Playing, Cover Flow, the album lists), at each size that iPod uses: the photo, 5th/5.5th generation, every
+  nano and the classic. The cover is the album's picture on the Deck, else the one in the file, else the
+  folder's cover.jpg. Ported from libgpod and checked against it: the same artwork database byte for byte
+  for the same songs, and libgpod reads MusicDeck's back. Covers iTunes put there are kept. Needs ffmpeg.
+- **Sound Check**: a song's ReplayGain goes on the iPod as its Sound Check, and the Sound Check of songs on an
+  iPod levels them when MusicDeck plays them.
+- **Renaming an iPod renames the iPod itself**, as iTunes does (its About screen says the new name), rather
+  than only MusicDeck's name for it.
+
 ## 0.28.3
 
 - **Videos aren't songs**: a phone's camera clips (and other .mp4 or .webm files with a picture in them)

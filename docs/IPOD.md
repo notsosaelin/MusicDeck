@@ -55,12 +55,34 @@ When it can't tell how an iPod wants its database signed, MusicDeck doesn't chan
    which has no Apple Lossless), Ogg and Opus to 256 kbps AAC. MP3, AAC, Apple Lossless, WAV and AIFF go as
    they are.
 4. Adds them to the database (and the albums and artists lists), makes the master playlist and its
-   sorted lists again, adds a playlist when a playlist was copied.
-5. Writes the new database beside the old one and moves it over it, signed for this iPod. The previous
-   one is kept on the Deck (`ipod-<id>/iTunesDB.previous` in the plugin's runtime folder). A shuffle gets
-   its `iTunesSD` too.
+   sorted lists again, adds a playlist when a playlist was copied. A song's ReplayGain becomes its Sound
+   Check (and an iPod song's Sound Check is ReplayGain when MusicDeck plays it).
+5. Gives each new song its album's cover on the iPod's screen (below).
+6. Writes the new database beside the old one and moves it over it, signed for this iPod. The previous
+   one is kept on the Deck (`ipod-<id>/iTunesDB.previous` in the plugin's runtime folder, and
+   `ArtworkDB.previous`). A shuffle gets its `iTunesSD` too.
 
-Removing songs takes them out of the database and every playlist, then deletes their files.
+Removing songs takes them out of the database and every playlist, then deletes their files; a cover no
+song uses any more leaves the ArtworkDB.
+
+Renaming an iPod (Y on it in Devices → Rename) renames the iPod itself, as iTunes does: its main
+playlist's name, which its About screen shows too.
+
+## Covers on the iPod's screen
+
+`ipod_artwork.py`, a port of libgpod's ArtworkDB and .ithmb writer:
+
+- Each iPod with a colour screen shows covers at sizes of its own: SysInfoExtended's AlbumArt list when it
+  has one (the nano 6G/7G only say it there), else libgpod's table (the photo, 5th/5.5th generation, nano
+  1G-5G, classic). RGB565 pixels, centred in each size on its background colour.
+- A song's cover: its album's picture on the Deck (set or found), else the one in its file, else the
+  folder's cover.jpg. Scaled with ffmpeg (no image library in Decky's Python); no ffmpeg, no covers.
+- iPods that share covers (nano 3G on, classic) get one per album; older ones one per song, as libgpod does.
+- The covers iTunes put there are kept as they are: new pictures go at the ends of the `F<size>_1.ithmb`
+  files.
+- Checked against libgpod: for the same songs and cover, the same ArtworkDB byte for byte (but the date it
+  was made), the same files at the same sizes and offsets, and libgpod reads ours back at every size. The
+  pixels differ a little (ffmpeg's scaling, not gdk-pixbuf's).
 
 ## The options, explored (October 2026)
 
@@ -102,9 +124,9 @@ MFi licence. Not something software can do.
 
 ## Not done yet
 
-- **Artwork on the iPod's screen.** Covers live in a separate database (ArtworkDB, with thumbnails in each
-  model's own sizes). Songs MusicDeck adds show no cover on the iPod; songs iTunes put there keep theirs.
-  MusicDeck shows covers for everything itself. iOpenPodv2's ArtworkDB writer (MIT) is a reference.
+- **Photos and videos.** Only music is synced (no Photo Database, no movies).
+- **Space left by removed covers.** A cover taken out of the ArtworkDB leaves its pictures in the .ithmb
+  files (libgpod packs them; MusicDeck doesn't yet). They're a few hundred KB per album.
 
 ## Testing with a real iPod
 
@@ -121,6 +143,8 @@ What to look at, in order:
 6. Remove a song (Y → Remove from <iPod>), eject, check it's gone from the iPod.
 7. Play something on the iPod, plug it in again, copy something: the play count on the iPod should
    still be there afterwards (Play Counts folded in).
+8. Covers: the copied album should show its cover in Now Playing and Cover Flow on the iPod.
+9. Rename it in Devices: the iPod's Settings → About should say the new name.
 
 If the iPod shows no music after a sync, its database's signature wasn't accepted: copy
 `iTunesDB.previous` from the Deck back to `iPod_Control/iTunes/iTunesDB` to undo the sync, and note the

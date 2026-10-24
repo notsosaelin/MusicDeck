@@ -130,6 +130,62 @@ for name in ipod_sqlite.FILES:
         rows_b = sorted(b.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr)
         check(rows_a == rows_b, f"{name} {table}: {len(rows_a)} rows the same")
 
+print("covers: libgpod's ArtworkDB and ours")
+import struct  # noqa: E402
+import zlib  # noqa: E402
+from musicdeck import ipod_artwork  # noqa: E402
+
+
+def png(width, height):
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\0" + b"\xff\x00\x00" * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+class Flat:  # ffmpeg's part (pixels): the ArtworkDB doesn't depend on them
+    def prepare(self, data):
+        return "cover", 300, 200
+
+    def scale(self, path, width, height, fmt):
+        return b"\0\xf8" * (width * height)
+
+
+cover = png(300, 200)
+with open(f"{HOME}/cover.png", "wb") as f:
+    f.write(cover)
+covered = pretend("covers", "xB147")
+r = gpod("makeart", covered, f"{HOME}/cover.png", *SONGS)
+if r.returncode != 0:
+    sys.exit(f"libgpod couldn't write covers: {r.stderr}")
+theirs_art = read(f"{covered}/iPod_Control/Artwork/ArtworkDB")
+check(ipod_artwork.ArtworkDB.parse(theirs_art).to_bytes() == theirs_art, "libgpod's ArtworkDB read and written back")
+plain = pretend("covers-ours", "xB147")
+gpod("make", plain, *SONGS)
+db = pkg_itunesdb.ITunesDB.parse(read(f"{plain}/iPod_Control/iTunes/iTunesDB"))
+for written_path, final in ipod_artwork.add_covers(f"{plain}/iPod_Control", "classic_1", "", db.tracks,
+                                                   [(t, cover) for t in db.tracks], plain, Flat()):
+    os.replace(written_path, final)
+with open(f"{plain}/iPod_Control/iTunes/iTunesDB", "wb") as f:
+    f.write(db.to_bytes(GUID, db.hashing_scheme))
+
+
+def masked(data):
+    data = bytearray(data)
+    at = data.find(b"mhii")
+    while at >= 0:  # its song id (gpodtool numbers makeart's tracks differently) and its date
+        data[at + 0x14:at + 0x1C], data[at + 0x28:at + 0x2C] = bytes(8), bytes(4)
+        at = data.find(b"mhii", at + 4)
+    return bytes(data)
+
+
+check(masked(read(f"{plain}/iPod_Control/Artwork/ArtworkDB")) == masked(theirs_art),
+      "ours the same as libgpod's for the same covers")
+out = gpod("art", plain).stdout
+check(out.count("|320x214:") == 3 and out.count("|56x38:") == 3 and "|1|101|101|" in out,
+      "libgpod reads ours: each track's cover, at each size")
+
 if "--fixtures" in sys.argv:
     dest = os.path.join(REPO, "tests", "fixtures", "ipod")
     os.makedirs(dest, exist_ok=True)
@@ -139,6 +195,7 @@ if "--fixtures" in sys.argv:
         shutil.copyfile(f"{d}/iPod_Control/iTunes/iTunesDB", os.path.join(dest, f"{name}-iTunesDB"))
         if name.startswith("shuffle"):
             shutil.copyfile(f"{d}/iPod_Control/iTunes/iTunesSD", os.path.join(dest, f"{name}-iTunesSD"))
+    shutil.copyfile(f"{covered}/iPod_Control/Artwork/ArtworkDB", os.path.join(dest, "classic-ArtworkDB"))
     print("fixtures written to", dest)
 
 sys.exit(1 if failed else 0)

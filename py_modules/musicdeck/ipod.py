@@ -7,17 +7,20 @@ put music on it, and doing so, through its own database (itunesdb.py) as iTunes 
   else the USB product id (sysfs, no root needed), else how its database is signed now.
 * Its FireWire GUID, which the iPod classic and the 3rd/4th generation nano sign their database with: in
   SysInfo(Extended), else the USB serial number, which is the GUID (libgpod's README.SysInfo).
-* What can be synced: every iPod with a disk mode and a plain iTunesDB (1st-5.5th generation, photo,
-  mini, nano 1G-4G, classic, every shuffle). Not the nano 5G (it reads SQLite databases signed with a key
-  only an iTunes sync leaves behind), not the nano 6G/7G (hashAB, a closed library), not an iPod touch
-  (no disk mode), and not a Mac-formatted (HFS+) iPod, which Linux mounts read only; those still play.
+* What can be synced: every iPod with a disk mode: a plain iTunesDB (1st-5.5th generation, photo, mini,
+  nano 1G-4G, classic, every shuffle), and the nano 5G-7G's SQLite libraries (ipod_sqlite.py; the 5G's
+  hash72 key comes from what iTunes signed, so it needs one iTunes sync first; the 6G/7G's hashAB from the
+  hashab helper). Not an iPod touch (no disk mode), and not a Mac-formatted (HFS+) iPod with its journal
+  on, which Linux mounts read only; those still play.
   An iPod running Rockbox isn't one of these: it's a player like any other (devices.py).
 * Syncing: files go to iPod_Control/Music/Fnn/<4 letters>.<ext>, as iTunes names them; formats the iPod
   can't play are converted with ffmpeg (FLAC and other lossless to Apple Lossless, or AAC for a 1st/2nd
   generation shuffle; Ogg, Opus... to 256 kbps AAC). The database is read again, what the iPod counted
   since the last sync folded in, the new tracks added, and written to a temporary file and moved over the
-  old one (kept on the Deck first). A shuffle gets its iTunesSD too.
+  old one (kept on the Deck first). A shuffle gets its iTunesSD too. Covers go on the iPod's screen
+  (ipod_artwork.py), ReplayGain becomes Sound Check, and renaming renames the iPod itself.
 """
+import logging
 import os
 import random
 import re
@@ -85,6 +88,7 @@ PLAYABLE = {".mp3": "MPEG audio file", ".m4a": "AAC audio file", ".m4b": "AAC au
             ".wav": "WAV audio file", ".aif": "AIFF audio file", ".aiff": "AIFF audio file"}
 LOSSLESS_SOURCES = {".flac", ".wav", ".aif", ".aiff", ".ape", ".wv"}
 NO_LOSSLESS = {"shuffle_1", "shuffle_2"}
+_log = logging.getLogger("musicdeck")
 
 
 @dataclass
@@ -101,6 +105,7 @@ class IpodInfo:
     hash72_key: Optional[tuple[bytes, bytes]] = None  # (iv, random bytes), from a library iTunes signed
     hashab: Optional[str] = None  # the hashab helper (bin/<platform>/hashab)
     post_process: list[str] = field(default_factory=list)  # the iPod's own SQL for its libraries
+    sysinfo_extended: str = ""  # its SysInfoExtended (the cover sizes it shows, among much else)
 
     @property
     def model(self) -> str:
@@ -296,10 +301,11 @@ def identify(root: str, source: str = "", runtime_dir: Optional[str] = None) -> 
     writable = os.access(control, os.W_OK)
     sqlite_library = compressed or generation in ("nano_5", "nano_6", "nano_7") or scheme in (HASH72, HASHAB)
     result = IpodInfo(root, generation, scheme, guid, compressed, writable, mount_type(root), sqlite_library)
+    xml = _read(_find(device_dir, "SysInfoExtended")).decode("utf-8", "replace")
+    result.sysinfo_extended = xml
     if sqlite_library:
         result.hash72_key = hash72_key(control, guid, path)
         result.hashab = native.helper("hashab", runtime_dir)
-        xml = _read(_find(device_dir, "SysInfoExtended")).decode("utf-8", "replace")
         from .ipod_sqlite import post_process_commands
         result.post_process = post_process_commands(xml) if xml else []
     return result
@@ -465,10 +471,12 @@ def _fold_extras(db: ITunesDB, itunes: str) -> list[str]:
     return used
 
 
-def _write(info: IpodInfo, db: ITunesDB, itunes: str, used: list[str], backup_dir: str) -> None:
+def _write(info: IpodInfo, db: ITunesDB, itunes: str, used: list[str], backup_dir: str,
+           artwork: Optional[list[tuple[str, str]]] = None) -> None:
     """The database (and a shuffle's iTunesSD, a nano 5G-7G's SQLite libraries) written in full beside
-    the old one, then moved over it; the old ones kept on the Deck first. Then "Play Counts" is put aside
-    and On-The-Go's files go, as libgpod does, as they're in the database now."""
+    the old one, then moved over it, with the ArtworkDB staged in `artwork`; the old ones kept on the Deck
+    first. Then "Play Counts" is put aside and On-The-Go's files go, as libgpod does, as they're in the
+    database now."""
     os.makedirs(backup_dir, exist_ok=True)
     if info.sqlite:
         # an iTunesCDB, signed as the iPod's database is, and an empty iTunesDB (libgpod's layout)
@@ -480,7 +488,10 @@ def _write(info: IpodInfo, db: ITunesDB, itunes: str, used: list[str], backup_di
         data = db.to_bytes(info.guid, info.scheme)
     if os.path.isfile(target):
         shutil.copyfile(target, os.path.join(backup_dir, os.path.basename(target) + ".previous"))
-    staged = []
+    staged = list(artwork or [])
+    for _, final in staged:
+        if os.path.isfile(final):
+            shutil.copyfile(final, os.path.join(backup_dir, os.path.basename(final) + ".previous"))
     if info.sqlite:
         from . import ipod_sqlite
         itlp = _find(itunes, "iTunes Library.itlp") or os.path.join(itunes, "iTunes Library.itlp")
@@ -559,7 +570,7 @@ def add(info: IpodInfo, items: list[dict[str, Any]], playlist: str, backup_dir: 
     assert control
     known = {(t.fields()["title"].lower(), t.fields()["artist"].lower(), t.fields()["album"].lower()): t.id
              for t in db.tracks}
-    added, ids = 0, []
+    added, ids, covers = 0, [], []
     with tempfile.TemporaryDirectory(prefix="musicdeck-ipod-") as scratch:
         for n, item in enumerate(items, 1):
             same = (str(item.get("title") or "").lower(), str(item.get("artist") or "").lower(),
@@ -578,20 +589,59 @@ def add(info: IpodInfo, items: list[dict[str, Any]], playlist: str, backup_dir: 
             shutil.copyfile(source, dest)
             ipod_path = "/" + os.path.relpath(dest, info.root).replace(os.sep, "/")
             year = str(item.get("year") or tags.get("year") or "")[:4]
+            gain = (item.get("rg") or tags.get("rg") or {}).get("track")  # ReplayGain, as Sound Check
             track = db.add_track({**tags, **{k: v for k, v in item.items() if v not in (None, "")},
                                   "path": ipod_path, "filetype": _filetype(dest), "size": size,
                                   "duration": tags.get("duration") or item.get("duration") or 0,
                                   "bitrate": tags.get("bitrate") or 0, "rate": tags.get("rate") or 44100,
-                                  "year": int(year) if year.isdigit() else 0})
+                                  "year": int(year) if year.isdigit() else 0, "gain": gain})
             known[same] = track.id
             ids.append(track.id)
+            cover = _cover(item)
+            if cover:
+                covers.append((track, cover))
             added += 1
             progress(n)
-    db.rebuild_master()
-    if playlist and ids:
-        db.add_playlist(playlist, ids)
-    _write(info, db, itunes, used, backup_dir)
+        db.rebuild_master()
+        if playlist and ids:
+            db.add_playlist(playlist, ids)
+        artwork = _covers(info, control, db, covers, scratch)
+        _write(info, db, itunes, used, backup_dir, artwork)
     return added
+
+
+def _cover(item: dict[str, Any]) -> Optional[bytes]:
+    """A song's cover: its album's picture on the Deck (item "cover"), else the one in the file, else the
+    folder's cover.jpg..."""
+    from .services.local import extract_embedded_art, find_folder_cover
+    path = item.get("cover") or ""
+    if not path:
+        embedded = extract_embedded_art(item["path"])
+        if embedded:
+            return embedded[0]
+        path = find_folder_cover(os.path.dirname(item["path"])) or ""
+    return _read(path) or None
+
+
+def _covers(info: IpodInfo, control: str, db: ITunesDB, covers: list[tuple[Any, bytes]],
+            scratch: str) -> list[tuple[str, str]]:
+    """The new tracks' covers put on the iPod (ipod_artwork); a failure there loses covers, not the sync."""
+    from . import ipod_artwork
+    try:
+        return ipod_artwork.add_covers(control, info.generation, info.sysinfo_extended, db.tracks, covers, scratch)
+    except (OSError, ValueError, struct.error, subprocess.SubprocessError) as e:
+        _log.warning(f"iPod covers: {e}")
+        return []
+
+
+def rename(info: IpodInfo, name: str, backup_dir: str) -> None:
+    """Gives the iPod a new name: its own (its main playlist's), as iTunes does."""
+    reason = info.why_not()
+    if reason:
+        raise ITunesDBError(reason)
+    db, itunes, used = _open(info)
+    db.rename(name)
+    _write(info, db, itunes, used, backup_dir)
 
 
 def remove(info: IpodInfo, ipod_paths: set[str], backup_dir: str) -> int:
@@ -604,7 +654,14 @@ def remove(info: IpodInfo, ipod_paths: set[str], backup_dir: str) -> int:
     ids = {t.id for t in db.tracks if t.fields()["path"].lower() in wanted}
     gone = db.remove_tracks(ids)
     db.rebuild_master()
-    _write(info, db, itunes, used, backup_dir)
+    from . import ipod_artwork
+    control = control_dir(info.root)
+    try:
+        artwork = ipod_artwork.prune(control, db.tracks) if control else []
+    except (OSError, ValueError, struct.error) as e:
+        _log.warning(f"iPod covers: {e}")
+        artwork = []
+    _write(info, db, itunes, used, backup_dir, artwork)
     for t in gone:
         try:
             os.remove(on_disk(info.root, t.fields()["path"]))
