@@ -3,6 +3,26 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.27.0
+
+- **Delete from your library**: Y on a song, album, folder or playlist file in Local files has Delete. It goes
+  to the trash, not away: an album's folder goes whole when only its cover and rip logs would be left, and an
+  artist's folder left empty is tidied up. Artists aren't deleted whole.
+- **Recently deleted**: a Local files tab (while there's something in it) listing what was deleted lately;
+  open one and Restore puts it back where it was. It's the desktop's Trash too, for desktop mode.
+- **Eject**: Y on a device's card in Devices, or its row in Decky → MusicDeck → Plugged in, ejects it as the
+  desktop would (a stick or iPod unmounted and powered down, a phone closed, a CD drive's tray opened).
+- **How much room is left**: a device's card says how much space is free on it, its page how much of how
+  much, and a copy that won't fit says so before it starts.
+- **A device's page** leads with its Songs, Artists and playlists, then its albums.
+- **Data discs**: a CD or DVD of MP3s (one burned for a car stereo) plays from Devices, as a player.
+- **iPhone and iPod touch**: once unlocked and trusted, the music synced to one plays from Devices (read
+  only; Apple Music downloads are protected and don't). A toast says to tap Trust when it's needed.
+- **MusicDeck playlists** of Local files can be copied to a device too.
+- **Mac-formatted iPods** say exactly what to do to sync them (turn their journal off on a Mac, or restore
+  them for Windows), rather than only that they can't.
+- A CD's album page shows its rip's progress, and offers Rip again once it's done.
+
 ## 0.26.0
 
 - **iPods**: an iPod plugged in (any with a disk mode: classic, nano, shuffle, mini, video, photo) shows in

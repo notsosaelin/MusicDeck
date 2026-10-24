@@ -156,6 +156,7 @@ class Plugin:
             self.output_watcher = OutputWatcher(self._output_changed, decky.logger)
             self.output_watcher.start()
             self.device_watcher = DeviceWatcher(self._devices_changed, decky.logger)
+            self.device_watcher.on_note = self._device_note
             self.device_watcher.start()
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
@@ -297,7 +298,8 @@ class Plugin:
             if device["kind"] == "cd":
                 config = {k: device[k] for k in ("drive", "toc", "disc_id")}
             else:
-                config = {"paths": device["paths"], "kind": device["kind"], "source": device.get("source", "")}
+                config = {"paths": device["paths"], "kind": device["kind"], "source": device.get("source", ""),
+                          "mount": device.get("mount", ""), "uri": device.get("uri", "")}
             known = self.devices.get(device["id"])
             entry = {"id": device["id"], "name": names.get(device["id"]) or device["name"], "own_name": device["name"],
                      "kind": device["kind"], "config": config}
@@ -316,6 +318,12 @@ class Plugin:
         for library in self._libraries():
             library.forget_browse_info()
         await _announce_change()
+
+    async def _device_note(self, text: str) -> None:
+        """A word about a device (an iPhone to unlock and trust), as Local files' toast."""
+        library = next(iter(self._libraries()), None)
+        if library:
+            await decky.emit("source_note", library.instance_id, text)
 
     def _instance(self, instance_id: str) -> MusicService:
         instance = self.instances.get(instance_id)
@@ -508,7 +516,54 @@ class Plugin:
             instance = self._instance(instance_id)
             if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id, target)):
                 raise ServiceError("Only Local files copies to and from devices")
+            if PlaylistStore.is_ours(item_id):
+                # a MusicDeck playlist: its songs, and its name for an iPod's playlist
+                try:
+                    page = self.playlists.page(item_id)
+                except KeyError:
+                    raise ServiceError("Playlist not found")
+                return await instance.copy_to("playlist", item_id, target,
+                                              ids=[t["id"] for t in page["tracks"]], title=page["title"])
             return await instance.copy_to(kind, item_id, target)
+        return await _result(work())
+
+    @_when_ready
+    async def eject_device(self, device_id: str) -> dict[str, Any]:
+        """Ejects a plugged-in device ("Safely remove"): its index stops first, so nothing holds it open."""
+        async def work():
+            entry = self.devices.get(device_id) if isinstance(device_id, str) else None
+            if not entry or not self.device_watcher:
+                raise ServiceError("That device isn't plugged in")
+            library = next(iter(self._libraries()), None)
+            if library and library.copy_progress.get("running"):
+                raise ServiceError(f"Still copying to {library.copy_progress['to']}")
+            instance = self.device_instances.get(device_id)
+            if isinstance(instance, AudioCdService) and instance.rip_progress.get("running"):
+                raise ServiceError("Still ripping that CD")
+            async with self.lifecycle:
+                instance = self.device_instances.pop(device_id, None)
+                if instance:
+                    await instance.stop()
+            problem = await self.device_watcher.eject({**entry["config"], "kind": entry["kind"]})
+            if problem:
+                await self._start_device(entry)  # still there: back in Devices
+                raise ServiceError(problem)
+            self.devices.pop(device_id, None)
+            await _announce_change()
+            return f"{entry['name']} can be unplugged" if entry["kind"] != "cd" else f"{entry['name']} ejected"
+        return await _result(work())
+
+    @_when_ready
+    async def delete_from_library(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
+        """Moves a song, album, folder or playlist file of Local files to the trash (Recently deleted
+        brings it back)."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id)):
+                raise ServiceError("Only Local files deletes music")
+            result = await instance.delete(kind, item_id)
+            await _announce_change()
+            return result
         return await _result(work())
 
     @_when_ready

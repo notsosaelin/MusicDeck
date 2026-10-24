@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from . import itunesdb, native
+from .devices import _unescape
 from .itunesdb import HASH58, HASH72, HASHAB, HASH_NONE, ITunesDB, ITunesDBError
 
 # model numbers (SysInfo's ModelNumStr without its first letter) by generation, from libgpod 0.8.3
@@ -93,6 +94,7 @@ class IpodInfo:
     guid: Optional[bytes]
     compressed: bool  # its database is an iTunesCDB (nano 5G and later)
     writable_fs: bool
+    fs: str = ""  # how it's formatted: "vfat" (Windows-formatted) or "hfsplus" (Mac-formatted)
 
     @property
     def model(self) -> str:
@@ -104,8 +106,13 @@ class IpodInfo:
 
     def why_not(self) -> str:
         """Why music can't be put on this iPod, or "" when it can."""
+        if not self.writable_fs and self.fs == "hfsplus":
+            # Linux writes HFS+ only with its journal off; turning it off needs a Mac (or a reformat)
+            return ("This iPod is Mac-formatted with journaling on, which Linux only reads. On a Mac, Disk Utility → "
+                    "the iPod → File → Disable Journaling (or: diskutil disableJournal), then plug it in here again. "
+                    "Or restore it with iTunes for Windows, which formats it for both")
         if not self.writable_fs:
-            return "This iPod is Mac-formatted, which Linux can only read: restore it with iTunes for Windows to sync it"
+            return "This iPod can only be read: it's mounted read only, or its files belong to another user"
         if self.compressed or self.generation == "nano_5" or self.scheme == HASH72:
             return f"The {self.model} keeps its library in a way only iTunes can sign; it can be played from, not synced"
         if self.generation in ("nano_6", "nano_7") or self.scheme == HASHAB:
@@ -181,6 +188,19 @@ def usb_facts(source: str) -> tuple[Optional[int], str]:
     return None, ""
 
 
+def mount_type(root: str) -> str:
+    """The file system a mount is ("vfat", "hfsplus"...), from /proc/self/mounts; "" when not found."""
+    try:
+        with open("/proc/self/mounts", "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) > 2 and _unescape(parts[1]) == root:
+                    return parts[2]
+    except OSError:
+        pass
+    return ""
+
+
 def database_path(control: str) -> tuple[Optional[str], bool]:
     """The database there is: (path, compressed?); iTunesCDB wins where both are (the nano 5G on)."""
     itunes = _find(control, "iTunes")
@@ -227,7 +247,7 @@ def identify(root: str, source: str = "") -> Optional[IpodInfo]:
     guid = (itunesdb.guid_bytes(info.get("xFireWireGUID", "")) or itunesdb.guid_bytes(info.get("FirewireGuid", ""))
             or itunesdb.guid_bytes(serial))
     writable = os.access(control, os.W_OK)
-    return IpodInfo(root, generation, scheme, guid, compressed, writable)
+    return IpodInfo(root, generation, scheme, guid, compressed, writable, mount_type(root))
 
 
 def load(root: str) -> Optional[ITunesDB]:

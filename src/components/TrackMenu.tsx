@@ -23,6 +23,9 @@ import {
   star,
   copyTo,
   removeFromDevice,
+  deleteFromLibrary,
+  ejectDevice,
+  renameDevice,
   onDevice,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
@@ -145,6 +148,14 @@ function copyItems(instanceId: string, kind: string, id: string): ReactNode[] {
   if (onDevice(id)) {
     const device = state.devices.find((d) => id.startsWith(`dv~${d.id}~`));
     if (!device || device.kind === "cd") return [];
+    // a data disc, an iPhone: copied from, never changed
+    if (device.status.writable === false && device.kind !== "ipod") {
+      return [
+        <MenuItem key="copy-deck" onSelected={() => copy("deck")}>
+          Copy to this Deck
+        </MenuItem>,
+      ];
+    }
     // deleting from a player (or an iPod's library) is asked about first: it can't be undone
     const remove = () =>
       showModal(
@@ -174,12 +185,94 @@ function copyItems(instanceId: string, kind: string, id: string): ReactNode[] {
     ];
   }
   return state.devices
-    .filter((d) => d.kind !== "cd")
+    .filter((d) => d.kind !== "cd" && (d.kind === "ipod" || d.status.writable !== false))
     .map((d) => (
       <MenuItem key={`copy-${d.id}`} onSelected={() => copy(d.id)}>
         Copy to {d.name}
       </MenuItem>
     ));
+}
+
+const DELETABLE = ["track", "album", "folder", "playlist"];
+
+/**
+ * Deleting from the Deck's library (Local files): a song, an album, a folder or a playlist file goes to
+ * the trash, where Local files' Recently deleted brings it back. Artists aren't deleted whole. A
+ * MusicDeck playlist has its own Delete; music on a device is removed from it instead.
+ */
+function deleteItems(instanceId: string, kind: string, id: string, title: string): ReactNode[] {
+  const local = pluginState.get()?.services.find((s) => s.id === instanceId)?.type === "local";
+  if (!local || onDevice(id) || isLocalPlaylist(id) || !DELETABLE.includes(kind) || id.startsWith("deleted:"))
+    return [];
+  const what: Record<string, string> = {
+    track: "The song moves to the trash.",
+    album: "Its songs move to the trash, with their folder when nothing else is in it.",
+    folder: "The folder and everything in it move to the trash.",
+    playlist: "The playlist file moves to the trash. Its songs stay.",
+  };
+  const remove = () =>
+    showModal(
+      <ConfirmModal
+        strTitle={`Delete ${title}?`}
+        strDescription={`${what[kind]} Recently deleted, in Local files, brings it back.`}
+        strOKButtonText="Delete"
+        bDestructiveWarning
+        onOK={async () => {
+          const r = await deleteFromLibrary(instanceId, kind, id);
+          invalidateBrowserCache();
+          notify(r.ok ? "Local files" : "Couldn't delete", r.ok ? r.data : r.error);
+          // looking at what's gone: step back out
+          const views = navigation.get().stacks.library;
+          const top = views[views.length - 1];
+          if (r.ok && top?.type === "collection" && top.collection.id === id) popView("library");
+        }}
+      />,
+    );
+  return [
+    <MenuItem key="delete" tone="destructive" onSelected={remove}>
+      Delete
+    </MenuItem>,
+  ];
+}
+
+/** Whether a collection can be deleted from the Deck's library. */
+export const canDelete = (instanceId: string, c: Collection) =>
+  deleteItems(instanceId, c.kind, c.id, c.title).length > 0;
+
+/** A device's own menu (its card in Devices): eject it, and name it. */
+function deviceMenu(c: Collection, target: EventTarget) {
+  const device = pluginState.get()?.devices.find((d) => c.id === `dv~${d.id}~` || c.id.startsWith(`dv~${d.id}~`));
+  if (!device) return;
+  const eject = async () => {
+    const r = await ejectDevice(device.id);
+    invalidateBrowserCache();
+    notify(device.name, r.ok ? r.data : r.error);
+  };
+  showContextMenu(
+    <Menu label={device.name}>
+      <MenuItem onSelected={eject}>{device.kind === "cd" ? "Eject disc" : "Eject"}</MenuItem>
+      {device.kind !== "cd" && device.kind !== "disc" && (
+        <MenuItem
+          onSelected={() =>
+            showModal(
+              <NameModal
+                title="Rename"
+                initial={device.name}
+                action="Save"
+                onSubmit={async (name) => {
+                  await renameDevice(device.id, name);
+                  invalidateBrowserCache();
+                }}
+              />,
+            )
+          }
+        >
+          Rename
+        </MenuItem>
+      )}
+    </Menu>,
+    target,
+  );
 }
 
 /** Whether an album, artist or playlist can be copied somewhere (to a device, or from one to the Deck). */
@@ -306,6 +399,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
       )}
       <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist</MenuItem>
       {copyItems(instanceId, "track", track.id)}
+      {deleteItems(instanceId, "track", track.id, track.title)}
       {/* a device's files aren't the Deck's to change */}
       {hasFeature(instanceId, "tags") && !onDevice(track.id) && (
         <MenuItem onSelected={() => editTags(instanceId, "track", track.id, track.title)}>Edit tags</MenuItem>
@@ -410,6 +504,14 @@ function gameMusicItem(instanceId: string, c: Collection) {
 /** Options for a collection row: save remote playlists, manage MusicDeck playlists, play with a game. */
 export function showCollectionMenu(instanceId: string, c: Collection, parent?: EventTarget | null) {
   const target = parent ?? window;
+  if (c.kind === "device") {
+    deviceMenu(c, target);
+    return;
+  }
+  if (c.kind === "folder") {
+    showContextMenu(<Menu label={c.title}>{deleteItems(instanceId, "folder", c.id, c.title)}</Menu>, target);
+    return;
+  }
   if (isLocalPlaylist(c.id)) {
     showContextMenu(
       <Menu label={c.title}>
@@ -432,6 +534,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
           Rename
         </MenuItem>
         <MenuItem onSelected={() => pickArtwork(c)}>Set artwork</MenuItem>
+        {copyItems(instanceId, "playlist", c.id)}
         {c.art?.startsWith("mdart:") && (
           <MenuItem
             onSelected={async () => {
@@ -495,6 +598,8 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
           {copyItems(instanceId, c.kind, c.id)}
           {manage.length > 0 && <MenuSeparator />}
           {manage}
+          {canDelete(instanceId, c) && <MenuSeparator />}
+          {deleteItems(instanceId, c.kind, c.id, c.title)}
         </Menu>,
         target,
       );

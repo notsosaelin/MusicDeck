@@ -32,6 +32,8 @@ CDROMREADTOCENTRY = 0x5306
 CDROMREADAUDIO = 0x530E
 CDROM_DRIVE_STATUS = 0x5326
 CDROM_DISC_STATUS = 0x5327
+CDROMEJECT = 0x5309
+CDROM_LOCKDOOR = 0x5329
 CDS_DISC_OK = 4
 CDS_AUDIO = 100
 CDS_MIXED = 105
@@ -54,6 +56,27 @@ def drives() -> list[str]:
 def _open(device: str) -> int:
     # O_NONBLOCK: opens without a disc, and doesn't wait for one
     return os.open(device, os.O_RDONLY | os.O_NONBLOCK)
+
+
+def eject(device: str) -> bool:
+    """Opens the drive's tray (CDROM_LOCKDOOR off, then CDROMEJECT), as `eject` does."""
+    if fcntl is None or not device:
+        return False
+    try:
+        fd = _open(device)
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.ioctl(fd, CDROM_LOCKDOOR, 0)
+        except OSError:
+            pass
+        fcntl.ioctl(fd, CDROMEJECT, 0)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
 
 
 def has_audio_disc(device: str) -> bool:

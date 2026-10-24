@@ -219,7 +219,8 @@ export interface CenterSettings {
 export interface DeviceInfo {
   id: string;
   name: string;
-  kind: "usb" | "mtp" | "cd" | "ipod";
+  /** usb: a player or stick; mtp: a phone; ios: an iPhone or iPod touch (read only); disc: a data CD/DVD */
+  kind: "usb" | "mtp" | "cd" | "ipod" | "ios" | "disc";
   status: Record<string, any>;
 }
 
@@ -289,6 +290,12 @@ export const copyTo = callable<[instanceId: string, kind: string, itemId: string
 export const removeFromDevice = callable<[instanceId: string, kind: string, itemId: string], Result<string>>(
   "remove_from_device",
 );
+/** Moves a song, album, folder or playlist file of Local files to the trash (Recently deleted brings it back). */
+export const deleteFromLibrary = callable<[instanceId: string, kind: string, itemId: string], Result<string>>(
+  "delete_from_library",
+);
+/** Ejects a plugged-in device ("Safely remove"), or opens a CD drive's tray. */
+export const ejectDevice = callable<[deviceId: string], Result<string>>("eject_device");
 /** Whether an id (a track's, an album's...) is of something on a plugged-in device (services/shelf.py). */
 export const onDevice = (id: string | null | undefined) => !!id && id.startsWith("dv~");
 export const getHome = callable<[id: string], Result<Section[]>>("home");

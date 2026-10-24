@@ -1781,12 +1781,12 @@ async def run():
         lib_row = next(s for s in state["services"] if s["id"] == sid)
         check(any(t["id"] == "devices" and t["group"] == "files" for t in lib_row["tabs"]), "Local files has a Devices tab")
         card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
-        check(card["kind"] == "device" and card["title"] == "WALKMAN" and card["subtitle"] == "USB · 1 song"
+        check(card["kind"] == "device" and card["title"] == "WALKMAN" and card["subtitle"].startswith("USB · 1 song · ")
               and card["id"] == f"dv~{stick['id']}~" and (card["art"] or "").startswith(f"dv~{stick['id']}~"),
               f"with the player in it: {card}")
         check((await plugin.home(sid))["data"][0]["title"] == "Devices", "and on Home")
         dev_page = (await plugin.open_collection(sid, "device", card["id"]))["data"]
-        dev_album = dev_page["collections"][0]
+        dev_album = next(c for c in dev_page["collections"] if c["kind"] == "album")
         check(dev_page["title"] == "WALKMAN" and dev_album["title"] == "Live" and dev_album["id"].startswith("dv~"),
               f"opening it: its albums: {dev_page}")
         opener = (await plugin.open_collection(sid, "album", dev_album["id"]))["data"]["tracks"][0]
@@ -1882,7 +1882,7 @@ async def run():
         state = await plugin.get_state()
         pod_card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
         check([(d["name"], d["kind"]) for d in state["devices"]] == [("Test iPod", "ipod")]
-              and pod_card["subtitle"] == "iPod classic · 3 songs" and state["devices"][0]["status"]["why_not"] == "",
+              and pod_card["subtitle"].startswith("iPod classic · 3 songs") and state["devices"][0]["status"]["why_not"] == "",
               f"it goes by the name it has in iTunes, and says which iPod it is: {pod_card}")
         said = await plugin.copy_to(sid, "album", deck_album, pod_device["id"])
         await library.copying
@@ -1896,6 +1896,113 @@ async def run():
         pod_db = itdb.ITunesDB.parse(open(os.path.join(pod, "iPod_Control", "iTunes", "iTunesDB"), "rb").read())
         check(removed["ok"] and len(pod_db.tracks) == 3, f"and taken off again: {removed}")
         check(not (await plugin.remove_from_device(sid, "album", deck_album))["ok"], "the Deck's own music isn't removed that way")
+        await plugin._devices_changed([])
+
+        print("deleting from the library, and Recently deleted")
+        from musicdeck import trash as trashmod
+        trashmod.RECYCLE_BIN = False  # the spec's trash, in the test's own folder, on Windows too
+        os.environ["XDG_DATA_HOME"] = os.path.join(tmp, "xdg")
+        make_wav(os.path.join(lib, "Artist D", "Gone", "01 a.wav"), "Song A", "Artist D", "Gone", 1)
+        make_wav(os.path.join(lib, "Artist D", "Gone", "02 b.wav"), "Song B", "Artist D", "Gone", 2)
+        with open(os.path.join(lib, "Artist D", "Gone", "cover.jpg"), "wb") as f:
+            f.write(JPEG)
+        library.rescan()
+        await library.scan_task
+        gone_album = next(k for k, v in library._albums().items() if v[0][1]["album"] == "Gone")
+        said = await plugin.delete_from_library(sid, "album", gone_album)
+        await library.scan_task
+        in_trash = os.listdir(os.path.join(tmp, "xdg", "Trash", "files"))
+        check(said["ok"] and not os.path.exists(os.path.join(lib, "Artist D")) and in_trash == ["Gone"]
+              and all(t["album"] != "Gone" for t in library.tracks.values()),
+              f"an album to the trash: its folder whole (its cover with it), the artist's emptied folder gone: {said} {in_trash}")
+        info = open(os.path.join(tmp, "xdg", "Trash", "info", "Gone.trashinfo"), encoding="utf-8").read()
+        check(info.startswith("[Trash Info]\nPath=") and "DeletionDate=" in info, "with a .trashinfo, so the desktop's Trash knows it")
+        state = await plugin.get_state()
+        tabs = next(s for s in state["services"] if s["id"] == sid)["tabs"]
+        deleted_card = (await plugin.center_tab(sid, "deleted"))["data"][0]["items"][0]
+        check(any(t["id"] == "deleted" for t in tabs) and deleted_card["title"] == "Gone"
+              and deleted_card["subtitle"] == "2 songs · just now", f"Recently deleted lists it: {deleted_card}")
+        deleted_page = (await plugin.open_collection(sid, "list", deleted_card["id"]))["data"]
+        check(deleted_page["action"] == {"label": "Restore", "call": "restore"} and "Song A" in (deleted_page["notice"] or ""),
+              f"what's in it, and Restore: {deleted_page}")
+        back = await plugin.collection_action(sid, "list", deleted_card["id"], "restore")
+        await library.scan_task
+        check(back["ok"] and os.path.isfile(os.path.join(lib, "Artist D", "Gone", "cover.jpg"))
+              and sum(t["album"] == "Gone" for t in library.tracks.values()) == 2
+              and not any(t["id"] == "deleted" for t in next(s for s in (await plugin.get_state())["services"]
+                                                              if s["id"] == sid)["tabs"]),
+              f"restored where it was, cover and all; Recently deleted empty again: {back}")
+        song_b = next(tid for tid, t in library.tracks.items() if t["title"] == "Song B")
+        await plugin.delete_from_library(sid, "track", song_b)
+        await library.scan_task
+        check(os.path.isfile(os.path.join(lib, "Artist D", "Gone", "01 a.wav"))
+              and not os.path.exists(os.path.join(lib, "Artist D", "Gone", "02 b.wav")),
+              "a song alone: just its file, its album's other songs stay")
+        mix_id = next(pid for pid, p in library.playlists.items() if p["title"] == "mix")
+        await plugin.delete_from_library(sid, "playlist", mix_id)
+        await library.scan_task
+        check(not os.path.exists(os.path.join(lib, "mix.m3u")) and os.path.isfile(os.path.join(lib, "Artist B", "Other", "song.wav")),
+              "a playlist file to the trash, its songs staying")
+        said = await plugin.delete_from_library(sid, "folder", os.path.join(lib, "Artist D"))
+        await library.scan_task
+        check(said["ok"] and not os.path.exists(os.path.join(lib, "Artist D")), f"a folder, whole: {said}")
+        check(not (await plugin.delete_from_library(sid, "folder", lib))["ok"]
+              and not (await plugin.delete_from_library(sid, "folder", tmp))["ok"]
+              and not (await plugin.delete_from_library(sid, "track", "dv~devtest00001~x"))["ok"],
+              "not the library's own folder, nothing outside it, nothing on a device")
+        for card in (await plugin.center_tab(sid, "deleted"))["data"][0]["items"]:
+            if card["title"] == "mix":
+                await plugin.collection_action(sid, "list", card["id"], "restore")
+        await library.scan_task
+        check(os.path.isfile(os.path.join(lib, "mix.m3u")), "the playlist back too")
+        shutil.rmtree(os.path.join(tmp, "xdg"))
+
+        print("more of what's plugged in")
+        mounts_more = "\n".join(["/dev/sr0 /run/media/deck/MP3\\040CD iso9660 ro,nosuid 0 0",
+                                 "/dev/sdb1 /run/media/deck/WALKMAN vfat rw,nosuid 0 0"])
+        more = devmod.usb_storage(mounts_more, "deck", {})
+        check([(d["name"], d["kind"], d["read_only"]) for d in more] == [("MP3 CD", "disc", True), ("WALKMAN", "usb", False)],
+              f"a data CD of MP3s is a player too, read only: {more}")
+        if os.name != "nt":
+            gvfs = tempfile.mkdtemp()
+            os.makedirs(os.path.join(gvfs, "afc:host=00008030-001A", "iTunes_Control", "Music", "F00"))
+            os.makedirs(os.path.join(gvfs, "afc:host=00008030-001A,port=3"))
+            phones = devmod.phone_storage(gvfs, {}, {"00008030-001A": "Sam's iPhone"})
+            check([(p["name"], p["kind"], p["uri"]) for p in phones] == [("Sam's iPhone", "ios", "afc://00008030-001A/")],
+                  f"an iPhone's synced music, by its name: {phones}")
+        await plugin._devices_changed([stick])
+        on_stick = plugin.device_instances[stick["id"]]
+        await on_stick.scan_task
+        card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
+        dev_page = (await plugin.open_collection(sid, "device", card["id"]))["data"]
+        check(" free" in card["subtitle"] and " free of " in dev_page["subtitle"]
+              and [c["title"] for c in dev_page["collections"]][:2] == ["Songs", "Artists"],
+              f"a device's card and page say how much room is left, and lead with its songs and artists: "
+              f"{card['subtitle']} | {dev_page['subtitle']}")
+        trip = await plugin.create_playlist(sid, "Trip", [t for t in (await plugin.open_collection(sid, "album", deck_album))["data"]["tracks"]])
+        said = await plugin.copy_to(sid, "playlist", trip["id"], stick["id"])
+        await library.copying
+        check(said["ok"] and os.path.isfile(os.path.join(stick_dir, "Music", "Artist A", "Album One", "01 first.wav")),
+              f"a MusicDeck playlist's songs copied to a player: {said}")
+        await plugin.playlist_delete(trip["id"])
+        await on_stick.scan_task
+        shutil.rmtree(os.path.join(stick_dir, "Music", "Artist A"))
+        ejected = []
+
+        class FakeWatcher:
+            known = None
+
+            async def eject(self, device):
+                ejected.append(device)
+                return "It's still in use; try again in a moment" if len(ejected) == 1 else ""
+        real_watcher, plugin.device_watcher = plugin.device_watcher, FakeWatcher()
+        busy = await plugin.eject_device(stick["id"])
+        check(not busy["ok"] and "in use" in busy["error"] and stick["id"] in plugin.device_instances,
+              f"a device in use isn't ejected, and stays in Devices: {busy}")
+        done = await plugin.eject_device(stick["id"])
+        check(done["ok"] and stick["id"] not in plugin.devices and ejected[-1]["mount"] == ""
+              and ejected[-1]["kind"] == "usb", f"ejected: gone from Devices: {done}")
+        plugin.device_watcher = real_watcher
         await plugin._devices_changed([])
 
         print("audio CDs")

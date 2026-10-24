@@ -33,7 +33,9 @@ POLL_SECONDS = 3
 MTP_EVERY = 2
 #: folders on a phone's storage that hold music (the whole storage holds photos and apps' files too)
 PHONE_MUSIC = ("Music", "Download", "Podcasts")
-MTP_ROOT = re.compile(r"activation_root=(mtp://[^\s]+)")
+MTP_ROOT = re.compile(r"activation_root=((?:mtp|afc)://[^\s]+)")
+#: an iPhone's or iPod touch's music (AFC's media share, as GVfs mounts it): what Apple's sync put there
+IOS_MUSIC = ("iTunes_Control", "Music")
 
 
 def _unescape(path: str) -> str:
@@ -116,13 +118,17 @@ def usb_storage(mounts_text: str, user: str, uuids: dict[str, str]) -> list[dict
         if len(parts) < 3:
             continue
         source, target = parts[0], _unescape(parts[1])
-        if not re.match(r"^/dev/sd[a-z]+\d*$", source):
+        disc = bool(re.match(r"^/dev/sr\d+$", source))
+        if not re.match(r"^/dev/sd[a-z]+\d*$", source) and not disc:
             continue  # the SD card (mmcblk), internal drives (nvme), anything not plugged in by USB
         if not (target.startswith(f"/run/media/{user}/") or target.startswith("/media/")):
             continue
         label = os.path.basename(target.rstrip("/")) or source
-        found.append({"id": _device_id("usb:" + uuids.get(source, label)), "name": label,
-                      "kind": "ipod" if is_ipod(target) else "usb", "paths": [target], "source": source})
+        # a data CD or DVD (MP3s burned for a car stereo) plays as a player, read only
+        kind = "disc" if disc else "ipod" if is_ipod(target) else "usb"
+        found.append({"id": _device_id("usb:" + uuids.get(source, label)), "name": label, "kind": kind,
+                      "paths": [target], "source": source, "mount": target, "fs": parts[2],
+                      "read_only": "ro" in (parts[3].split(",") if len(parts) > 3 else [])})
     return found
 
 
@@ -136,16 +142,26 @@ def is_ipod(root: str) -> bool:
     return "ipod_control" in names and ".rockbox" not in names
 
 
-def phone_storage(gvfs_dir: str, usb_names: Optional[dict[str, tuple[str, str]]] = None) -> list[dict[str, Any]]:
+def phone_storage(gvfs_dir: str, usb_names: Optional[dict[str, tuple[str, str]]] = None,
+                  ios_names: Optional[dict[str, str]] = None) -> list[dict[str, Any]]:
     """Phones mounted by GVfs: /run/user/<uid>/gvfs/mtp:host=<name>/<storage>/Music (and the others in
-    PHONE_MUSIC); a phone whose storages have none of them is played whole."""
+    PHONE_MUSIC); a phone whose storages have none of them is played whole. iPhones and iPod touches
+    (afc:host=<UDID>): the music Apple's sync put on them, iTunes_Control/Music, read only."""
     found = []
     try:
-        hosts = sorted(n for n in os.listdir(gvfs_dir) if n.startswith("mtp:host="))
+        hosts = sorted(n for n in os.listdir(gvfs_dir) if n.startswith(("mtp:host=", "afc:host=")))
     except OSError:
         return found
     for host in hosts:
         root = os.path.join(gvfs_dir, host)
+        if host.startswith("afc:"):
+            udid = host.partition("=")[2]
+            music = os.path.join(root, *IOS_MUSIC)
+            if "," in udid or not os.path.isdir(music):
+                continue  # an app's documents share (",port="), or not trusted yet
+            found.append({"id": _device_id("afc:" + udid), "name": (ios_names or {}).get(udid) or "iPhone",
+                          "kind": "ios", "paths": [music], "mount": root, "uri": f"afc://{udid}/"})
+            continue
         try:
             storages = [os.path.join(root, s) for s in sorted(os.listdir(root))]
         except OSError:
@@ -153,7 +169,8 @@ def phone_storage(gvfs_dir: str, usb_names: Optional[dict[str, tuple[str, str]]]
         paths = [os.path.join(s, folder) for s in storages for folder in PHONE_MUSIC
                  if os.path.isdir(os.path.join(s, folder))]
         name = phone_name(host.partition("=")[2], usb_names or {})
-        found.append({"id": _device_id("mtp:" + host), "name": name, "kind": "mtp", "paths": paths or storages})
+        found.append({"id": _device_id("mtp:" + host), "name": name, "kind": "mtp", "paths": paths or storages,
+                      "mount": root, "uri": f"mtp://{host.partition('=')[2]}/"})
     return found
 
 
@@ -193,6 +210,12 @@ class DeviceWatcher:
         self.gio = shutil.which("gio")
         self.known: Optional[list[dict[str, Any]]] = None
         self.discs: dict[str, dict[str, Any]] = {}
+        # iPhones' names by UDID (from GVfs), those asked to trust this computer, and who to tell
+        self.ios_names: dict[str, str] = {}
+        self.asked_trust: set[str] = set()
+        # phones ejected: not mounted again until they're unplugged (no longer listed)
+        self.ejected: set[str] = set()
+        self.on_note: Optional[Callable[[str], Awaitable[None]]] = None
 
     @property
     def available(self) -> bool:
@@ -223,15 +246,32 @@ class DeviceWatcher:
         except (OSError, asyncio.TimeoutError):
             return
         text = out.decode(errors="replace")
-        mounted = set(re.findall(r"-> (mtp://[^\s]+)", text))
-        for root in set(MTP_ROOT.findall(text)) - mounted:
+        # an iPhone's name ("Sam's iPhone") as GVfs lists it, for its afc:host=<UDID> folder
+        volume = ""
+        for line in text.splitlines():
+            named = re.match(r"\s*Volume\(\d+\):\s*(.+)$", line)
+            if named:
+                volume = named.group(1).strip()
+            root = re.search(r"activation_root=afc://([^/\s]+)", line)
+            if root and volume:
+                self.ios_names[root.group(1)] = volume
+        mounted = set(re.findall(r"-> ((?:mtp|afc)://[^\s]+)", text))
+        listed = set(MTP_ROOT.findall(text))
+        self.ejected &= listed
+        self.asked_trust &= listed
+        for root in listed - mounted - self.ejected:
             debuglog.debug("devices", "mounting a phone", root=root)
             try:
                 mount = await asyncio.create_subprocess_exec(self.gio, "mount", root, stdout=asyncio.subprocess.DEVNULL,
                                                              stderr=asyncio.subprocess.DEVNULL, env=self._gio_env())
-                await asyncio.wait_for(mount.wait(), 20)
+                code = await asyncio.wait_for(mount.wait(), 20)
             except (OSError, asyncio.TimeoutError):
-                pass
+                code = -1
+            if code != 0 and root.startswith("afc://") and root not in self.asked_trust and self.on_note:
+                # an iPhone opens only once it trusts this computer: it asks on its screen
+                self.asked_trust.add(root)
+                name = self.ios_names.get(root[len("afc://"):].strip("/"), "your iPhone")
+                await self.on_note(f"Unlock {name} and tap Trust to see its music")
 
     def _scan(self) -> list[dict[str, Any]]:
         try:
@@ -240,8 +280,35 @@ class DeviceWatcher:
         except OSError:
             mounts = ""
         return (usb_storage(mounts, self.user, _uuids())
-                + phone_storage(f"/run/user/{self.uid}/gvfs", _usb_names())
+                + phone_storage(f"/run/user/{self.uid}/gvfs", _usb_names(), self.ios_names)
                 + audio_cds(cd.drives(), cd.has_audio_disc, cd.read_toc, self.discs))
+
+    async def eject(self, device: dict[str, Any]) -> str:
+        """Ejects a device as the desktop would ("Safely remove"): a stick or iPod unmounted and powered
+        down, a phone's share closed, a disc's tray opened. Returns "" when done, else why not."""
+        kind = device.get("kind")
+        if kind == "cd":
+            return "" if await asyncio.to_thread(cd.eject, device.get("drive", "")) else "The drive wouldn't open"
+        if not self.gio:
+            return "Ejecting needs GVfs (gio), which this system doesn't have"
+        target = device.get("uri") if kind in ("mtp", "ios") else device.get("mount")
+        if not target:
+            return "MusicDeck doesn't know where that device is mounted"
+        flag = "-u" if kind in ("mtp", "ios") else "-e"
+        try:
+            proc = await asyncio.create_subprocess_exec(self.gio, "mount", flag, target, stdout=asyncio.subprocess.DEVNULL,
+                                                        stderr=asyncio.subprocess.PIPE, env=self._gio_env())
+            _, err = await asyncio.wait_for(proc.communicate(), 30)
+        except (OSError, asyncio.TimeoutError):
+            return "Ejecting took too long; something may still be using it"
+        if proc.returncode != 0:
+            message = err.decode(errors="replace").strip().splitlines()
+            debuglog.debug("devices", "eject failed", target=target, error=message)
+            busy = any("busy" in m.lower() for m in message)
+            return "It's still in use; try again in a moment" if busy else (message[-1] if message else "It couldn't be ejected")
+        if kind in ("mtp", "ios"):
+            self.ejected.add(target)
+        return ""
 
     async def _run(self) -> None:
         tick = 0

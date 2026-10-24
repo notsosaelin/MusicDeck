@@ -28,9 +28,9 @@ with the real libgpod, and the databases it wrote are in `tests/fixtures/ipod` f
 | iPod classic (all three) | yes | yes | hash58, from the FireWire ID |
 | iPod nano 3rd and 4th generation | yes | yes | hash58 |
 | iPod shuffle 1st-4th generation | yes | yes | not signed; reads iTunesSD (written too) |
-| iPod nano 5th generation | yes | no | hash72, and SQLite databases only an iTunes sync can sign |
-| iPod nano 6th and 7th generation | yes | no | hashAB: only in a closed library libgpod loads from outside |
-| iPod touch, iPhone | no | no | no disk mode: a different protocol entirely |
+| iPod nano 5th generation | yes | not yet | hash72 + SQLite databases (see below) |
+| iPod nano 6th and 7th generation | yes | not yet | hashAB + SQLite databases (see below) |
+| iPod touch, iPhone | yes, its synced music | no | AFC (GVfs), read only; no disk mode |
 | Any iPod running Rockbox | yes | yes | none: Rockbox plays files, so it's a player like any other |
 
 "Plays from it" goes through its database too (a second, where reading thousands of files' tags over USB
@@ -62,14 +62,43 @@ When it can't tell how an iPod wants its database signed, MusicDeck doesn't chan
 
 Removing songs takes them out of the database and every playlist, then deletes their files.
 
+## The options, explored (October 2026)
+
+**Mac-formatted (HFS+) iPods.** Linux's hfsplus driver writes only volumes whose journal is off, and
+iTunes leaves the journal on. Turning it off, or mounting with `force`, needs the raw disk (root), which a
+Decky plugin doesn't have and shouldn't take. So MusicDeck plays them and says what to do: on a Mac, Disk
+Utility → the iPod → File → Disable Journaling (`diskutil disableJournal /Volumes/<iPod>`), after which Linux
+writes it; or restore the iPod with iTunes for Windows, which formats it FAT32.
+
+**The nano 5th-7th generation: possible, next.** They read SQLite libraries (`iTunes Library.itlp`: Library,
+Locations, Dynamic, Extras, Genius) beside a compressed iTunesCDB, and both are signed:
+- nano 5G: hash72, an AES signature whose key can be recovered from any database iTunes signed for that
+  iPod (libgpod's HashInfo): every nano 5G that was ever synced with iTunes has one.
+- nano 6G/7G: hashAB. [dstaley/hashab](https://github.com/dstaley/hashab) is a public-domain C
+  implementation (reverse engineered from the nano 6G's firmware, checked against the 2010 library on 10,000
+  inputs, with 100 test vectors). It would build into MusicDeck's per-platform helpers (`bin/<platform>/`) as
+  the Spotify helper does.
+- The SQLite libraries: libgpod's itdb_sqlite.c, and iOpenPodv2's MIT-licensed writer
+  ([chrismheiser/iOpenPodv2](https://github.com/chrismheiser/iOpenPodv2)), are the references; Decky's Python
+  has sqlite3.
+This is a large piece on its own and unforgiving without a nano to try it on (a wrong signature and the nano
+asks to be restored), so it's the next step rather than part of this one.
+
+**iPhone and iPod touch.** No disk mode, but Apple's AFC service (what photo import uses) shows the music
+an iTunes/Finder sync put on them; GVfs on Bazzite mounts it once the phone trusts the computer. MusicDeck
+plays that (read only). Putting music *on* one needs Apple's sync protocol (and, on current iOS, its own
+signed databases), which nothing open implements; Apple Music downloads are FairPlay-protected.
+
+**The car-stereo way (iAP).** Car stereos browse and play iPods and iPhones over Apple's accessory protocol,
+and from iPhones (and iAP2) that requires Apple's authentication chip in the accessory, sold only under its
+MFi licence. Not something software can do.
+
 ## Not done yet
 
 - **Artwork on the iPod's screen.** Covers live in a separate database (ArtworkDB, with thumbnails in each
   model's own sizes). Songs MusicDeck adds show no cover on the iPod; songs iTunes put there keep theirs.
-  MusicDeck shows covers for everything itself.
-- **Mac-formatted iPods.** Linux mounts HFS+ read only (its journal), so they play but don't sync.
-  Restoring the iPod with iTunes for Windows makes it FAT32.
-- **The nano 5th-7th generation**, for the reasons in the table.
+  MusicDeck shows covers for everything itself. iOpenPodv2's ArtworkDB writer (MIT) is a reference.
+- **Syncing the nano 5th-7th generation** (above).
 
 ## Testing with a real iPod
 

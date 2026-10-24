@@ -58,6 +58,7 @@ import {
   removeDownloads,
   rescan,
   renameDevice,
+  ejectDevice,
   DeviceInfo,
   retryDownloads,
   setGameMusic,
@@ -267,7 +268,13 @@ const RenameDeviceModal: FC<{ closeModal?: () => void; device: DeviceInfo }> = (
   );
 };
 
-/** What's on a device, or what's happening to a CD: "Phone · 412 songs", "Audio CD · ripping 3 of 11". */
+const DEVICE_KINDS: Record<string, string> = { mtp: "Phone", ios: "iPhone", disc: "Disc", usb: "USB" };
+
+/** "3.2 GB": a device's free space. */
+const gigabytes = (bytes: number) =>
+  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+
+/** What's on a device, or what's happening to a CD: "Phone · 412 songs · 3.2 GB free", "Audio CD · ripping 3 of 11". */
 const describeDevice = (d: DeviceInfo): string => {
   if (d.kind === "cd") {
     const n = d.status.tracks ?? 0;
@@ -280,28 +287,36 @@ const describeDevice = (d: DeviceInfo): string => {
       .join(" · ");
   }
   const n = d.status.tracks ?? 0;
-  const kind = d.kind === "ipod" ? d.status.model || "iPod" : d.kind === "mtp" ? "Phone" : "USB";
+  const kind = d.kind === "ipod" ? d.status.model || "iPod" : (DEVICE_KINDS[d.kind] ?? "USB");
+  const songs = d.status.scanning ? "Reading…" : `${n} song${n === 1 ? "" : "s"}`;
+  const free = d.status.space ? `${gigabytes(d.status.space.free)} free` : "";
   // an iPod MusicDeck can play from but not sync (a nano 5G or later, a Mac-formatted one)
-  const playOnly = d.kind === "ipod" && d.status.why_not ? " · play only" : "";
-  return `${kind} · ` + (d.status.scanning ? "Reading…" : `${n} song${n === 1 ? "" : "s"}`) + playOnly;
+  const playOnly = (d.kind === "ipod" && d.status.why_not) || d.kind === "ios" ? "play only" : "";
+  return [kind, songs, free, playOnly].filter(Boolean).join(" · ");
 };
 
-/** A device plugged in: played and copied to in Local files (its Devices tab); here it can be renamed. */
+/** A device plugged in: played and copied to in Local files (its Devices tab); here it can be named and ejected. */
 const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
   const rename = () => showModal(<RenameDeviceModal device={device} />);
+  const eject = async () => {
+    const r = await ejectDevice(device.id);
+    notify(device.name, r.ok ? r.data : r.error);
+    await refreshState();
+  };
   const openMenu = (e: any) =>
     showContextMenu(
       <Menu label={device.name}>
-        <MenuItem onSelected={rename}>Rename</MenuItem>
+        <MenuItem onSelected={eject}>{device.kind === "cd" ? "Eject disc" : "Eject"}</MenuItem>
+        {device.kind !== "cd" && device.kind !== "disc" && <MenuItem onSelected={rename}>Rename</MenuItem>}
       </Menu>,
       e?.currentTarget ?? window,
     );
   const icon =
     device.kind === "mtp" ? (
       <FaMobileAlt />
-    ) : device.kind === "cd" ? (
+    ) : device.kind === "cd" || device.kind === "disc" ? (
       <FaCompactDisc />
-    ) : device.kind === "ipod" ? (
+    ) : device.kind === "ipod" || device.kind === "ios" ? (
       <SiApple />
     ) : (
       <FaUsb />
@@ -310,13 +325,15 @@ const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
     <PanelSectionRow>
       <Field
         focusable
-        highlightOnFocus={device.kind !== "cd"}
+        highlightOnFocus
         icon={icon}
         label={device.name}
         description={describeDevice(device)}
-        {...(device.kind !== "cd" && { onActivate: openMenu, onClick: openMenu, onOKActionDescription: "Options" })}
+        onActivate={openMenu}
+        onClick={openMenu}
+        onOKActionDescription="Options"
       >
-        {device.kind !== "cd" && <FaEllipsisH style={{ opacity: 0.6 }} />}
+        <FaEllipsisH style={{ opacity: 0.6 }} />
       </Field>
     </PanelSectionRow>
   );

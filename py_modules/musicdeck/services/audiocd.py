@@ -141,9 +141,13 @@ class AudioCdService(MusicService):
             raise ServiceError("Not on this CD")
         album = self._album()
         action = None
-        if self.rip_to() and not self.rip_progress["running"]:
-            action = {"label": "Rip to Local files", "call": "rip"}
-        return models.page(album["title"], album["subtitle"], album["art"],
+        subtitle = album["subtitle"]
+        if self.rip_progress["running"]:
+            subtitle += f" · ripping {self.rip_progress['done'] + 1} of {self.rip_progress['total']}"
+        elif self.rip_to():
+            action = {"label": "Rip again" if self.rip_progress["done"] and not self.rip_progress["error"]
+                      else "Rip to Local files", "call": "rip"}
+        return models.page(album["title"], subtitle, album["art"],
                            tracks=[self._track(i) for i in range(len(self.tracks))], action=action)
 
     async def search(self, query: str) -> dict[str, Any]:

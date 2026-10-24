@@ -161,7 +161,20 @@ source (`MusicService.remove`).
   goes into that database (`ipod.add`: converted with ffmpeg where needed, signed with hash58 where the model
   asks), as a removal does (`ipod.remove`). `why_not()` says when it can't be synced (nano 5G-7G, HFS+,
   unidentified); it still plays.
+- **More devices**: a data CD/DVD (`/dev/sr*` mounted with music files) is a read-only player ("disc");
+  an iPhone or iPod touch is mounted by GVfs's AFC backend once trusted (`afc:host=<UDID>`) and its
+  `iTunes_Control/Music` read by its files' tags ("ios", read only).
+- **Eject** (`Plugin.eject_device`, `DeviceWatcher.eject`): the device's index stops first, then `gio mount -e`
+  (sticks, iPods, discs) or `-u` (phones, which aren't mounted again until unplugged), or the CD-ROM ioctl
+  for an audio CD's tray. A busy device stays in Devices and says so.
+- **Space**: `DeviceService.space()` (statvfs, kept 30 s); copies check it first (`free_for`).
 - **Unplugged**: it leaves Local files. Polled every 3 s (`DeviceWatcher`). Linux only.
+- **Deleting** (`LocalLibrary.delete`, `trash.py`): a song (with its .lrc), an album (its folder whole when only
+  artwork, logs and cue sheets would be left), a folder or a playlist file goes to the freedesktop.org trash
+  (the home's, or the drive's own `.Trash-<uid>`), with a `.trashinfo`, so the desktop's Trash restores it as
+  well. Each deletion is kept (`local-<id>-deleted.json`, the last 50 still in the trash) for Recently deleted,
+  whose cards (`deleted:<id>`) open a page with Restore (`collection_action` "restore"). Windows: the Recycle
+  Bin (not restored from MusicDeck).
 
 ## Steam soundtracks (`steam.py`, `src/steam.ts`)
 

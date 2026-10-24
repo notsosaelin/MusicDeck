@@ -15,13 +15,17 @@ Copying (`copy_to`) goes either way: the Deck's music to a device, a device's to
 iPod's goes into its own library (IpodService, ipod.py) instead, as iTunes would put it there.
 """
 import asyncio
+import json
 import os
+import random
 import shutil
+import time
 from typing import Any, Callable, Optional
 
-from .. import models
+from .. import models, trash
 from .audiocd import AudioCdService
 from .base import ServiceError, StreamSource
+from .device import DeviceService, _size as device_size
 from .ipod import IpodService
 from .local import LocalService
 
@@ -31,6 +35,14 @@ ID_KEYS = ("album_id", "artist_id")
 READ_ONLY = ("tag_fields", "edit_tags", "undo_tags", "lookup", "lookup_changes", "apply_lookup",
              "set_album_art", "clear_album_art", "find_album_art", "set_artist_art", "clear_artist_art",
              "find_artist_art", "save_lyrics", "find_lyrics", "dismiss_review")
+#: what each kind of device is called on its card
+KIND_NAMES = {"mtp": "Phone", "ios": "iPhone", "disc": "Disc", "usb": "USB"}
+#: Recently deleted: its cards' ids ("deleted:<batch>"), and how many deletions it keeps
+DELETED = "deleted:"
+KEEP_DELETED = 50
+#: what an album's folder may be left with and still go with it: artwork, a rip's logs and cue sheet, lyrics
+LEFTOVERS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".cue", ".log", ".nfo", ".txt", ".m3u", ".m3u8",
+             ".lrc", ".sfv", ".md5", ".accurip", ".pdf", ".ini", ".db"}
 #: a phone's folders other than Music that hold music (devices.PHONE_MUSIC): copies go beside them, in Music
 OTHER_MUSIC = ("download", "podcasts")
 
@@ -115,10 +127,13 @@ class LocalLibrary(LocalService):
             album = instance._album()
             return mark({**album, "subtitle": "Audio CD · " + models.count(len(instance.tracks), "track")},
                         device["id"])
-        kind = instance.describe() if isinstance(instance, IpodService) else "Phone" if device["kind"] == "mtp" else "USB"
+        kind = instance.describe() if isinstance(instance, IpodService) else KIND_NAMES.get(device["kind"], "USB")
         songs = len(getattr(instance, "tracks", {}) or {})
         about = f"{kind} · " + ("Reading…" if instance.status().get("scanning") and not songs
                                 else models.count(songs, "song"))
+        room = instance.space() if isinstance(instance, DeviceService) else None
+        if room:
+            about += f" · {device_size(room['free'])} free"
         cover = None
         albums = instance._albums() if hasattr(instance, "_albums") else {}
         if albums:
@@ -132,6 +147,10 @@ class LocalLibrary(LocalService):
 
     def center_tabs(self) -> list[dict[str, Any]]:
         tabs = super().center_tabs()
+        deleted = self._deleted()
+        if deleted:
+            tabs = tabs + [{"id": "deleted", "title": "Recently deleted", "group": "files",
+                            "subtitle": f"{len(deleted)} in the trash"}]
         devices = self.devices()
         if not devices:
             return tabs
@@ -145,6 +164,9 @@ class LocalLibrary(LocalService):
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         if tab_id == "devices":
             return self._devices_section(display="grid")
+        if tab_id == "deleted":
+            cards = [self._deleted_card(b) for b in self._deleted()]
+            return [models.section("Recently deleted", cards, display="grid")] if cards                 else [models.notice("Nothing deleted lately")]
         if tab_id == "home":
             # first, as on the panel's Home: what was just plugged in is what's to be played
             return self._devices_section() + [s for s in await super().tab(tab_id) if s["title"] != "Devices"]
@@ -153,16 +175,28 @@ class LocalLibrary(LocalService):
     # --- what's on a device, through Local files ---
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith(DELETED):
+            return self._open_deleted(id[len(DELETED):])
         if not on_device(id):
             return await super().open(kind, id)
         device, inner = self._route(id)
         instance = device["instance"]
         if kind == "device":
-            # the device itself: its albums
+            # the device itself, as a media manager shows one: its songs, artists and playlists, then its
+            # albums; how much room is left on it
             card = self._card(device)
             page = await instance.open("list", "albums")
-            return models.page(device["name"], card["subtitle"], card["art"],
-                               collections=mark(page["collections"], device["id"]))
+            lists = [models.collection("tracks", "list", "Songs", models.count(len(instance.tracks), "song")),
+                     models.collection("artists", "list", "Artists")]
+            lists += [models.collection(pid, "playlist", p["title"], models.count(len(p["tracks"]), "song"))
+                      for pid, p in sorted(instance.playlists.items(), key=lambda kv: kv[1]["title"].lower())]
+            room = instance.space() if isinstance(instance, DeviceService) else None
+            about = card["subtitle"]
+            if room:
+                # the card's "3.2 GB free", as "3.2 GB free of 16.0 GB"
+                about = about.rsplit(" · ", 1)[0] + f" · {device_size(room['free'])} free of {device_size(room['total'])}"
+            return models.page(device["name"], about, card["art"],
+                               collections=mark(lists + page["collections"], device["id"]))
         return mark(await instance.open(kind, inner), device["id"])
 
     def current(self, collection: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -229,6 +263,8 @@ class LocalLibrary(LocalService):
         return mark(await device["instance"].radio(unmark(track)), device["id"])
 
     async def collection_action(self, kind: str, collection_id: str, call: str) -> str:
+        if call == "restore" and collection_id.startswith(DELETED):
+            return await self._restore(collection_id[len(DELETED):])
         if not on_device(collection_id):
             raise ServiceError("Not something Local files does")
         device, inner = self._route(collection_id)
@@ -241,32 +277,50 @@ class LocalLibrary(LocalService):
 
     # --- copying between the Deck and a device ---
 
-    async def _files(self, kind: str, item_id: str) -> tuple[list[dict[str, Any]], str, str, LocalService]:
-        """The files of a track, album, artist or playlist (their index records, "path" and tags), where
-        they are ("" for the Deck, else a device's id), a playlist's name, and the index they're in."""
+    def _record(self, track_id: str) -> Optional[dict[str, Any]]:
+        """A song's file and tags from whichever index it's in (the Deck's, or a device's), with where
+        it's from ("from": "" or a device id) and its id there ("tid")."""
         source: LocalService = self
-        device_id, inner = "", item_id
-        if on_device(item_id):
-            device, inner = self._route(item_id)
+        device_id, inner = "", track_id
+        if on_device(track_id):
+            try:
+                device, inner = self._route(track_id)
+            except ServiceError:
+                return None
             if not isinstance(device["instance"], LocalService):
-                raise ServiceError("A CD is ripped, not copied: Rip to Local files is on its album")
+                return None
             source, device_id = device["instance"], device["id"]
-        title = ""
-        if kind == "track":
-            ids = [inner]
-        else:
-            page = await source.open(kind, inner)
-            ids = [t["id"] for t in page.get("tracks") or []]
-            title = page.get("title", "") if kind == "playlist" else ""
-        files = []
-        for tid in dict.fromkeys(ids):
-            t = source.tracks.get(tid)
-            if t and os.path.isfile(t["path"]):
-                files.append({**t, "tid": tid, "artist_folder": source._album_artist(t) or "Unknown artist",
-                              "album_folder": t["album"] or "Unknown album"})
+        t = source.tracks.get(inner)
+        if not t or not os.path.isfile(t["path"]):
+            return None
+        from_apple = isinstance(source, IpodService) or (device_id and self._device(device_id)["kind"] == "ios")
+        return {**t, "tid": inner, "from": device_id, "from_ipod": bool(from_apple),
+                "artist_folder": source._album_artist(t) or "Unknown artist",
+                "album_folder": t["album"] or "Unknown album"}
+
+    async def _files(self, kind: str, item_id: str, ids: Optional[list[str]] = None,
+                     title: str = "") -> tuple[list[dict[str, Any]], str, LocalService]:
+        """The files of a track, album, artist or playlist (or of the songs `ids`: a MusicDeck playlist's),
+        with a playlist's name and the index they're in."""
+        source: LocalService = self
+        inner = item_id
+        if ids is None:
+            if on_device(item_id):
+                device, inner = self._route(item_id)
+                if not isinstance(device["instance"], LocalService):
+                    raise ServiceError("A CD is ripped, not copied: Rip to Local files is on its album")
+                source = device["instance"]
+            if kind == "track":
+                ids = [item_id]
+            else:
+                page = await source.open(kind, inner)
+                prefix = item_id[:len(item_id) - len(inner)]
+                ids = [prefix + t["id"] for t in page.get("tracks") or []]
+                title = page.get("title", "") if kind == "playlist" else ""
+        files = [r for r in (self._record(tid) for tid in dict.fromkeys(ids)) if r]
         if not files:
             raise ServiceError("Nothing there to copy")
-        return files, device_id, title, source
+        return files, title, source
 
     def _destination(self, target: str) -> tuple[str, str, Optional[LocalService]]:
         """Where a copy goes: (folder, its name for the user, the index to rescan after)."""
@@ -293,34 +347,38 @@ class LocalLibrary(LocalService):
             music = inside if os.path.isdir(inside) or device["kind"] == "mtp" else base
         return music, device["name"], instance
 
-    async def copy_to(self, kind: str, item_id: str, target: str) -> str:
-        """Copies a track, album, artist or playlist to a device ("dv..." id) or from one to the Deck
-        ("deck"), in the background; returns what to tell the user. To an iPod, into its library (a
-        playlist stays a playlist there)."""
+    async def copy_to(self, kind: str, item_id: str, target: str, ids: Optional[list[str]] = None,
+                      title: str = "") -> str:
+        """Copies a track, album, artist or playlist (or the songs `ids`, a MusicDeck playlist named
+        `title`) to a device ("dv..." id) or from one to the Deck ("deck"), in the background; returns what
+        to tell the user. To an iPod, into its library (a playlist stays a playlist there)."""
         if self.copy_progress["running"]:
             raise ServiceError(f"Still copying to {self.copy_progress['to']}")
-        files, source, playlist, index_from = await self._files(kind, item_id)
-        if source == target or (target == "deck" and not source):
+        files, playlist, _ = await self._files(kind, item_id, ids, title)
+        files = [f for f in files if f["from"] != ("" if target == "deck" else target)]
+        if not files:
             raise ServiceError("That's already there")
         folder, name, index = self._destination(target)
+        if isinstance(index, DeviceService):
+            if not isinstance(index, IpodService) and not index.writable():
+                raise ServiceError(f"{name} can only be read")
+            await index.free_for(sum(int(f.get("size") or 0) for f in files))
         self.copy_progress = {"running": True, "done": 0, "total": len(files), "to": name, "error": ""}
         if isinstance(index, IpodService):
             self.copying = asyncio.ensure_future(self._copy_to_ipod(files, playlist, name, index))
         else:
-            # an iPod's files are "ABCD.mp3": copied off it, they're named as their tags say
-            named = isinstance(index_from, IpodService)
-            self.copying = asyncio.ensure_future(self._copy(files, folder, name, index, named))
+            self.copying = asyncio.ensure_future(self._copy(files, folder, name, index))
         return f"Copying {models.count(len(files), 'song')} to {name}"
 
-    async def _copy(self, files: list[dict[str, Any]], folder: str, name: str, index: Optional[LocalService],
-                    named: bool = False) -> None:
+    async def _copy(self, files: list[dict[str, Any]], folder: str, name: str, index: Optional[LocalService]) -> None:
         copied = 0
         try:
             for f in files:
                 where = os.path.join(folder, models.safe_name(f["artist_folder"], "Unknown artist"),
                                      models.safe_name(f["album_folder"], "Unknown album"))
                 file_name = None
-                if named:
+                # an iPod's files are "ABCD.mp3": copied off it, they're named as their tags say
+                if f.get("from_ipod"):
                     number = f"{f['track']:02d} " if f.get("track") else ""
                     file_name = (number + models.safe_name(f.get("title") or "Track", "Track")
                                  + os.path.splitext(f["path"])[1].lower())
@@ -355,8 +413,8 @@ class LocalLibrary(LocalService):
         library too); returns what to tell the user."""
         if not on_device(item_id):
             raise ServiceError("Only music on a plugged-in device is removed here")
-        files, device_id, _, index = await self._files(kind, item_id)
-        device = self._device(device_id)
+        files, _, index = await self._files(kind, item_id)
+        device = self._device(split(item_id)[0])
         if isinstance(index, IpodService):
             gone = await index.take_off([f["tid"] for f in files])
         else:
@@ -389,7 +447,151 @@ class LocalLibrary(LocalService):
             raise
         return 1
 
+    # --- deleting (to the trash) and Recently deleted ---
+
+    def _deleted_path(self) -> str:
+        return os.path.join(self.runtime_dir, f"local-{self.instance_id}-deleted.json")
+
+    def _deleted(self) -> list[dict[str, Any]]:
+        """What was deleted lately that's still in the trash, newest first."""
+        try:
+            with open(self._deleted_path(), "r", encoding="utf-8") as f:
+                batches = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+        return [b for b in batches if isinstance(b, dict) and any(trash.still_there(i) for i in b.get("items", []))]
+
+    def _save_deleted(self, batches: list[dict[str, Any]]) -> None:
+        tmp = self._deleted_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(batches[:KEEP_DELETED], f)
+        os.replace(tmp, self._deleted_path())
+
+    def _within_library(self, path: str) -> bool:
+        return any(path.startswith(r + os.sep) for r in self.roots)
+
+    def _plan_delete(self, paths: list[str]) -> list[str]:
+        """What to move to the trash for these songs: each one and its lyrics beside it, or its whole
+        folder when nothing but those, artwork and a rip's logs would be left in it."""
+        planned: list[str] = []
+        by_folder: dict[str, list[str]] = {}
+        for p in paths:
+            by_folder.setdefault(os.path.dirname(p), []).append(p)
+        for folder, songs in by_folder.items():
+            gone = set(songs)
+            try:
+                names = os.listdir(folder)
+            except OSError:
+                names = []
+            rest = [n for n in names if os.path.join(folder, n) not in gone]
+            leftovers_only = all(not os.path.isdir(os.path.join(folder, n))
+                                 and (os.path.splitext(n)[1].lower() in LEFTOVERS or n.startswith("."))
+                                 for n in rest)
+            if folder not in self.roots and self._within_library(folder) and leftovers_only:
+                planned.append(folder)
+                continue
+            for song in songs:
+                planned.append(song)
+                lrc = os.path.splitext(song)[0] + ".lrc"
+                if os.path.isfile(lrc):
+                    planned.append(lrc)
+        return planned
+
+    async def delete(self, kind: str, item_id: str) -> str:
+        """Moves a song, album, folder or playlist file to the trash; returns what to tell the user."""
+        if on_device(item_id):
+            raise ServiceError("Music on a device is removed from it, not deleted here")
+        if kind == "playlist":
+            playlist = self.playlists.get(item_id)
+            if not playlist or not playlist.get("path"):
+                raise ServiceError("That playlist isn't a file in the library")
+            title, songs, planned = playlist["title"], 0, [playlist["path"]]
+            names = [playlist["title"]]
+        elif kind == "folder":
+            folder = os.path.abspath(item_id)
+            if folder in self.roots or not self._within_library(folder):
+                raise ServiceError("Only folders inside the library are deleted")
+            inside = [t for t in self.tracks.values() if t["path"].startswith(folder + os.sep)]
+            title, songs, planned = os.path.basename(folder), len(inside), [folder]
+            names = [t["title"] for t in inside]
+        elif kind in ("track", "album"):
+            items = self._target(kind, item_id)
+            if kind == "track":
+                title = items[0][1]["title"]
+            else:
+                title = items[0][1]["album"] or "Album"
+            songs = len(items)
+            names = [t["title"] for _, t in items]
+            planned = self._plan_delete([t["path"] for _, t in items])
+        else:
+            raise ServiceError("Only songs, albums, folders and playlists are deleted")
+
+        def move() -> list[dict[str, str]]:
+            done = []
+            for path in planned:
+                done.append(trash.trash(path))
+            # an artist's folder left empty goes too (it's empty: nothing to keep)
+            for path in planned:
+                parent = os.path.dirname(path)
+                if parent not in self.roots and self._within_library(parent):
+                    try:
+                        os.rmdir(parent)
+                    except OSError:
+                        pass
+            return done
+
+        moved = await asyncio.to_thread(move)
+        if any(i["trashed"] for i in moved):
+            batch = {"id": f"{random.getrandbits(48):012x}", "at": time.time(), "kind": kind, "title": title,
+                     "songs": songs, "names": names[:40], "items": moved}
+            self._save_deleted([batch] + self._deleted())
+        self.rescan()
+        self._browse_cache = None
+        self.forget_browse_info()
+        what = f"{title} ({models.count(songs, 'song')})" if kind in ("album", "folder") else title
+        return f"Moved {what} to the trash"
+
+    def _deleted_card(self, batch: dict[str, Any]) -> dict[str, Any]:
+        ago = _ago(time.time() - batch.get("at", 0))
+        about = models.count(batch.get("songs", 0), "song") if batch.get("kind") != "playlist" else "Playlist"
+        return models.collection(f"{DELETED}{batch['id']}", "list", batch.get("title", ""), f"{about} · {ago}")
+
+    def _open_deleted(self, batch_id: str) -> dict[str, Any]:
+        batch = next((b for b in self._deleted() if b["id"] == batch_id), None)
+        if not batch:
+            raise ServiceError("That's no longer in the trash")
+        names = batch.get("names") or []
+        notice = ("In the trash: " + ", ".join(names[:12]) + ("…" if len(names) > 12 else "")) if names else None
+        return models.page(batch.get("title", ""), self._deleted_card(batch)["subtitle"],
+                           action={"label": "Restore", "call": "restore"}, notice=notice)
+
+    async def _restore(self, batch_id: str) -> str:
+        batches = self._deleted()
+        batch = next((b for b in batches if b["id"] == batch_id), None)
+        if not batch:
+            raise ServiceError("That's no longer in the trash")
+        back = await asyncio.to_thread(lambda: sum(trash.restore(i) for i in batch["items"]))
+        self._save_deleted([b for b in batches if b["id"] != batch_id])
+        self.rescan()
+        self._browse_cache = None
+        self.forget_browse_info()
+        if not back:
+            raise ServiceError("It couldn't be put back: something else is where it was")
+        return f"Restored {batch.get('title', '')}"
+
     async def stop(self) -> None:
         if self.copying:
             self.copying.cancel()
         await super().stop()
+
+
+def _ago(seconds: float) -> str:
+    """"just now", "5 minutes ago", "3 hours ago", "2 days ago"."""
+    minutes = int(seconds // 60)
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{models.count(minutes, 'minute')} ago"
+    if minutes < 60 * 24:
+        return f"{models.count(minutes // 60, 'hour')} ago"
+    return f"{models.count(minutes // (60 * 24), 'day')} ago"

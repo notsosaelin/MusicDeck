@@ -84,6 +84,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   tagged FLAC (with ffmpeg, which Bazzite has). No Local files source yet? Plugging something in adds one on
   ~/Music. Players whose firmware calls them by a code name can be renamed in Decky → MusicDeck, under
   Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only.
+- **Delete, safely:** Y on a song, album, folder or playlist file in Local files deletes it to the trash;
+  Local files' Recently deleted puts it back. Devices can be ejected from their card or from Decky → MusicDeck,
+  and say how much room they have left. A data CD of MP3s plays too, and an iPhone's synced music (read only).
 - **iPods:** an iPod with Apple's software shows in Devices by its own name and model, and music copied to
   it goes into its library as iTunes put it there, so the iPod's menus play it (FLAC converted to Apple
   Lossless; playlists, and plays made on the iPod, kept). Every iPod with a disk mode syncs but the nano
