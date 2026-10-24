@@ -3,6 +3,16 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.21.1
+
+- **Empty pages can be left**: B did nothing on an empty playlist (or any page with nothing on it, or one that
+  couldn't load) in the media center, as nothing on it could take the controller. It rests on the page's
+  "Empty" now, and B goes back.
+- **Now Playing with nothing playing** looks like Now Playing: a record where the cover goes, "Nothing
+  playing" and the source, Home, Browse and Search, and the source's Jump back in to start again in one press.
+- Big screens: the media center finds Steam's hint bar on every build of Steam (the measured fit from 0.21.0
+  could fall back to the Steam Deck's proportions).
+
 ## 0.21.0
 
 - **Every genre, mood, country and year is a row on Browse**, each ending in its own Show all, however many

@@ -452,8 +452,22 @@ export const Loading: FC<{ result: Result<any> | null }> = ({ result }) =>
     <Notice>{result.error}</Notice>
   ) : null;
 
+/**
+ * A sentence in place of a page's contents ("Empty", what fills it, why it couldn't load). The controller
+ * can rest on it, unmarked, when there's nothing else on the page: with nothing focused, B wouldn't reach
+ * the page to go back (an empty playlist couldn't be left).
+ */
 export const Notice: FC<{ children: ReactNode }> = ({ children }) => (
-  <div style={{ padding: "32px 0", fontSize: 18, opacity: 0.6 }}>{children}</div>
+  // an action (doing nothing, unhinted) is what makes Steam's focus able to land on it
+  <Focusable
+    className="mc-notice"
+    noFocusRing
+    onActivate={() => {}}
+    onOKActionDescription=""
+    style={{ padding: "32px 0", fontSize: 18, opacity: 0.6 }}
+  >
+    {children}
+  </Focusable>
 );
 
 /**
@@ -478,7 +492,9 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
       remembered ||
       container.querySelector<HTMLElement>(".mc-results .mc-row, .mc-results .mc-card, .mc-results .mc-tile") ||
       (!container.querySelector(".mc-results") &&
-        container.querySelector<HTMLElement>(".mc-row, .mc-card, .mc-tile, input"));
+        container.querySelector<HTMLElement>(".mc-row, .mc-card, .mc-tile, input")) ||
+      // nothing to press: the page's sentence, so B still goes back
+      container.querySelector<HTMLElement>(".mc-notice");
     if (target) {
       target.focus();
       if (remembered) target.scrollIntoView?.({ block: "nearest" });

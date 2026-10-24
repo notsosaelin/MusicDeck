@@ -1,13 +1,16 @@
 import { DropdownItem, Focusable, SliderField, Tabs, footerClasses } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
+  FaCompactDisc,
   FaHeart,
+  FaHome,
   FaMoon,
   FaPause,
   FaPlay,
   FaPlus,
   FaRandom,
   FaRegHeart,
+  FaSearch,
   FaStop,
   FaRedo,
   FaStepBackward,
@@ -17,7 +20,17 @@ import {
   FaVolumeUp,
 } from "react-icons/fa";
 import { MdForward30, MdRepeatOne, MdReplay10 } from "react-icons/md";
-import { CenterSettings, CenterTabInfo, NowPlayingKind, ServiceInfo, setSetting } from "../../api";
+import {
+  CenterSettings,
+  CenterTabInfo,
+  Collection,
+  NowPlayingKind,
+  Section,
+  ServiceInfo,
+  Track,
+  getCenterTab,
+  setSetting,
+} from "../../api";
 import { CenterTab, browsePreview, centerTab, leaveMediaCenter } from "../../nav";
 import { hasFeature, player } from "../../player";
 import { showPlaylistPicker, toggleStar } from "../TrackMenu";
@@ -40,7 +53,8 @@ import {
   useDetails,
 } from "./nowplaying";
 import { DEFAULT_CENTER, setCenter } from "./center";
-import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
+import { CENTER_CSS, Cover, Notice, PageButton, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
+import { playCollection, useResult } from "../Browser";
 import { useOnAir } from "../NowPlaying";
 import {
   AllPage,
@@ -463,6 +477,138 @@ const SideSwitch: FC<{ kind: NowPlayingKind; upNext: number }> = ({ kind, upNext
   );
 };
 
+/** One of "Jump back in" on the empty Now Playing: its cover and name; A plays it straight away. */
+const RecentTile: FC<{ instanceId: string; art: string | null; title: string; size: number; onPlay: () => void }> = ({
+  instanceId,
+  art,
+  title,
+  size,
+  onPlay,
+}) => {
+  const [focused, setFocused] = useState(false);
+  return (
+    <Focusable
+      className="mc-card"
+      noFocusRing
+      onActivate={onPlay}
+      onClick={onPlay}
+      onOKActionDescription="Play"
+      onGamepadFocus={() => setFocused(true)}
+      onGamepadBlur={() => setFocused(false)}
+      style={{ width: size, flexShrink: 0 }}
+    >
+      <div
+        style={{
+          borderRadius: 6,
+          boxShadow: focused ? "0 0 0 3px #ffffff" : "none",
+          transform: focused ? "scale(1.04)" : "none",
+          transition: "transform 0.12s",
+        }}
+      >
+        <Cover instanceId={instanceId} c={{ art, kind: "album" }} size={size} />
+      </div>
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 14,
+          fontWeight: 600,
+          color: focused ? "#ffffff" : "#dcdedf",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {title}
+      </div>
+    </Focusable>
+  );
+};
+
+/**
+ * Now Playing with nothing playing, laid out as when something is: a cover's square (a record, quiet),
+ * the title, the source; the ways to find something, and what was played lately to start again in one
+ * press (the source's own "Jump back in").
+ */
+const NothingPlaying: FC<{ room: number }> = ({ room }) => {
+  const state = useStore(pluginState);
+  const preview = useStore(browsePreview).id;
+  const instanceId = preview ?? state?.active_service ?? "";
+  const source = state?.services.find((s) => s.id === instanceId);
+  const home = useResult<Section[]>(`${instanceId}:tab:home`, () =>
+    instanceId ? getCenterTab(instanceId, "home") : Promise.resolve({ ok: false as const, error: "" }),
+  );
+  const jump = home?.ok ? home.data.find((s) => s.title === "Jump back in") : undefined;
+  const items: Collection[] = (jump?.items ?? []).slice(0, 6);
+  const stations: Track[] = (jump?.tracks ?? []).slice(0, 6);
+  const height = room || 380;
+  const square = Math.round(Math.min(height * 0.42, 240));
+  const tile = Math.round(Math.max(64, Math.min(height * 0.2, 110)));
+  return (
+    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "3vh" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "3.5vw" }}>
+        <div
+          style={{
+            width: square,
+            height: square,
+            flexShrink: 0,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02))",
+            boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          <FaCompactDisc style={{ fontSize: square * 0.4, opacity: 0.16 }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 13, letterSpacing: 1.5, textTransform: "uppercase", opacity: 0.6 }}>Now playing</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#ffffff", lineHeight: 1.15 }}>Nothing playing</div>
+          {source && <div style={{ fontSize: 16, opacity: 0.75 }}>{source.name}</div>}
+          <Focusable flow-children="row" style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <PageButton primary label="Home" onClick={() => centerTab.set({ tab: "home" })}>
+              <FaHome /> Home
+            </PageButton>
+            <PageButton label="Browse" onClick={() => centerTab.set({ tab: BROWSE.id })}>
+              <FaCompactDisc /> Browse
+            </PageButton>
+            <PageButton label="Search" onClick={() => centerTab.set({ tab: SEARCH.id })}>
+              <FaSearch /> Search
+            </PageButton>
+          </Focusable>
+        </div>
+      </div>
+      {items.length + stations.length > 0 && (
+        <div>
+          <SectionTitle>Jump back in</SectionTitle>
+          <Focusable flow-children="row" style={{ display: "flex", gap: 16, overflow: "clip", padding: 4 }}>
+            {items.map((c) => (
+              <RecentTile
+                key={c.kind + c.id}
+                instanceId={instanceId}
+                art={c.art}
+                title={c.title}
+                size={tile}
+                onPlay={() => playCollection(instanceId, c)}
+              />
+            ))}
+            {stations.map((t) => (
+              <RecentTile
+                key={t.id}
+                instanceId={instanceId}
+                art={t.art}
+                title={t.title}
+                size={tile}
+                onPlay={() => player.playList(instanceId, [t], 0)}
+              />
+            ))}
+          </Focusable>
+        </div>
+      )}
+    </Focusable>
+  );
+};
+
 const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyrics"] }> = ({ onSleep, lyricsSize }) => {
   const [syncedSize, plainSize] = LYRICS_SIZES[lyricsSize] ?? LYRICS_SIZES.medium;
   const state = useStore(player.state);
@@ -505,7 +651,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   return (
     <div ref={page} style={{ height: room || undefined, boxSizing: "border-box", padding: "1vh 2.8vw 1.5vh" }}>
       {!item ? (
-        <Notice>Nothing playing. Find something in Home or Search.</Notice>
+        <NothingPlaying room={room} />
       ) : (
         <Focusable
           // Y and R2 work without a hint: the moon and the Lyrics/Queue pills are on screen, and the
