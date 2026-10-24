@@ -6,8 +6,6 @@ from typing import Any, Awaitable, Callable, Optional
 
 from .. import models
 
-# a list of ways in up to this long shows as a row of music each; longer, as tiles to pick from
-ROWS_MAX = 40
 #: Where a source's sections sit on the media center's Browse: the user's own music ("yours": albums,
 #: artists, playlists, favourites), picks from it ("listening": recently added, most played, their top),
 #: ways into the catalogue ("explore", the rest), folders on the Deck ("files").
@@ -33,7 +31,9 @@ KIND_NOUNS = {"album": "album", "artist": "artist", "playlist": "playlist", "pod
 
 def tab_info(sections: list[dict[str, Any]]) -> dict[str, Any]:
     """A Browse tile's line and covers, from what its tab holds: "128 albums" for one section of
-    albums, the first sections' names for a tab of several; up to four covers from the start of it."""
+    albums, the first sections' names for a tab of several; up to four covers from the start of it.
+    Its "items" are the start of it for Browse's row of it; for ways in (genres, countries, years) all
+    of them, as Browse shows each as a row of its own."""
     shown = [s for s in sections if s.get("items") or s.get("tracks")]
     if not shown:
         # only a note ("Press Y on a station and choose Favourite..."): nothing in it yet
@@ -66,14 +66,18 @@ def tab_info(sections: list[dict[str, Any]]) -> dict[str, Any]:
         subtitle = " · ".join(s["title"] for s in shown[:3])  # one line on the tile, cut with "…"
     # the start of it, for Browse's row of it (its first part's)
     lead = shown[0] if shown else {}
+    if lead and models.is_categories(lead):
+        every = [c for s in shown if models.is_categories(s) for c in s["items"]]
+        return {"subtitle": subtitle, "art": art[:4], "count": len(every), "items": every, "tracks": []}
     return {"subtitle": subtitle, "art": art[:4], "count": len(lead.get("items") or lead.get("tracks") or []),
             "items": list(lead.get("items") or [])[:PREVIEW],
             "tracks": [] if lead.get("items") else list(lead.get("tracks") or [])[:PREVIEW]}
 
 
-def rows_or_tiles(s: dict[str, Any]) -> dict[str, Any]:
-    """A section of genres, moods or charts as the media center shows it best."""
-    return {**s, "display": "rows" if len(s["items"]) <= ROWS_MAX else "tiles"}
+def as_rows(s: dict[str, Any]) -> dict[str, Any]:
+    """A section of ways in (genres, moods, charts, countries, years) as the media center shows them: each
+    a row of its own music, ending in Show all, however many there are (a row loads as it nears)."""
+    return {**s, "display": "rows"}
 
 
 class ServiceError(Exception):
@@ -255,14 +259,14 @@ class MusicService:
 
     async def tab(self, tab_id: str) -> list[dict[str, Any]]:
         """One of center_tabs(): sections, each with how to show it (models.section's `display`).
-        By default "home" is home() with its ways in as tiles at the end, and "browse" is browse()
-        with each genre or mood as a row of its own (a long list of them as tiles)."""
+        By default "home" is home() with its ways in at the end, and "browse" is browse(), each genre
+        or mood as a row of its own."""
         if tab_id == "home":
             sections = await self.home()
             return ([s for s in sections if not models.is_categories(s)]
-                    + [{**s, "display": "tiles"} for s in sections if models.is_categories(s)])
+                    + [as_rows(s) for s in sections if models.is_categories(s)])
         if tab_id == "browse" and "browse" in self.features:
-            return [rows_or_tiles(s) for s in await self.browse()]
+            return [as_rows(s) for s in await self.browse()]
         raise ServiceError("This source has no such tab")
 
     async def cached_tab(self, tab_id: str) -> list[dict[str, Any]]:

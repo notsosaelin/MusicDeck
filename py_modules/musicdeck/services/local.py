@@ -1028,13 +1028,13 @@ class LocalService(MusicService):
             return [models.section(page["title"], page["collections"], display="grid")]
         if tab_id == "genres":
             page = self._open_list("genres")
-            return [models.section("Genres", page["collections"], display="tiles")] if page["collections"] \
+            return [models.section("Genres", page["collections"], display="rows")] if page["collections"] \
                 else [models.notice("None of the files say what genre they are")]
         if tab_id == "years":
             decades = self._open_list("decades")["collections"]
             if not decades:
                 return [models.notice("None of the files say what year they're from")]
-            return [models.section("Decades", decades, display="tiles")]
+            return [models.section("Decades", decades, display="rows")]
         if tab_id == "folders":
             page = self._open_folder("")
             return [models.section(page["title"] if page["collections"] else "Folders", page["collections"],

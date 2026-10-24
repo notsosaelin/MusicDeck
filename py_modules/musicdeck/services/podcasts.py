@@ -27,7 +27,7 @@ from ..cache import Cache
 from ..feeds import parse_feed
 from ..net import tls
 from ..settings import load_json, save_json
-from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
+from .base import MusicService, ServiceError, StreamSource, as_rows
 from ..version import USER_AGENT
 
 SEARCH = "https://itunes.apple.com/search"
@@ -292,7 +292,7 @@ class PodcastService(MusicService):
             return sections or [models.notice("Open a podcast and choose Subscribe to keep it here, "
                                               "with its new episodes as they come out.")]
         if tab_id == "categories":
-            return [rows_or_tiles(s) for s in await self.browse()]
+            return [as_rows(s) for s in await self.browse()]
         return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:

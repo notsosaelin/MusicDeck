@@ -27,7 +27,7 @@ import aiohttp
 
 from .. import debuglog, lyrics, models
 from ..net import tls
-from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
+from .base import MusicService, ServiceError, SignIn, StreamSource, as_rows
 from ..version import VERSION
 
 PRODUCT = "MusicDeck"
@@ -366,7 +366,7 @@ class PlexService(MusicService):
                         if str(d.get("key", "")).isdigit() and d.get("title"):
                             seen.setdefault(d["title"], d["key"])
             genres = [models.collection(f"genre:{key}#{title}", "list", title) for title, key in sorted(seen.items())]
-            return [rows_or_tiles(models.section("Genres", genres))]
+            return [as_rows(models.section("Genres", genres))]
         if tab_id == "library":
             playlists, albums, artists, tracks = await asyncio.gather(
                 self._metadata("/playlists", playlistType="audio"),

@@ -3,6 +3,22 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.21.0
+
+- **Every genre, mood, country and year is a row on Browse**, each ending in its own Show all, however many
+  there are: SoundCloud's 35 genres showed 15 rows and a lone "All genres" square to click into. Radio's
+  countries and languages, the Live Music Archive's years and local files' genres and decades were squares
+  to pick from; they're rows now too (each loads as you reach it).
+- **SoundCloud's charts have pictures**: SoundCloud's own artwork for each (its top track's), not a grey
+  square.
+- **More search results**: SoundCloud asked for 40 songs (fewer showed, once the ones that can't be played
+  signed out were left out), 6 artists and 8 playlists; Qobuz for 30 of each and 8 artists. Now up to 120
+  songs, 16 artists, 16 albums and 24 playlists on SoundCloud, and 60 of each and 16 artists on Qobuz; long
+  rows end in Show all.
+- **Big screens**: the media center fits between Steam's own header and hint bar as Steam draws them,
+  rather than a share of the screen that only matched the Steam Deck's; on 2560x1600 the now-playing bar
+  floated above the hint bar.
+
 ## 0.20.2
 
 - **Windows: YouTube Music works without installing Python.** It said Python 3.10 wasn't installed: the

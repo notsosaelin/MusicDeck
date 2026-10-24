@@ -198,7 +198,7 @@ async def run():
         decades = (await plugin.open_collection(lid, "list", "decades"))["data"]["collections"]
         check([d["title"] for d in decades] == ["1990s", "1980s"], f"years by decade, latest first: {decades}")
         tabs2 = await media_center_tabs(plugin, lid)
-        check("composers" in tabs2 and tabs2["genres"][0][1] == "tiles", f"a Composers tab once there's one: {list(tabs2)}")
+        check("composers" in tabs2 and tabs2["genres"][0][1] == "rows", f"a Composers tab once there's one; genres as rows: {list(tabs2)}")
         composer = (await plugin.open_collection(lid, "list", "composer:Some Composer"))["data"]
         check([t["title"] for t in composer["tracks"]] == ["Piece"], "a composer's works")
         singer = next(t for t in hits_page["tracks"] if t["artist"] == "Singer One")
@@ -3026,6 +3026,16 @@ async def run():
               and opened["playlists"][0]["mine"] and opened["frequent"][0]["title"] == "Most played"
               and {t["group"] for t in sub.center_tabs() if t["id"] in Sub.PICKS} == {"listening"},
               f"Navidrome's Browse: its library in parts, picks from it: {opened}")
+
+        print("browse rows")
+        from musicdeck import models as rowmodels
+        from musicdeck.services.base import tab_info as rows_info
+        genres35 = rowmodels.section("Genres", [rowmodels.collection(f"genre:{i}", "list", f"G{i}") for i in range(35)],
+                                    display="rows")
+        albums30 = rowmodels.section("Albums", [rowmodels.collection(f"a{i}", "album", f"A{i}") for i in range(30)])
+        g, a = rows_info([genres35]), rows_info([albums30])
+        check(len(g["items"]) == 35 and g["count"] == 35 and len(a["items"]) == 15 and a["count"] == 30,
+              "Browse gets every genre (a row each, no lone Show all for the rest); other rows their first 15")
 
         print("platforms")
         from musicdeck import native

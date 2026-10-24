@@ -229,7 +229,7 @@ class LiveMusicService(LocalLikes, MusicService):
             # the archive's shows run from the sixties to last week
             years = range(date.today().year, 1964, -1)
             return [models.section("Years", [models.collection(f"year:{y}", "list", str(y)) for y in years],
-                                   display="tiles")]
+                                   display="rows")]
         return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:

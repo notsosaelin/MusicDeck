@@ -18,7 +18,7 @@ import aiohttp
 from .. import models
 from ..cache import Cache
 from ..net import tls
-from .base import LocalLikes, MusicService, ServiceError, StreamSource, rows_or_tiles
+from .base import LocalLikes, MusicService, ServiceError, StreamSource, as_rows
 
 API = "https://api-v2.soundcloud.com"
 # Genres for the Browse tab: (tag its search filters by, name shown). SoundCloud's per-genre charts are
@@ -170,9 +170,11 @@ class SoundCloudService(LocalLikes, MusicService):
     @staticmethod
     def _playlist(p: dict[str, Any]) -> dict[str, Any]:
         if p.get("kind") == "system-playlist":
-            # curated mixes ("Charts: Top 50", personalised stations) are addressed by URN
+            # curated mixes ("Charts: Top 50", personalised stations) are addressed by URN; charts have no
+            # cover of their own, only the one SoundCloud works out (their top track's)
             return models.collection("urn:" + p["urn"], "playlist", p.get("title", ""),
-                                     p.get("short_description") or "SoundCloud", _art(p.get("artwork_url")))
+                                     p.get("short_description") or "SoundCloud",
+                                     _art(p.get("artwork_url") or p.get("calculated_artwork_url")))
         user = (p.get("user") or {}).get("username", "")
         count = p.get("track_count")
         subtitle = " · ".join(x for x in [user, models.count(count, "track") if count else ""] if x)
@@ -239,7 +241,7 @@ class SoundCloudService(LocalLikes, MusicService):
                 raise trending if isinstance(trending, Exception) else ServiceError("No charts right now")
             return sections
         if tab_id == "genres":
-            return [rows_or_tiles(s) for s in await self.browse() if s["title"] == "Genres"]
+            return [as_rows(s) for s in await self.browse() if s["title"] == "Genres"]
         return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
@@ -282,11 +284,13 @@ class SoundCloudService(LocalLikes, MusicService):
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:
+        # plenty of each: songs that can't be played signed out (Go+, DRM-only) are left out afterwards,
+        # and the media center ends long rows in Show all
         tracks, users, playlists, albums = await asyncio.gather(
-            self._get("/search/tracks", q=query, limit=40),
-            self._get("/search/users", q=query, limit=6),
-            self._get("/search/playlists_without_albums", q=query, limit=8),
-            self._get("/search/albums", q=query, limit=6))
+            self._get("/search/tracks", q=query, limit=120),
+            self._get("/search/users", q=query, limit=16),
+            self._get("/search/playlists_without_albums", q=query, limit=24),
+            self._get("/search/albums", q=query, limit=16))
         return models.page(f"Results for “{query}”",
                            collections=[self._user(u) for u in users.get("collection", [])]
                            + [self._playlist(p) for p in albums.get("collection", []) + playlists.get("collection", [])],

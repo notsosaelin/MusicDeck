@@ -13,7 +13,7 @@ import aiohttp
 
 from .. import models
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
+from .base import MusicService, ServiceError, StreamSource, as_rows
 
 API_VERSION = "1.16.1"
 CLIENT_NAME = "MusicDeck"
@@ -186,7 +186,7 @@ class SubsonicService(MusicService):
         if tab_id == "artists":
             return [models.section("Artists", (await self.open("list", "artists"))["collections"], display="grid")]
         if tab_id == "genres":
-            return [rows_or_tiles(s) for s in await self.browse()]
+            return [as_rows(s) for s in await self.browse()]
         if tab_id == "library":
             playlists, starred = await asyncio.gather(self._call("getPlaylists"), self._call("getStarred2"))
             starred = starred.get("starred2", {})

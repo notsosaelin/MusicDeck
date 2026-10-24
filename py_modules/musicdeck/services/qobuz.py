@@ -27,7 +27,7 @@ from aiohttp import web
 
 from .. import debuglog, models
 from ..net import tls
-from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
+from .base import MusicService, ServiceError, SignIn, StreamSource, as_rows
 
 API = "https://www.qobuz.com/api.json/0.2"
 PLAYER = "https://play.qobuz.com"
@@ -352,7 +352,7 @@ class QobuzService(MusicService):
                 raise ServiceError("Qobuz didn't answer; try again")
             return sections
         if tab_id == "genres":
-            return [rows_or_tiles(s) for s in await self.browse()]
+            return [as_rows(s) for s in await self.browse()]
         if tab_id == "library":
             user_id = self.config.get("user_id")
             playlists, albums, artists, tracks = await asyncio.gather(
@@ -426,8 +426,9 @@ class QobuzService(MusicService):
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:
-        data = await self._get("catalog/search", query=query, limit=30)
-        artists = [self._artist(a) for a in (data.get("artists") or {}).get("items", [])[:8]]
+        # as many of each as Qobuz's own apps show: the media center ends long rows in Show all
+        data = await self._get("catalog/search", query=query, limit=60)
+        artists = [self._artist(a) for a in (data.get("artists") or {}).get("items", [])[:16]]
         albums = [self._album(a) for a in (data.get("albums") or {}).get("items", [])]
         playlists = [self._playlist(p) for p in (data.get("playlists") or {}).get("items", [])]
         return models.page(f"Results for “{query}”", collections=artists + albums + playlists,

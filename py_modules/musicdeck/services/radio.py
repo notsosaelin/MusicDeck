@@ -19,7 +19,7 @@ import aiohttp
 from .. import debuglog, models
 from ..cache import Cache
 from ..net import tls
-from .base import ROWS_MAX, MusicService, ServiceError, StreamSource
+from .base import MusicService, ServiceError, StreamSource, as_rows
 from ..version import USER_AGENT
 
 DIRECTORY = "https://all.api.radio-browser.info"
@@ -365,22 +365,21 @@ class RadioService(MusicService):
         if tab_id == "genres":
             tags = await self._get("/json/tags", order="stationcount", reverse=True, limit=100)
             tags = [self._tag(t) for t in tags if t.get("name")]
-            # the biggest as rows of their stations, the rest to pick from
-            return [models.section("Genres", tags[:ROWS_MAX], display="rows"),
-                    models.section("More genres", tags[ROWS_MAX:], display="tiles")]
+            # each a row of its stations, the biggest first
+            return [models.section("Genres", tags, display="rows")]
         if tab_id == "stations":
             favourites = [{**f, "artist": f.get("artist", "").split(" · ")[0], "starred": True}
                           for f in self.config.get("favourites") or []]
             return [models.section("Your stations", [], favourites, display="grid")] if favourites else \
                 [models.notice("Press Y on a station and choose Favourite to keep it here")]
         if tab_id == "countries":
-            return [{**s, "display": "tiles"} for s in await self.browse() if s["title"] == "Countries"]
+            return [as_rows(s) for s in await self.browse() if s["title"] == "Countries"]
         if tab_id == "languages":
             languages = await self._get("/json/languages", order="stationcount", reverse=True, limit=80)
             return [models.section("Languages", [
                 models.collection(f"language:{l['name']}", "list", l["name"].title(),
                                   models.count(l.get("stationcount") or 0, "station"))
-                for l in languages if l.get("name") and (l.get("stationcount") or 0) >= 10], display="tiles")]
+                for l in languages if l.get("name") and (l.get("stationcount") or 0) >= 10], display="rows")]
         return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:

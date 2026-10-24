@@ -21,7 +21,7 @@ import aiohttp
 
 from .. import debuglog, models
 from ..net import tls
-from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tiles
+from .base import MusicService, ServiceError, SignIn, StreamSource, as_rows
 from ..version import VERSION
 
 CLIENT = "MusicDeck"
@@ -258,7 +258,7 @@ class JellyfinService(MusicService):
                                    SortBy="SortName", Limit=200)
             genres = [models.collection(f"genre:{g['Id']}#{g.get('Name', '')}", "list", g.get("Name") or "Genre")
                       for g in (data or {}).get("Items") or [] if g.get("Id")]
-            return [rows_or_tiles(models.section("Genres", genres))]
+            return [as_rows(models.section("Genres", genres))]
         if tab_id == "library":
             playlists, albums, artists, tracks = await asyncio.gather(
                 self._items(IncludeItemTypes="Playlist", SortBy="SortName", **self.PLAYLIST_FILTER),

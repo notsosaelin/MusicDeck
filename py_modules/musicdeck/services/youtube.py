@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlparse
 from .. import debuglog, models, native, ytdlp_update
 from ..background import spawn
 from ..cache import Cache
-from .base import LocalLikes, MusicService, ServiceError, StreamSource, rows_or_tiles
+from .base import LocalLikes, MusicService, ServiceError, StreamSource, as_rows
 
 # Shipped in the plugin's bin/; a copy in the data folder also works (e.g. updated or side-loaded)
 QJS_NAME = "qjs"
@@ -411,7 +411,7 @@ class YouTubeService(LocalLikes, MusicService):
         if tab_id in ("moods", "genres"):
             sections = [s for s in await self.browse() if s["title"] != "Charts"]
             pick = [s for s in sections if (s["title"].lower() == "genres") == (tab_id == "genres")]
-            return [rows_or_tiles(s) for s in pick]
+            return [as_rows(s) for s in pick]
         return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:

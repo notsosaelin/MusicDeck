@@ -1,4 +1,4 @@
-import { DropdownItem, Focusable, SliderField, Tabs } from "@decky/ui";
+import { DropdownItem, Focusable, SliderField, Tabs, footerClasses } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
   FaHeart,
@@ -648,6 +648,57 @@ function useAreaHeight(ref: RefObject<HTMLElement | null>): { full: number; shor
   return { full: size.full, short: size.full > 0 && size.now < size.full * 0.8 };
 }
 
+/**
+ * Where Steam's own header (search, notifications, clock) ends and its hint bar starts, in the media
+ * center's own coordinates, as drawn now. Both are a set size in Steam's units, not a share of the
+ * screen, so fractions of the height that fit the Steam Deck's screen left a gap above the hint bar on
+ * taller ones (2560x1600). The hint bar is Steam's BasicFooter; the header, the bar across the top of the
+ * window. Null until they're found (the fractions stand in).
+ */
+function useSteamBars(ref: RefObject<HTMLElement | null>): { top: number; bottom: number } | null {
+  const [bars, setBars] = useState<{ top: number; bottom: number } | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    const doc = el?.ownerDocument;
+    const win = doc?.defaultView;
+    if (!el || !doc || !win) return;
+    const measure = () => {
+      const area = el.getBoundingClientRect();
+      if (!area.height) return;
+      // a bar of Steam's along the window's edge at height y: not ours, across most of it, not tall
+      const barAt = (y: number) =>
+        doc
+          .elementsFromPoint(win.innerWidth / 2, y)
+          .filter((h) => !el.contains(h))
+          .map((h) => h.getBoundingClientRect())
+          .find(
+            (r) =>
+              (r.top <= 1 || r.bottom >= win.innerHeight - 1) &&
+              r.width > win.innerWidth / 2 &&
+              r.height > 8 &&
+              r.height < win.innerHeight / 5,
+          );
+      const footer =
+        doc.querySelector<HTMLElement>(`.${footerClasses.BasicFooter}`)?.getBoundingClientRect() ??
+        barAt(win.innerHeight - 2);
+      const header = barAt(2);
+      const bottom =
+        footer && footer.height > 8 && footer.top > area.top + area.height / 2 ? area.bottom - footer.top : 0;
+      const top = header ? header.bottom - area.top : 0;
+      setBars(bottom > 0 && top > 0 ? { top: Math.round(top), bottom: Math.round(bottom) } : null);
+    };
+    measure();
+    // Steam lays its bars out after the page arrives; and the screen can change size
+    const later = win.setTimeout(measure, 500);
+    const stop = watchSize(el, measure);
+    return () => {
+      win.clearTimeout(later);
+      stop();
+    };
+  }, []);
+  return bars;
+}
+
 /** Along the bottom of the browsing tabs: what's playing and its progress. Tapping it opens Now Playing. */
 const NowPlayingBar: FC = () => {
   const state = useStore(player.state);
@@ -913,6 +964,7 @@ export const MediaCenter: FC = () => {
   const [screenOff, sleep, wake] = useScreenOff();
   const root = useRef<HTMLDivElement>(null);
   const { full, short } = useAreaHeight(root);
+  const bars = useSteamBars(root);
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const preview = useStore(browsePreview).id;
@@ -984,10 +1036,11 @@ export const MediaCenter: FC = () => {
       <div
         style={{
           position: "absolute",
-          // between Steam's header and its hint bar, measured from the whole screen's height; with the
-          // keyboard up (the page shorter, the hint bar behind the keyboard), down to the keyboard
-          top: full ? full * 0.086 : "8.6vh",
-          bottom: short ? 0 : full ? full * 0.088 : "8.8vh",
+          // between Steam's header and its hint bar, as drawn (until they're found, the share of the
+          // screen they take on a Steam Deck); with the keyboard up (the page shorter, the hint bar behind
+          // the keyboard), down to the keyboard
+          top: bars ? bars.top : full ? full * 0.086 : "8.6vh",
+          bottom: short ? 0 : bars ? bars.bottom : full ? full * 0.088 : "8.8vh",
           left: 0,
           right: 0,
           display: "flex",
