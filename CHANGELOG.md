@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.15.1
+
+- **Grids stop flickering:** a grid flipped between two shapes (three big covers, then four with a row
+  cut off) over and over. It measured the room under its title from where its covers began, which moves
+  with the shape it picks; it measures from the title's foot now, and settles on one shape.
+
 ## 0.15.0
 
 - **Grids fill the screen on their own:** the columns-and-rows setting and the Layout button are gone. A

@@ -1089,8 +1089,11 @@ export const FittedGrid: FC<{
     const scroller = b && scrollParent(b);
     if (!b || !g || !scroller) return;
     const measure = () => {
-      // the title above the rows (the block is the rows' frame's offsetParent: its top is the title's height)
-      const head = g.parentElement?.offsetTop ?? 0;
+      // the title above the rows: its own height, not where the rows start (that includes the space that
+      // centres them, which depends on the shape: measured that way, the shape fed back on itself and
+      // flickered between two)
+      const header = b.firstElementChild as HTMLElement | null;
+      const head = header ? header.offsetTop + header.offsetHeight : 0;
       const room = scroller.clientHeight - TAB_BAR - 8 - head - 16;
       setSpace((was) =>
         was && was.width === g.clientWidth && was.room === room ? was : { width: g.clientWidth, room },
