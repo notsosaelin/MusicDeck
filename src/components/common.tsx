@@ -14,6 +14,7 @@ import {
 import { CSSProperties, FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaSort, FaUsb, FaUser } from "react-icons/fa";
 import { Collection, CollectionKind, Track } from "../api";
+import { useArtLoad } from "../art";
 import { mediaUrl } from "../store";
 
 export const ACCENT = "#1a9fff";
@@ -52,8 +53,8 @@ export const Art: FC<{
   fallback?: ReactNode;
   round?: boolean;
 }> = ({ instanceId, art, size, fallback, round }) => {
-  const [failed, setFailed] = useState<string | null>(null);
   const url = art ? mediaUrl("art", instanceId, art) : undefined;
+  const load = useArtLoad(url);
   const box: CSSProperties = {
     width: size,
     height: size,
@@ -67,18 +68,20 @@ export const Art: FC<{
     color: "rgba(255,255,255,0.5)",
     overflow: "hidden",
   };
-  if (!url || failed === url) return <div style={box}>{fallback ?? <FaCompactDisc />}</div>;
+  if (load.failed) return <div style={box}>{fallback ?? <FaCompactDisc />}</div>;
   return (
     <div style={box}>
-      {/* lazy: a long list's covers load as they scroll into view, not all at once */}
+      {/* lazy: a long list's covers load as they scroll into view, not all at once; hidden until
+          they have (art.ts) */}
       <img
         src={url}
         width={size}
         height={size}
         loading="lazy"
         decoding="async"
-        style={{ objectFit: "cover" }}
-        onError={() => setFailed(url)}
+        style={{ objectFit: "cover", opacity: load.visible ? 1 : 0 }}
+        onLoad={load.onLoad}
+        onError={load.onError}
       />
     </div>
   );

@@ -74,6 +74,7 @@ python scripts/vendor.py       # the tests use the vendored packages in py_modul
 pip install aiohttp certifi    # these come with Decky on a device, so they aren't vendored
 python tests/test_backend.py
 python tests/test_cast.py      # casting: mDNS, a fake Chromecast, a fake UPnP renderer, the network site
+python tests/test_ipod.py      # iPods: the database format against libgpod's (fixtures), a pretend iPod synced
 ```
 
 The suite stubs the `decky` module, builds a small tagged music library in a temp folder, starts the
@@ -149,6 +150,17 @@ starts with `//` (a comment written among JSX children shows on screen).
 Each service was additionally checked against its real API with throwaway scripts (create the
 service, call `home`/`search`/`open`/`stream`, fetch the first bytes of the stream). Do the same
 when you change a service; public test servers: `demo.navidrome.org`, `demo.jellyfin.org/stable`.
+
+### iPods against libgpod
+
+`tests/test_ipod.py` checks the iPod code against databases libgpod wrote (`tests/fixtures/ipod`). To check
+against libgpod itself (after changing `itunesdb.py`), on Linux or WSL:
+
+```sh
+sh scripts/libgpod_check/setup.sh       # libgpod 0.8.3 unpacked into ~/gpod (no root), gpodtool built
+python3 scripts/libgpod_check/check.py  # libgpod writes, we read; we write, libgpod reads
+python3 scripts/libgpod_check/check.py --fixtures   # and refresh tests/fixtures/ipod
+```
 
 ## Debugging
 
@@ -237,7 +249,7 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
-3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py`.
+3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py`.
 4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && python scripts/package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
 6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.

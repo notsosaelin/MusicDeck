@@ -22,6 +22,7 @@ import {
   setPlayed,
   star,
   copyTo,
+  removeFromDevice,
   onDevice,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
@@ -143,13 +144,34 @@ function copyItems(instanceId: string, kind: string, id: string): ReactNode[] {
   };
   if (onDevice(id)) {
     const device = state.devices.find((d) => id.startsWith(`dv~${d.id}~`));
-    return device && device.kind !== "cd"
-      ? [
-          <MenuItem key="copy-deck" onSelected={() => copy("deck")}>
-            Copy to this Deck
-          </MenuItem>,
-        ]
-      : [];
+    if (!device || device.kind === "cd") return [];
+    // deleting from a player (or an iPod's library) is asked about first: it can't be undone
+    const remove = () =>
+      showModal(
+        <ConfirmModal
+          strTitle={`Remove from ${device.name}?`}
+          strDescription={
+            kind === "track"
+              ? "The song is deleted from the device."
+              : "Its songs are deleted from the device. Copies on this Deck stay."
+          }
+          strOKButtonText="Remove"
+          bDestructiveWarning
+          onOK={async () => {
+            const r = await removeFromDevice(instanceId, kind, id);
+            invalidateBrowserCache();
+            notify(r.ok ? device.name : "Couldn't remove", r.ok ? r.data : r.error);
+          }}
+        />,
+      );
+    return [
+      <MenuItem key="copy-deck" onSelected={() => copy("deck")}>
+        Copy to this Deck
+      </MenuItem>,
+      <MenuItem key="remove-device" tone="destructive" onSelected={remove}>
+        Remove from {device.name}
+      </MenuItem>,
+    ];
   }
   return state.devices
     .filter((d) => d.kind !== "cd")

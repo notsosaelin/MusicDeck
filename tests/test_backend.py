@@ -1865,6 +1865,39 @@ async def run():
         plugin.settings.data["services"] = services
         plugin.settings.save()
 
+        print("an iPod in Local files")
+        from musicdeck import itunesdb as itdb
+        pod = tempfile.mkdtemp()
+        for sub in ("Device", "iTunes", os.path.join("Music", "F00")):
+            os.makedirs(os.path.join(pod, "iPod_Control", sub))
+        with open(os.path.join(pod, "iPod_Control", "Device", "SysInfo"), "w") as f:
+            f.write("ModelNumStr: xB147\nFirewireGuid: 0x000A2700138F1F2E\n")
+        shutil.copyfile(os.path.join(os.path.dirname(__file__), "fixtures", "ipod", "classic-iTunesDB"),
+                        os.path.join(pod, "iPod_Control", "iTunes", "iTunesDB"))
+        check(devmod.is_ipod(pod) and not devmod.is_ipod(stick_dir), "an iPod is told from a stick by its iPod_Control")
+        pod_device = {"id": "devtestipod1", "name": "JOHNS IPOD", "kind": "ipod", "paths": [pod], "source": ""}
+        await plugin._devices_changed([pod_device])
+        on_pod = plugin.device_instances[pod_device["id"]]
+        await on_pod.scan_task
+        state = await plugin.get_state()
+        pod_card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
+        check([(d["name"], d["kind"]) for d in state["devices"]] == [("Test iPod", "ipod")]
+              and pod_card["subtitle"] == "iPod classic · 3 songs" and state["devices"][0]["status"]["why_not"] == "",
+              f"it goes by the name it has in iTunes, and says which iPod it is: {pod_card}")
+        said = await plugin.copy_to(sid, "album", deck_album, pod_device["id"])
+        await library.copying
+        pod_db = itdb.ITunesDB.parse(open(os.path.join(pod, "iPod_Control", "iTunes", "iTunesDB"), "rb").read())
+        check(said["ok"] and [t.fields()["title"] for t in pod_db.tracks][3:] == ["First", "Second"]
+              and not library.copy_progress["error"], f"an album copied to it goes into its library: {said} {library.copy_progress}")
+        await on_pod.scan_task
+        pod_album = next(c for c in (await plugin.open_collection(sid, "device", pod_card["id"]))["data"]["collections"]
+                         if c["title"] == "Album One")
+        removed = await plugin.remove_from_device(sid, "album", pod_album["id"])
+        pod_db = itdb.ITunesDB.parse(open(os.path.join(pod, "iPod_Control", "iTunes", "iTunesDB"), "rb").read())
+        check(removed["ok"] and len(pod_db.tracks) == 3, f"and taken off again: {removed}")
+        check(not (await plugin.remove_from_device(sid, "album", deck_album))["ok"], "the Deck's own music isn't removed that way")
+        await plugin._devices_changed([])
+
         print("audio CDs")
         from musicdeck import cd as cdmod
         # MusicBrainz's own example disc (musicbrainz.org/doc/Disc_ID_Calculation)

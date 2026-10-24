@@ -1,5 +1,6 @@
 import { Navigation, Router } from "@decky/ui";
 import { Collection, Result, Track, playedCollection } from "./api";
+import { forgetMissingArt } from "./art";
 import { player } from "./player";
 import { RecentlyUsed, Store, pluginState } from "./store";
 
@@ -110,6 +111,8 @@ export function playFrom(instanceId: string, from: Collection, tracks: Track[], 
 
 export const invalidateBrowserCache = () => {
   resultCache.clear();
+  // artwork may have been found or changed: pictures that were missing get another try
+  forgetMissingArt();
   dataVersion.set({ v: dataVersion.get().v + 1 });
 };
 

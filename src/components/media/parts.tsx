@@ -3,6 +3,7 @@ import { CSSProperties, FC, ReactNode, RefObject, createContext, useContext, use
 import { FaCompactDisc, FaFolder, FaList, FaUsb, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
+import { useArtLoad } from "../../art";
 import { mediaUrl, pluginState, useStore } from "../../store";
 import { ACCENT, ScrollingText, formatTime } from "../common";
 import { GRID_GAP, GRID_SHARE, gridShape } from "./grid";
@@ -103,8 +104,8 @@ export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind">
   c,
   size,
 }) => {
-  const [failed, setFailed] = useState(false);
   const url = c.art ? mediaUrl("art", instanceId, c.art) : undefined;
+  const load = useArtLoad(url);
   const round = c.kind === "artist";
   return (
     <div
@@ -124,13 +125,14 @@ export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind">
       }}
     >
       {/* lazy: a shelf's covers past the screen's edge load as it scrolls to them */}
-      {url && !failed ? (
+      {!load.failed ? (
         <img
           src={url}
           loading="lazy"
           decoding="async"
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          onError={() => setFailed(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", opacity: load.visible ? 1 : 0 }}
+          onLoad={load.onLoad}
+          onError={load.onError}
         />
       ) : (
         KIND_ICON[c.kind]
@@ -558,13 +560,12 @@ export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?
   full,
   style,
 }) => {
-  const [failed, setFailed] = useState(false);
+  const load = useArtLoad(url);
   const [fit, setFit] = useState<{ square: boolean; edge: string | null } | null>(null);
   useEffect(() => {
-    setFailed(false);
     setFit(null);
   }, [url]);
-  const shown = url && !failed;
+  const shown = !load.failed;
   const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
   const initials = name
     .split(/\s+/)
@@ -594,9 +595,12 @@ export const StationArt: FC<{ url?: string; name: string; full?: boolean; style?
             const img = e.currentTarget;
             const ratio = img.naturalWidth / Math.max(img.naturalHeight, 1);
             setFit({ square: ratio > 0.8 && ratio < 1.25, edge: edgeColour(img) });
+            load.onLoad();
           }}
-          onError={() => setFailed(true)}
+          onError={load.onError}
           style={{
+            // shown once it's loaded and measured: no broken-image icon, no jump from filled to whole
+            opacity: fit ? 1 : 0,
             position: "absolute",
             inset: whole ? "6%" : 0,
             width: whole ? "88%" : "100%",

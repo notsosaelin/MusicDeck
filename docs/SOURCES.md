@@ -155,6 +155,12 @@ source (`MusicService.remove`).
   `<artist>/<album>/<nn> <title>.flac` into Local files' first folder: raw audio piped to ffmpeg's FLAC
   encoder, then tagged with mutagen (names, numbers, year, genres, MusicBrainz album id, cover). Progress
   in `status()["rip"]`, a toast when done. Without ffmpeg or a Local files source, it says so.
+- **iPods** (`ipod.py`, `itunesdb.py`, `services/ipod.py`; all of it in [IPOD.md](IPOD.md)): USB storage with
+  `iPod_Control` and no `.rockbox` is an iPod (`devices.is_ipod`), an `IpodService`: its index comes from its
+  iTunesDB (or iTunesCDB) rather than its files' tags, it goes by its master playlist's name, and a copy to it
+  goes into that database (`ipod.add`: converted with ffmpeg where needed, signed with hash58 where the model
+  asks), as a removal does (`ipod.remove`). `why_not()` says when it can't be synced (nano 5G-7G, HFS+,
+  unidentified); it still plays.
 - **Unplugged**: it leaves Local files. Polled every 3 s (`DeviceWatcher`). Linux only.
 
 ## Steam soundtracks (`steam.py`, `src/steam.ts`)

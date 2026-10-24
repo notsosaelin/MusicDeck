@@ -3,6 +3,23 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.26.0
+
+- **iPods**: an iPod plugged in (any with a disk mode: classic, nano, shuffle, mini, video, photo) shows in
+  Local files → Devices by the name it has in iTunes and its model, read from its own library in a second.
+  Copying music to it puts it into that library as iTunes did, so the iPod's own menus play it: FLAC and
+  other formats it can't play are converted (to Apple Lossless, or AAC), playlists stay playlists, and plays
+  and On-The-Go playlists made on the iPod are kept. The iPod classic's and the nano 3G/4G's signed library is
+  signed for each iPod. A nano 5G, 6G or 7G, or a Mac-formatted iPod, plays but isn't synced (Decky →
+  MusicDeck says "play only"). See docs/IPOD.md.
+- **Remove from a device**: Y on something on a plugged-in player, phone or iPod has Remove from <device>
+  (asked first).
+- **No more flashing covers**: a card without a picture (a player's album with no cover) flickered between
+  a broken-image icon and its own icon each time it was drawn (L1/R1 between tabs); it shows its icon
+  straight away now. Covers appear once they've loaded.
+- **Now Playing at rest**: the record's label no longer shows a broken image when what played last has no
+  cover; it stays blue.
+
 ## 0.25.1
 
 - Devices come first on the media center's Home too, and Browse's Devices row shows them.

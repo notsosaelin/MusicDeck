@@ -11,7 +11,8 @@ queue, playlists, the stream server): one source, no mixing.
 
 What's on a device is read only (no tag edits, artwork or look-ups: the files aren't the Deck's).
 Copying (`copy_to`) goes either way: the Deck's music to a device, a device's to the Deck, into
-<artist>/<album>/ under the device's Music folder or the library's first folder, files as they are.
+<artist>/<album>/ under the device's Music folder or the library's first folder, files as they are. An
+iPod's goes into its own library (IpodService, ipod.py) instead, as iTunes would put it there.
 """
 import asyncio
 import os
@@ -21,6 +22,7 @@ from typing import Any, Callable, Optional
 from .. import models
 from .audiocd import AudioCdService
 from .base import ServiceError, StreamSource
+from .ipod import IpodService
 from .local import LocalService
 
 PREFIX = "dv~"
@@ -113,7 +115,7 @@ class LocalLibrary(LocalService):
             album = instance._album()
             return mark({**album, "subtitle": "Audio CD · " + models.count(len(instance.tracks), "track")},
                         device["id"])
-        kind = "Phone" if device["kind"] == "mtp" else "USB"
+        kind = instance.describe() if isinstance(instance, IpodService) else "Phone" if device["kind"] == "mtp" else "USB"
         songs = len(getattr(instance, "tracks", {}) or {})
         about = f"{kind} · " + ("Reading…" if instance.status().get("scanning") and not songs
                                 else models.count(songs, "song"))
@@ -239,9 +241,9 @@ class LocalLibrary(LocalService):
 
     # --- copying between the Deck and a device ---
 
-    async def _files(self, kind: str, item_id: str) -> tuple[list[dict[str, Any]], str]:
-        """The files of a track, album, artist or playlist: [{"path", "artist", "album"}], and where
-        they are ("" for the Deck, else a device's id)."""
+    async def _files(self, kind: str, item_id: str) -> tuple[list[dict[str, Any]], str, str, LocalService]:
+        """The files of a track, album, artist or playlist (their index records, "path" and tags), where
+        they are ("" for the Deck, else a device's id), a playlist's name, and the index they're in."""
         source: LocalService = self
         device_id, inner = "", item_id
         if on_device(item_id):
@@ -249,20 +251,22 @@ class LocalLibrary(LocalService):
             if not isinstance(device["instance"], LocalService):
                 raise ServiceError("A CD is ripped, not copied: Rip to Local files is on its album")
             source, device_id = device["instance"], device["id"]
+        title = ""
         if kind == "track":
             ids = [inner]
         else:
             page = await source.open(kind, inner)
             ids = [t["id"] for t in page.get("tracks") or []]
+            title = page.get("title", "") if kind == "playlist" else ""
         files = []
         for tid in dict.fromkeys(ids):
             t = source.tracks.get(tid)
             if t and os.path.isfile(t["path"]):
-                files.append({"path": t["path"], "artist": source._album_artist(t) or "Unknown artist",
-                              "album": t["album"] or "Unknown album"})
+                files.append({**t, "tid": tid, "artist_folder": source._album_artist(t) or "Unknown artist",
+                              "album_folder": t["album"] or "Unknown album"})
         if not files:
             raise ServiceError("Nothing there to copy")
-        return files, device_id
+        return files, device_id, title, source
 
     def _destination(self, target: str) -> tuple[str, str, Optional[LocalService]]:
         """Where a copy goes: (folder, its name for the user, the index to rescan after)."""
@@ -274,6 +278,11 @@ class LocalLibrary(LocalService):
         instance = device["instance"]
         if not isinstance(instance, LocalService) or not instance.roots:
             raise ServiceError("Music can't be copied to a CD")
+        if isinstance(instance, IpodService):
+            reason = instance.why_not()
+            if reason:
+                raise ServiceError(reason)
+            return "", device["name"], instance
         roots = instance.roots
         music = next((r for r in roots if os.path.basename(r).lower() == "music"), None)
         if not music:
@@ -286,24 +295,36 @@ class LocalLibrary(LocalService):
 
     async def copy_to(self, kind: str, item_id: str, target: str) -> str:
         """Copies a track, album, artist or playlist to a device ("dv..." id) or from one to the Deck
-        ("deck"), in the background; returns what to tell the user."""
+        ("deck"), in the background; returns what to tell the user. To an iPod, into its library (a
+        playlist stays a playlist there)."""
         if self.copy_progress["running"]:
             raise ServiceError(f"Still copying to {self.copy_progress['to']}")
-        files, source = await self._files(kind, item_id)
+        files, source, playlist, index_from = await self._files(kind, item_id)
         if source == target or (target == "deck" and not source):
             raise ServiceError("That's already there")
         folder, name, index = self._destination(target)
         self.copy_progress = {"running": True, "done": 0, "total": len(files), "to": name, "error": ""}
-        self.copying = asyncio.ensure_future(self._copy(files, folder, name, index))
+        if isinstance(index, IpodService):
+            self.copying = asyncio.ensure_future(self._copy_to_ipod(files, playlist, name, index))
+        else:
+            # an iPod's files are "ABCD.mp3": copied off it, they're named as their tags say
+            named = isinstance(index_from, IpodService)
+            self.copying = asyncio.ensure_future(self._copy(files, folder, name, index, named))
         return f"Copying {models.count(len(files), 'song')} to {name}"
 
-    async def _copy(self, files: list[dict[str, Any]], folder: str, name: str, index: Optional[LocalService]) -> None:
+    async def _copy(self, files: list[dict[str, Any]], folder: str, name: str, index: Optional[LocalService],
+                    named: bool = False) -> None:
         copied = 0
         try:
             for f in files:
-                where = os.path.join(folder, models.safe_name(f["artist"], "Unknown artist"),
-                                     models.safe_name(f["album"], "Unknown album"))
-                copied += await asyncio.to_thread(self._copy_one, f["path"], where)
+                where = os.path.join(folder, models.safe_name(f["artist_folder"], "Unknown artist"),
+                                     models.safe_name(f["album_folder"], "Unknown album"))
+                file_name = None
+                if named:
+                    number = f"{f['track']:02d} " if f.get("track") else ""
+                    file_name = (number + models.safe_name(f.get("title") or "Track", "Track")
+                                 + os.path.splitext(f["path"])[1].lower())
+                copied += await asyncio.to_thread(self._copy_one, f["path"], where, file_name)
                 self.copy_progress["done"] += 1
             self.copy_progress["running"] = False
             if index is not None and copied:
@@ -316,12 +337,48 @@ class LocalLibrary(LocalService):
             if self.announce:
                 self.announce(f"Copying to {name} stopped: {self.copy_progress['error']}")
 
+    async def _copy_to_ipod(self, files: list[dict[str, Any]], playlist: str, name: str, ipod: IpodService) -> None:
+        def progress(done: int) -> None:
+            self.copy_progress["done"] = done
+        try:
+            added = await ipod.put(files, playlist, progress)
+            self.copy_progress["running"] = False
+            if self.announce:
+                self.announce(f"Copied {models.count(added, 'song')} to {name}" if added else f"Already on {name}")
+        except Exception as e:  # noqa: BLE001 - a full iPod, one unplugged mid-copy: said, not raised
+            self.copy_progress.update(running=False, error=str(e) or type(e).__name__)
+            if self.announce:
+                self.announce(f"Copying to {name} stopped: {self.copy_progress['error']}")
+
+    async def remove_from_device(self, kind: str, item_id: str) -> str:
+        """Deletes a track, album, artist or playlist's songs from the device they're on (from an iPod's
+        library too); returns what to tell the user."""
+        if not on_device(item_id):
+            raise ServiceError("Only music on a plugged-in device is removed here")
+        files, device_id, _, index = await self._files(kind, item_id)
+        device = self._device(device_id)
+        if isinstance(index, IpodService):
+            gone = await index.take_off([f["tid"] for f in files])
+        else:
+            def delete() -> int:
+                n = 0
+                for f in files:
+                    try:
+                        os.remove(f["path"])
+                        n += 1
+                    except OSError:
+                        pass
+                return n
+            gone = await asyncio.to_thread(delete)
+            index.rescan()
+        return f"Removed {models.count(gone, 'song')} from {device['name']}"
+
     @staticmethod
-    def _copy_one(path: str, folder: str) -> int:
+    def _copy_one(path: str, folder: str, file_name: Optional[str] = None) -> int:
         """One file into a folder; a file of the same name and size there already is left as it is.
         A phone's folder (GVfs's) takes plain writes, as a stick's does."""
         os.makedirs(folder, exist_ok=True)
-        target = os.path.join(folder, os.path.basename(path))
+        target = os.path.join(folder, file_name or os.path.basename(path))
         if os.path.isfile(target) and os.path.getsize(target) == os.path.getsize(path):
             return 0
         try:

@@ -31,6 +31,7 @@ import {
 import { CenterTab, browsePreview, centerTab, leaveMediaCenter } from "../../nav";
 import { hasFeature, player } from "../../player";
 import { showPlaylistPicker, toggleStar } from "../TrackMenu";
+import { useLoadedArt } from "../../art";
 import { Store, mediaUrl, pluginState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
 import { Equalizer } from "../Equalizer";
@@ -542,7 +543,8 @@ const NothingPlaying: FC = () => {
   const last: Collection | undefined = jump?.items[0];
   const station: Track | undefined = last ? undefined : jump?.tracks?.[0];
   const art = last?.art ?? station?.art;
-  const cover = art && instanceId ? mediaUrl("art", instanceId, art) : undefined;
+  // on the label once it has loaded: one that doesn't (a song off a player without a cover) leaves it blue
+  const cover = useLoadedArt(art && instanceId ? mediaUrl("art", instanceId, art) : undefined);
   const play = () => {
     if (last) playCollection(instanceId, last);
     else if (station) player.playList(instanceId, [station], 0);

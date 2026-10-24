@@ -42,7 +42,7 @@ import {
   FaSteam,
   FaYoutube,
 } from "react-icons/fa";
-import { SiAudiobookshelf, SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-icons/si";
+import { SiApple, SiAudiobookshelf, SiEmby, SiJellyfin, SiPlex, SiTidal } from "react-icons/si";
 import {
   DownloadStatus,
   exportBackup,
@@ -280,9 +280,10 @@ const describeDevice = (d: DeviceInfo): string => {
       .join(" · ");
   }
   const n = d.status.tracks ?? 0;
-  return (
-    `${d.kind === "mtp" ? "Phone" : "USB"} · ` + (d.status.scanning ? "Reading…" : `${n} song${n === 1 ? "" : "s"}`)
-  );
+  const kind = d.kind === "ipod" ? d.status.model || "iPod" : d.kind === "mtp" ? "Phone" : "USB";
+  // an iPod MusicDeck can play from but not sync (a nano 5G or later, a Mac-formatted one)
+  const playOnly = d.kind === "ipod" && d.status.why_not ? " · play only" : "";
+  return `${kind} · ` + (d.status.scanning ? "Reading…" : `${n} song${n === 1 ? "" : "s"}`) + playOnly;
 };
 
 /** A device plugged in: played and copied to in Local files (its Devices tab); here it can be renamed. */
@@ -295,7 +296,16 @@ const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
       </Menu>,
       e?.currentTarget ?? window,
     );
-  const icon = device.kind === "mtp" ? <FaMobileAlt /> : device.kind === "cd" ? <FaCompactDisc /> : <FaUsb />;
+  const icon =
+    device.kind === "mtp" ? (
+      <FaMobileAlt />
+    ) : device.kind === "cd" ? (
+      <FaCompactDisc />
+    ) : device.kind === "ipod" ? (
+      <SiApple />
+    ) : (
+      <FaUsb />
+    );
   return (
     <PanelSectionRow>
       <Field

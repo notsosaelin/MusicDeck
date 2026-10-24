@@ -1,0 +1,116 @@
+"""
+MusicDeck's iPod code against libgpod itself (after setup.sh, on Linux or WSL): run as
+    python3 scripts/libgpod_check/check.py [--fixtures]
+
+* libgpod writes databases for an iPod classic (signed with hash58) and two shuffles (with iTunesSD);
+  musicdeck/itunesdb.py must read them, write them back byte for byte, sign them the same, and make the
+  same sorted lists and iTunesSD files.
+* musicdeck/itunesdb.py writes a database from nothing and changes libgpod's; libgpod must read both.
+* --fixtures: copies libgpod's databases to tests/fixtures/ipod, which tests/test_ipod.py checks against
+  where libgpod isn't (Windows, CI).
+"""
+import importlib.util
+import os
+import shutil
+import subprocess
+import sys
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+spec = importlib.util.spec_from_file_location("itunesdb", os.path.join(REPO, "py_modules", "musicdeck", "itunesdb.py"))
+i = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(i)
+HOME = os.path.expanduser("~/gpod")
+ENV = {**os.environ, "LD_LIBRARY_PATH": f"{HOME}/root/usr/lib/x86_64-linux-gnu", "LC_ALL": "en_US.UTF-8",
+       "LOCPATH": f"{HOME}/locale"}
+GUID_TEXT = "0x000A2700138F1F2E"
+GUID = i.guid_bytes(GUID_TEXT)
+SONGS = ["Zebra", "The Beatles", "Abbey Road", ":iPod_Control:Music:F01:A.mp3",
+         "apple", "Artist B", "B Side", ":iPod_Control:Music:F02:B.m4a",
+         "9 Lives", "Artist B", "B Side", ":iPod_Control:Music:F03:C.mp3"]
+failed = []
+
+
+def check(ok, message):
+    print(("  ok - " if ok else "  FAILED - ") + message)
+    if not ok:
+        failed.append(message)
+
+
+def gpod(*args):
+    return subprocess.run([f"{HOME}/tool/gpodtool", *args], capture_output=True, text=True, env=ENV)
+
+
+def pretend(name, model):
+    d = f"{HOME}/check-{name}"
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(f"{d}/iPod_Control/iTunes")
+    os.makedirs(f"{d}/iPod_Control/Device")
+    with open(f"{d}/iPod_Control/Device/SysInfo", "w") as f:
+        f.write(f"ModelNumStr: {model}\nFirewireGuid: {GUID_TEXT}\n")
+    return d
+
+
+def read(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+written = {}
+for name, model in (("classic", "xB147"), ("shuffle2", "xA546"), ("shuffle4", "xC584")):
+    print(name)
+    d = pretend(name, model)
+    r = gpod("make", d, *SONGS)
+    if r.returncode != 0:
+        sys.exit(f"libgpod couldn't write: {r.stderr}")
+    data = read(f"{d}/iPod_Control/iTunes/iTunesDB")
+    written[name] = d
+    db = i.ITunesDB.parse(data)
+    check(db.to_bytes(GUID, db.hashing_scheme) == data, "read and written back byte for byte, signed the same")
+    master = next(p for p in db.section(2).playlists if p.master)
+    check([m for m in master.mhods if i._u32(m, 12) in (52, 53)] == i._index_mhods(db.tracks),
+          "the same sorted lists")
+    if name.startswith("shuffle"):
+        theirs = bytearray(read(f"{d}/iPod_Control/iTunes/iTunesSD"))
+        if name == "shuffle2":
+            for n in range(len(db.tracks)):
+                theirs[18 + 558 * n + 0x22B] = 1  # iTunes' "play when shuffling", which libgpod leaves 0
+        check(i.shuffle_db(db, old_format=name == "shuffle2") == bytes(theirs), "the same iTunesSD")
+
+print("ours, read by libgpod")
+fresh = pretend("ours", "xB147")
+db = i.new_database("Sam's iPod")
+for n, (title, artist, album) in enumerate([("Zebra", "The Beatles", "Abbey Road"), ("Énigme", "Artist B", "B Side")], 1):
+    db.add_track({"title": title, "artist": artist, "album": album, "path": f"/iPod_Control/Music/F0{n}/T{n}.mp3",
+                  "filetype": "MPEG audio file", "size": 1000, "duration": 61.5, "track": n})
+db.rebuild_master()
+db.add_playlist("Road trip", [db.tracks[1].id, db.tracks[0].id])
+with open(f"{fresh}/iPod_Control/iTunes/iTunesDB", "wb") as f:
+    f.write(db.to_bytes(GUID, i.HASH58))
+out = gpod("dump", fresh).stdout
+check("track|Énigme|Artist B|B Side|:iPod_Control:Music:F02:T2.mp3|61500" in out
+      and "playlist|Road trip|0|2|Énigme|Zebra" in out and "playlist|Sam's iPod|1|2" in out,
+      "a database made from nothing")
+edited = written["classic"]
+db = i.ITunesDB.parse(read(f"{edited}/iPod_Control/iTunes/iTunesDB"))
+db.add_track({"title": "Fourth", "artist": "Artist A", "album": "Album X", "path": "/iPod_Control/Music/F00/D.m4a",
+              "filetype": "AAC audio file", "size": 5, "duration": 3})
+db.remove_tracks({db.tracks[1].id})
+db.rebuild_master()
+with open(f"{edited}/iPod_Control/iTunes/iTunesDB", "wb") as f:
+    f.write(db.to_bytes(GUID, i.HASH58))
+out = gpod("dump", edited).stdout
+check("tracks 3" in out and "track|Fourth|" in out and "|apple|" not in out and "playlist|Test iPod|1|3" in out,
+      "libgpod's database, changed")
+
+if "--fixtures" in sys.argv:
+    dest = os.path.join(REPO, "tests", "fixtures", "ipod")
+    os.makedirs(dest, exist_ok=True)
+    for name in ("classic", "shuffle2", "shuffle4"):
+        d = pretend(name, {"classic": "xB147", "shuffle2": "xA546", "shuffle4": "xC584"}[name])
+        gpod("make", d, *SONGS)
+        shutil.copyfile(f"{d}/iPod_Control/iTunes/iTunesDB", os.path.join(dest, f"{name}-iTunesDB"))
+        if name.startswith("shuffle"):
+            shutil.copyfile(f"{d}/iPod_Control/iTunes/iTunesSD", os.path.join(dest, f"{name}-iTunesSD"))
+    print("fixtures written to", dest)
+
+sys.exit(1 if failed else 0)

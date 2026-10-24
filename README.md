@@ -84,6 +84,10 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   tagged FLAC (with ffmpeg, which Bazzite has). No Local files source yet? Plugging something in adds one on
   ~/Music. Players whose firmware calls them by a code name can be renamed in Decky → MusicDeck, under
   Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only.
+- **iPods:** an iPod with Apple's software shows in Devices by its own name and model, and music copied to
+  it goes into its library as iTunes put it there, so the iPod's menus play it (FLAC converted to Apple
+  Lossless; playlists, and plays made on the iPod, kept). Every iPod with a disk mode syncs but the nano
+  5th-7th generation, which only play; see [docs/IPOD.md](docs/IPOD.md).
 - **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My
   Collection on TIDAL, Add to favourites on Qobuz and your servers. SoundCloud, YouTube Music, Bandcamp and the
   Live Music Archive keep likes on the Deck, listed under Liked songs (Browse, and the panel's Library).
@@ -246,9 +250,9 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 
 Not planned yet:
 
-- **Syncing a stock iPod.** Apple's firmware only plays what its own database (iTunesDB) lists, not files
-  copied to it, and from the iPod Classic and 3rd-generation nano on that database must be signed. An iPod
-  running Rockbox, or used as a plain disk, works like any player today.
+- **Album covers on an iPod's screen** for songs MusicDeck puts there (its separate artwork database).
+- **Syncing the iPod nano 5th-7th generation.** The 5th signs SQLite libraries with a key only an iTunes
+  sync leaves behind; the 6th and 7th with a scheme only a closed library implements. They play.
 - **Burning CDs.** Not investigated.
 
 Not possible:

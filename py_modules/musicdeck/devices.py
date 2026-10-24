@@ -121,9 +121,19 @@ def usb_storage(mounts_text: str, user: str, uuids: dict[str, str]) -> list[dict
         if not (target.startswith(f"/run/media/{user}/") or target.startswith("/media/")):
             continue
         label = os.path.basename(target.rstrip("/")) or source
-        found.append({"id": _device_id("usb:" + uuids.get(source, label)), "name": label, "kind": "usb",
-                      "paths": [target]})
+        found.append({"id": _device_id("usb:" + uuids.get(source, label)), "name": label,
+                      "kind": "ipod" if is_ipod(target) else "usb", "paths": [target], "source": source})
     return found
+
+
+def is_ipod(root: str) -> bool:
+    """An iPod with Apple's software (iPod_Control), read and synced through its database (ipod.py). One
+    running Rockbox plays files as they are: a player like any other."""
+    try:
+        names = {n.lower() for n in os.listdir(root)}
+    except OSError:
+        return False
+    return "ipod_control" in names and ".rockbox" not in names
 
 
 def phone_storage(gvfs_dir: str, usb_names: Optional[dict[str, tuple[str, str]]] = None) -> list[dict[str, Any]]:

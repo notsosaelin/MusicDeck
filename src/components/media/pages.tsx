@@ -57,6 +57,7 @@ import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../g
 import { View, centerTab, playFrom, resultCache, setOpenInCenter } from "../../nav";
 import { notify } from "../../notify";
 import { hasFeature, player } from "../../player";
+import { isMissingArt, useArtLoad } from "../../art";
 import { Store, mediaUrl, pluginState, useStore } from "../../store";
 import {
   KIND_TITLES,
@@ -271,10 +272,29 @@ const ONE_LINE = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "elli
 
 const TILE_BACK = "linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04))";
 
+/** One of a mosaic's pictures, shown once it has loaded (art.ts); one that doesn't load drops out. */
+const MosaicPicture: FC<{ url?: string; onMissing: () => void }> = ({ url, onMissing }) => {
+  const load = useArtLoad(url);
+  return (
+    <img
+      src={url}
+      loading="lazy"
+      decoding="async"
+      onLoad={load.onLoad}
+      onError={() => {
+        load.onError();
+        onMissing();
+      }}
+      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: load.visible ? 1 : 0 }}
+    />
+  );
+};
+
 /** A section's covers as one square picture: four in a 2 by 2, or one filling it when it has fewer. */
 const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) => {
-  const [failed, setFailed] = useState<string[]>([]);
-  const shown = art.filter((a) => !failed.includes(a));
+  const [, setFailed] = useState<string[]>([]);
+  // known missing ones left out from the start, so the square doesn't rearrange (art.ts)
+  const shown = art.filter((a) => !isMissingArt(mediaUrl("art", instanceId, a)));
   const four = shown.length >= 4 ? shown.slice(0, 4) : shown.slice(0, 1);
   if (!four.length) return null;
   return (
@@ -288,14 +308,7 @@ const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) 
       }}
     >
       {four.map((a) => (
-        <img
-          key={a}
-          src={mediaUrl("art", instanceId, a)}
-          loading="lazy"
-          decoding="async"
-          onError={() => setFailed((f) => [...f, a])}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
+        <MosaicPicture key={a} url={mediaUrl("art", instanceId, a)} onMissing={() => setFailed((f) => [...f, a])} />
       ))}
     </div>
   );

@@ -219,7 +219,7 @@ export interface CenterSettings {
 export interface DeviceInfo {
   id: string;
   name: string;
-  kind: "usb" | "mtp" | "cd";
+  kind: "usb" | "mtp" | "cd" | "ipod";
   status: Record<string, any>;
 }
 
@@ -284,6 +284,10 @@ export const renameDevice = callable<[id: string, name: string], void>("rename_d
 /** Copies a track, album, artist or playlist of Local files to a device (its id), or a device's to the Deck ("deck"). */
 export const copyTo = callable<[instanceId: string, kind: string, itemId: string, target: string], Result<string>>(
   "copy_to",
+);
+/** Deletes a track, album, artist or playlist's songs from the device they're on (an iPod's library too). */
+export const removeFromDevice = callable<[instanceId: string, kind: string, itemId: string], Result<string>>(
+  "remove_from_device",
 );
 /** Whether an id (a track's, an album's...) is of something on a plugged-in device (services/shelf.py). */
 export const onDevice = (id: string | null | undefined) => !!id && id.startsWith("dv~");

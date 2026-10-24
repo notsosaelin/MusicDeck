@@ -27,6 +27,7 @@ from musicdeck.services.base import LIKED_LIST, LocalLikes
 from musicdeck.devices import DeviceWatcher
 from musicdeck.services.audiocd import AudioCdService
 from musicdeck.services.device import DeviceService
+from musicdeck.services.ipod import IpodService
 from musicdeck.services.shelf import LocalLibrary
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
@@ -214,6 +215,9 @@ class Plugin:
             if instance:
                 # a CD goes by its album's name once MusicBrainz says it
                 name = instance.name() if isinstance(instance, AudioCdService) else d["name"]
+                if isinstance(instance, IpodService) and d["name"] == d.get("own_name"):
+                    # an iPod goes by the name it was given in iTunes (its drive's label is in capitals)
+                    name = instance.name() or d["name"]
                 shelf.append({"id": i, "name": name, "kind": d["kind"], "instance": instance})
         return shelf
 
@@ -225,7 +229,7 @@ class Plugin:
         old = self.device_instances.pop(device["id"], None)
         if old:
             await old.stop()
-        cls = AudioCdService if device["kind"] == "cd" else DeviceService
+        cls = AudioCdService if device["kind"] == "cd" else IpodService if device["kind"] == "ipod" else DeviceService
         instance = cls(device["id"], device["config"], decky.DECKY_PLUGIN_RUNTIME_DIR)
         # its news (a CD named, a rip done) comes as Local files', with its name
         def announce(text: str, name: str = device["name"]) -> None:
@@ -293,7 +297,7 @@ class Plugin:
             if device["kind"] == "cd":
                 config = {k: device[k] for k in ("drive", "toc", "disc_id")}
             else:
-                config = {"paths": device["paths"], "kind": device["kind"]}
+                config = {"paths": device["paths"], "kind": device["kind"], "source": device.get("source", "")}
             known = self.devices.get(device["id"])
             entry = {"id": device["id"], "name": names.get(device["id"]) or device["name"], "own_name": device["name"],
                      "kind": device["kind"], "config": config}
@@ -505,6 +509,19 @@ class Plugin:
             if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id, target)):
                 raise ServiceError("Only Local files copies to and from devices")
             return await instance.copy_to(kind, item_id, target)
+        return await _result(work())
+
+    @_when_ready
+    async def remove_from_device(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
+        """Deletes a track, album, artist or playlist's songs from the plugged-in device they're on (from
+        an iPod's library too)."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id)):
+                raise ServiceError("Only Local files removes music from devices")
+            result = await instance.remove_from_device(kind, item_id)
+            await _announce_change()
+            return result
         return await _result(work())
 
     @_when_ready
