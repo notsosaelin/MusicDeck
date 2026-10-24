@@ -128,6 +128,21 @@ source (`MusicService.remove`).
 - **Unplugged**: its source goes; if it was live, the source live before it is live again.
 - Polled every 3 s (`DeviceWatcher`). Linux only.
 
+## Audio CDs (`audiocd.py`, `cd.py`)
+
+- **What**: an audio CD in a `/dev/sr*` drive, a source while it's in (`AudioCdService`, found by
+  `devices.audio_cds`). Read with Linux's CD-ROM ioctls (`cd.py`: drive and disc status, the table of
+  contents, `CDROMREADAUDIO` for raw frames), no program needed; the drive is the user's to read (uaccess).
+- **Names**: the MusicBrainz disc ID (`cd.disc_id`, enhanced CDs' data session left out) looks up the
+  release (`MusicBrainz.by_disc`), then its names for this disc and the Cover Art Archive's cover, kept as
+  `cd-<disc id>.json` and `.jpg` in the runtime folder. Unknown discs play as "Track n".
+- **Playing**: each track a WAV made on demand (`cd.TrackWav`), served by the stream server as a
+  `StreamSource(reader=...)` with byte ranges, so seeking works.
+- **Ripping**: the album page's "Rip to Local files" (`collection_action` "rip") writes
+  `<artist>/<album>/<nn> <title>.flac` into the first Local files source's first folder: raw audio piped
+  to ffmpeg's FLAC encoder, then tagged with mutagen (names, numbers, year, genres, MusicBrainz album id,
+  cover). Progress in `status()["rip"]`, a toast when done. Without ffmpeg or a Local files source, it says so.
+
 ## Steam soundtracks (`steam.py`, `src/steam.ts`)
 
 - **What's installed** comes from Steam's own records: `steamapps/libraryfolders.vdf` lists every

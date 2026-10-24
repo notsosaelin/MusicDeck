@@ -11,6 +11,8 @@ then played as a source of its own while it's there (DeviceService), as the Xbox
   each storage's Music folder is what's played (a phone holds much more than music). GVfs runs in game
   mode on Bazzite; where it doesn't (or there's no gio), only USB storage is found. A phone shows up once
   it's set to "File transfer" (on Android, the USB notification).
+* Audio CDs: a disc in a /dev/sr* drive (cd.py reads it), its table of contents read once when it goes
+  in; played by AudioCdService, which can rip it to Local files.
 * Linux only (on Windows, removable drives are drive letters; not yet).
 
 A device's id comes from what identifies it (its file system's UUID, or the phone's MTP name), so it
@@ -23,7 +25,7 @@ import re
 import shutil
 from typing import Any, Awaitable, Callable, Optional
 
-from . import debuglog
+from . import cd, debuglog
 
 POLL_SECONDS = 3
 # MTP needs a moment longer: `gio` is a process each time
@@ -93,6 +95,30 @@ def phone_storage(gvfs_dir: str) -> list[dict[str, Any]]:
     return found
 
 
+def audio_cds(drives: list[str], has_disc: Callable[[str], bool], read_toc: Callable[[str], Any],
+              known: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """The audio CDs in the drives. A disc's table of contents is read once, when it goes in (`known`, by
+    drive, keeps it while it stays)."""
+    found = []
+    for drive in drives:
+        if not has_disc(drive):
+            known.pop(drive, None)
+            continue
+        if drive not in known:
+            try:
+                toc = [list(t) for t in read_toc(drive)]
+            except OSError as e:
+                debuglog.debug("devices", "couldn't read a CD", drive=drive, error=str(e))
+                continue
+            disc = cd.disc_id([tuple(t) for t in toc])
+            if not disc:
+                continue
+            known[drive] = {"id": _device_id("cd:" + disc), "name": "Audio CD", "kind": "cd", "paths": [],
+                            "drive": drive, "toc": toc, "disc_id": disc}
+        found.append(known[drive])
+    return found
+
+
 class DeviceWatcher:
     """Calls on_change(devices) whenever the set of plugged-in devices changes (and once at start)."""
 
@@ -104,6 +130,7 @@ class DeviceWatcher:
         self.uid = os.getuid() if hasattr(os, "getuid") else 0
         self.gio = shutil.which("gio")
         self.known: Optional[list[dict[str, Any]]] = None
+        self.discs: dict[str, dict[str, Any]] = {}
 
     @property
     def available(self) -> bool:
@@ -151,7 +178,8 @@ class DeviceWatcher:
         except OSError:
             mounts = ""
         return (usb_storage(mounts, self.user, _uuids())
-                + phone_storage(f"/run/user/{self.uid}/gvfs"))
+                + phone_storage(f"/run/user/{self.uid}/gvfs")
+                + audio_cds(cd.drives(), cd.has_audio_disc, cd.read_toc, self.discs))
 
     async def _run(self) -> None:
         tick = 0

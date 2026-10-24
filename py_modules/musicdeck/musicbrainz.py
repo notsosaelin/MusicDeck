@@ -105,6 +105,22 @@ class MusicBrainz:
                 "genres": genres, "label": labels[0] if labels else "", "group": group.get("id", ""),
                 "discs": len(r.get("media") or []), "tracks": tracks}
 
+    async def by_disc(self, disc_id: str) -> Optional[tuple[str, int]]:
+        """The release a CD with this disc ID belongs to, and which of its discs it is: (release id,
+        disc number), or None when MusicBrainz doesn't know the disc."""
+        try:
+            data = await self._get(f"discid/{disc_id}", inc="", cdstubs="no")
+        except ServiceError as e:
+            if "Not found" in str(e):
+                return None
+            raise
+        for r in data.get("releases") or []:
+            for medium in r.get("media") or []:
+                if any(d.get("id") == disc_id for d in medium.get("discs") or []):
+                    return r.get("id", ""), int(medium.get("position") or 1)
+        releases = data.get("releases") or []
+        return (releases[0].get("id", ""), 1) if releases else None
+
     async def cover(self, release_id: str, group_id: str = "") -> Optional[tuple[bytes, str]]:
         """The front cover (500 px) of a release, else of its release group: (bytes, extension), or None."""
         paths = [f"release/{release_id}/front-500"] + ([f"release-group/{group_id}/front-500"] if group_id else [])

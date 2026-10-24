@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import struct
 import sys
 import tempfile
@@ -1770,6 +1771,79 @@ async def run():
         check(plugin.settings.get("active_service") == live_before and stick["id"] not in plugin.instances
               and all(s["id"] != stick["id"] for s in state["services"]),
               "unplugged: gone, and the source live before it is live again")
+
+        print("audio CDs")
+        from musicdeck import cd as cdmod
+        # MusicBrainz's own example disc (musicbrainz.org/doc/Disc_ID_Calculation)
+        example = [(n, off - 150, True) for n, off in enumerate([150, 15363, 32314, 46592, 63414, 80489], 1)]
+        example.append((cdmod.CDROM_LEADOUT, 95462 - 150, False))
+        check(cdmod.disc_id(example) == "49HHV7Eb8UKF3aQiNmu1GR8vKTY-", f"the disc ID MusicBrainz knows: {cdmod.disc_id(example)}")
+        enhanced = [(1, 0, True), (2, 1000, True), (3, 13000, False), (cdmod.CDROM_LEADOUT, 20000, False)]
+        check(cdmod.tracks(enhanced) == [{"number": 1, "start": 0, "frames": 1000}, {"number": 2, "start": 1000, "frames": 600}],
+              f"an enhanced CD's data track and the gap before it aren't music: {cdmod.tracks(enhanced)}")
+
+        def frames_of(lba, count):  # a drive whose every byte says where it is on the disc
+            return b"".join(((lba + i) % 251).to_bytes(1, "little") * cdmod.FRAME for i in range(count))
+        disc_audio = frames_of(0, 300)
+        wav = cdmod.TrackWav(100, 200, frames_of)
+        whole = wav.read(0, wav.size)
+        check(len(whole) == wav.size == 44 + 200 * cdmod.FRAME and whole[:4] == b"RIFF"
+              and whole[44:] == disc_audio[100 * cdmod.FRAME:300 * cdmod.FRAME], "a track is a WAV of its frames")
+        check(all(wav.read(o, n) == whole[o:o + n] for o, n in [(0, 10), (40, 10), (44, 1), (5000, 9000), (wav.size - 3, 99)]),
+              "any byte range of it, across the header and frames")
+        found = devmod.audio_cds(["/dev/sr0", "/dev/sr1"], lambda d: d == "/dev/sr0", lambda d: example, cache := {})
+        check(len(found) == 1 and found[0]["kind"] == "cd" and found[0]["drive"] == "/dev/sr0"
+              and found[0]["disc_id"] == "49HHV7Eb8UKF3aQiNmu1GR8vKTY-", f"a drive with an audio disc is found: {found}")
+        check(devmod.audio_cds(["/dev/sr0"], lambda d: True, lambda d: 1 / 0, cache) == found, "its contents are read once")
+        check(devmod.audio_cds(["/dev/sr0"], lambda d: False, lambda d: example, cache) == [] and not cache, "ejected: gone")
+
+        disc = dict(found[0])
+        named = {"release": "rel-1", "title": "Blue: Album?", "artist": "AC/DC", "year": "1990", "genres": ["Rock"],
+                 "disc": 1, "discs": 1, "tracks": [{"title": f"Song {i}", "artist": "AC/DC"} for i in range(1, 7)]}
+        json.dump(named, open(os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, f"cd-{disc['disc_id']}.json"), "w"))
+        await plugin._devices_changed([disc])
+        cd_source = plugin.instances[disc["id"]]
+        cd_source.reader = type("FakeDrive", (), {"read": staticmethod(frames_of)})()
+        state = await plugin.get_state()
+        row = next(s for s in state["services"] if s["id"] == disc["id"])
+        check(row["device"] == "cd" and row["type"] == "cd" and row["name"] == "Blue: Album? · AC/DC",
+              f"a CD is a source while it's in, named by MusicBrainz: {row}")
+        cd_home = (await plugin.home(disc["id"]))["data"]
+        cd_tracks = cd_home[0]["tracks"] if isinstance(cd_home, list) else cd_home["sections"][0]["tracks"]
+        check([t["title"] for t in cd_tracks][:2] == ["Song 1", "Song 2"] and round(cd_tracks[0]["duration"]) == 203,
+              f"its tracks, named and timed: {cd_tracks[:2]}")
+        async with aiohttp.ClientSession() as http:
+            async with http.get(f"{base}/stream/{disc['id']}/t2?k={key}", headers={"Range": "bytes=44-2395"}) as r:
+                body = await r.read()
+                check(r.status == 206 and r.headers["Content-Type"] == "audio/wav"
+                      and r.headers["Content-Range"] == f"bytes 44-2395/{44 + (32314 - 15363) * cdmod.FRAME}"
+                      and body == bytes([(15363 - 150) % 251]) * cdmod.FRAME,
+                      "a track plays from the drive, seeking included")
+        cd_source.rip_to = lambda: ""
+        check((await plugin.open_collection(disc["id"], "album", "disc"))["data"]["action"] is None,
+              "no ripping without a Local files folder to rip into")
+        rips = tempfile.mkdtemp()
+        cd_source.rip_to = lambda: rips
+        cd_source.tracks = cd_source.tracks[:2]
+        for t in cd_source.tracks:
+            t["frames"] = 150  # two seconds each is plenty
+        if shutil.which("ffmpeg"):
+            action = (await plugin.open_collection(disc["id"], "album", "disc"))["data"]["action"]
+            check(action == {"label": "Rip to Local files", "call": "rip"}, f"the album offers ripping: {action}")
+            said = await plugin.collection_action(disc["id"], "album", "disc", "rip")
+            await cd_source.rip_task
+            folder = os.path.join(rips, "AC_DC", "Blue_ Album_")
+            check(sorted(os.listdir(folder)) == ["01 Song 1.flac", "02 Song 2.flac"] and not cd_source.rip_progress["error"],
+                  f"ripped to <artist>/<album>, names fit for any drive: {said} {cd_source.rip_progress}")
+            from mutagen.flac import FLAC
+            ripped = FLAC(os.path.join(folder, "02 Song 2.flac"))
+            check(ripped["title"] == ["Song 2"] and ripped["album"] == ["Blue: Album?"] and ripped["tracknumber"] == ["2/2"]
+                  and ripped["musicbrainz_albumid"] == ["rel-1"] and abs(ripped.info.length - 2) < 0.01,
+                  f"as FLAC, tagged: {dict(ripped)}")
+        else:
+            print("  (no ffmpeg here: ripping not tried)")
+        await plugin._devices_changed([])
+        check(disc["id"] not in plugin.instances, "the disc out: the source goes")
 
         print("songs liked on the Deck")
         from musicdeck import models

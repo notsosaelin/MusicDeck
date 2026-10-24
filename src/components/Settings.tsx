@@ -135,6 +135,14 @@ const describeStatus = (s: ServiceInfo): string => {
             s.status.uploading ? `uploading ${s.status.uploading}` : "",
           )
         : s.status.error || "Connecting…";
+    case "cd": {
+      const n = s.status.tracks ?? 0;
+      const rip = s.status.rip;
+      return parts(
+        `CD · ${n} track${n === 1 ? "" : "s"}`,
+        rip?.running ? `ripping ${rip.done} of ${rip.total}` : rip?.error ? `ripping stopped: ${rip.error}` : "",
+      );
+    }
     case "device": {
       const n = s.status.tracks ?? 0;
       return parts(
@@ -296,7 +304,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
         {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
         {/* a plugged-in device comes and goes by itself: nothing to edit or remove */}
         {!service.device && <MenuItem onSelected={edit}>Edit</MenuItem>}
-        {service.type === "local" || service.type === "steam" || service.device ? (
+        {service.device === "cd" ? null : service.type === "local" || service.type === "steam" || service.device ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
             Rescan library
           </MenuItem>
@@ -331,7 +339,15 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
         highlightOnFocus
         icon={
           <span style={{ color: active ? ACCENT : undefined }}>
-            {service.device === "mtp" ? <FaMobileAlt /> : service.device ? <FaUsb /> : TYPE_ICONS[service.type]}
+            {service.device === "mtp" ? (
+              <FaMobileAlt />
+            ) : service.device === "cd" ? (
+              <FaCompactDisc />
+            ) : service.device ? (
+              <FaUsb />
+            ) : (
+              TYPE_ICONS[service.type]
+            )}
           </span>
         }
         label={
@@ -735,7 +751,8 @@ export const Settings: FC = () => {
 
   if (!state) return null;
   const typeName = (type: string) =>
-    state.service_types.find((t) => t.type === type)?.display_name ?? (type === "device" ? "Plugged in" : type);
+    state.service_types.find((t) => t.type === type)?.display_name ??
+    (type === "device" ? "Plugged in" : type === "cd" ? "Audio CD" : type);
 
   // sources and the kinds of source to add, A to Z
   const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });

@@ -89,9 +89,12 @@ class StreamSource:
     """Where the stream server should get audio or art bytes from.
 
     Exactly one of `path` (a local file, served with Range support), `url` (a remote resource,
-    proxied with Range passthrough) or `playlist` (HLS text, with `hls`) is set.
+    proxied with Range passthrough), `playlist` (HLS text, with `hls`) or `reader` is set.
     """
     path: Optional[str] = None
+    # audio made on demand (an audio CD's track as a WAV): an object with `size`, `content_type` and
+    # `read(offset, length) -> bytes` (blocking; run in a thread), served with Range support like a file
+    reader: Optional[Any] = None
     url: Optional[str] = None
     headers: dict[str, str] = field(default_factory=dict)
     content_type: Optional[str] = None

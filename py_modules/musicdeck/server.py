@@ -17,6 +17,7 @@ While casting, a second site listens on the home network for the one device bein
 open_lan): /c/{link} (the track), /c/{link}/art and /c/{link}/f?u= (HLS pieces). Each track gets
 a fresh random link, only that device's address is answered, and the site closes when casting stops.
 """
+import asyncio
 import base64
 import mimetypes
 import re
@@ -24,7 +25,7 @@ import secrets
 import socket
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 from urllib.parse import quote, urljoin, urlparse
 
 import aiohttp
@@ -40,6 +41,8 @@ from .services import MusicService, ServiceError, StreamSource
 PASSTHROUGH_HEADERS = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Content-Encoding",
                        "Last-Modified", "ETag", "Cache-Control"]
 CORS = {"Access-Control-Allow-Origin": "*"}
+# audio made on demand (a CD track) is read and sent this much at a time
+READ_PIECE = 256 * 1024
 HLS_TYPE = "application/vnd.apple.mpegurl"
 URI_ATTR = re.compile(r'URI="([^"]+)"')
 # Resolved remote URLs (e.g. from yt-dlp) are reused for a while; most expire after ~6 hours
@@ -201,6 +204,8 @@ class StreamServer:
         """What the audio is: devices pick a decoder before they fetch anything."""
         if source.content_type:
             return source.content_type
+        if source.reader is not None:
+            return source.reader.content_type
         if source.path:
             return mimetypes.guess_type(source.path)[0] or "audio/mpeg"
         assert self.session and source.url
@@ -233,6 +238,8 @@ class StreamServer:
             raise web.HTTPNotFound()
         if source.path:
             return self._file(source)
+        if source.reader is not None:
+            return await self._read(request, source.reader)
         piece = self._cast_piece(request.match_info["link"], link)
         if source.playlist is not None:
             return self._rewrite(source.playlist, "", piece)
@@ -302,6 +309,8 @@ class StreamServer:
             raise web.HTTPNotFound(headers=CORS)
         if source.path:
             return self._file(source)
+        if source.reader is not None:
+            return await self._read(request, source.reader)
         if source.playlist is not None:
             return self._rewrite(source.playlist, "")
         assert source.url
@@ -358,6 +367,38 @@ class StreamServer:
         return await self._proxy(request, StreamSource(url=url))
 
     # --- responses ---
+
+    @staticmethod
+    async def _read(request: web.Request, reader: Any) -> web.StreamResponse:
+        """Audio made on demand (StreamSource.reader), a byte range of it as a file would give it."""
+        size = reader.size
+        start, end = 0, size - 1
+        wanted = request.headers.get("Range", "")
+        match = re.match(r"^bytes=(\d*)-(\d*)$", wanted.strip())
+        if match and (match.group(1) or match.group(2)):
+            if match.group(1):
+                start = int(match.group(1))
+                end = min(int(match.group(2)), size - 1) if match.group(2) else size - 1
+            else:  # the last N bytes
+                start = max(0, size - int(match.group(2)))
+            if start >= size or start > end:
+                raise web.HTTPRequestRangeNotSatisfiable(headers={**CORS, "Content-Range": f"bytes */{size}"})
+        partial = bool(match)
+        headers = {**CORS, "Accept-Ranges": "bytes", "Content-Type": reader.content_type,
+                   "Content-Length": str(end - start + 1)}
+        if partial:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        response = web.StreamResponse(status=206 if partial else 200, headers=headers)
+        await response.prepare(request)
+        offset = start
+        while offset <= end:
+            piece = await asyncio.to_thread(reader.read, offset, min(READ_PIECE, end - offset + 1))
+            if not piece:
+                break
+            await response.write(piece)
+            offset += len(piece)
+        await response.write_eof()
+        return response
 
     @staticmethod
     def _file(source: StreamSource) -> web.StreamResponse:

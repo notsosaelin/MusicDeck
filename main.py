@@ -25,6 +25,7 @@ from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError, StreamSource
 from musicdeck.services.base import LIKED_LIST, LocalLikes
 from musicdeck.devices import DeviceWatcher
+from musicdeck.services.audiocd import AudioCdService
 from musicdeck.services.device import DeviceService
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
@@ -180,7 +181,8 @@ class Plugin:
         old = self.instances.pop(service["id"], None)
         if old:
             await old.stop()
-        cls = DeviceService if service.get("device") else SERVICE_TYPES.get(service["type"])
+        device = service.get("device")
+        cls = (AudioCdService if device == "cd" else DeviceService) if device else SERVICE_TYPES.get(service["type"])
         if cls is None:
             decky.logger.warning(f"Skipping service of unknown type {service['type']}")
             return
@@ -189,6 +191,8 @@ class Plugin:
         instance.save_config = lambda config, sid=service["id"]: self._persist_config(sid, config)
         # a short note for the user from the source (what new albums got), shown as a toast
         instance.announce = lambda text, sid=service["id"]: spawn(decky.emit("source_note", sid, text), "source note")
+        if isinstance(instance, AudioCdService):
+            instance.rip_to = self._rip_folder
         try:
             await instance.start()
         except Exception:
@@ -200,6 +204,16 @@ class Plugin:
         if stored:
             stored["config"] = dict(config)
             self.settings.save()
+
+    def _rip_folder(self) -> str:
+        """Where a CD is ripped to: the first Local files source's first folder."""
+        for service in self.settings.services():
+            if service["type"] == "local":
+                instance = self.instances.get(service["id"])
+                folders = getattr(instance, "roots", None) or []
+                if folders:
+                    return folders[0]
+        return ""
 
     def _known(self, instance_id: Any) -> Optional[dict[str, Any]]:
         """A configured source, or a device plugged in now."""
@@ -222,8 +236,12 @@ class Plugin:
                 self.settings.set("active_service", back or next((s["id"] for s in self.settings.services()), None))
             decky.logger.info(f"Unplugged: {gone['name']}")
         for device in found:
-            service = {"id": device["id"], "type": DeviceService.type, "name": device["name"],
-                       "config": {"paths": device["paths"], "kind": device["kind"]}, "device": device["kind"]}
+            if device["kind"] == "cd":
+                service = {"id": device["id"], "type": AudioCdService.type, "name": device["name"],
+                           "config": {k: device[k] for k in ("drive", "toc", "disc_id")}, "device": "cd"}
+            else:
+                service = {"id": device["id"], "type": DeviceService.type, "name": device["name"],
+                           "config": {"paths": device["paths"], "kind": device["kind"]}, "device": device["kind"]}
             if self.devices.get(device["id"]) != service:
                 new = device["id"] not in self.devices
                 self.devices[device["id"]] = service
@@ -247,7 +265,8 @@ class Plugin:
         return {
             "id": service["id"],
             "type": service["type"],
-            "name": service["name"],
+            # a CD goes by its album's name once MusicBrainz says it
+            "name": instance.name() if isinstance(instance, AudioCdService) else service["name"],
             "config": {k: v for k, v in service["config"].items() if k not in SECRET_KEYS},
             "has_credentials": any(k in SECRET_KEYS for k in service["config"]),
             "features": sorted(instance.features) if instance else [],

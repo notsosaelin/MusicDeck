@@ -3,6 +3,16 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.24.0
+
+- **Audio CDs**: put a CD in a drive plugged into the device and it shows up in Decky → MusicDeck as a
+  source: pick it and play it, seeking included. MusicBrainz names the album and its songs and brings the
+  cover (kept on the device, so a CD played before is named straight away, offline too); a CD it doesn't
+  know plays as Track 1, Track 2...
+- **Rip a CD to Local files**: the CD's album page has Rip to Local files, which saves it as FLAC, tagged
+  and with its cover, into your first Local files folder under Artist/Album, where Local files picks it up.
+  Needs ffmpeg (Bazzite has it) and a Local files source.
+
 ## 0.23.0
 
 - **Plug in a music player**: an MP3 player, an iPod in disk mode, a USB stick, or a phone set to File
