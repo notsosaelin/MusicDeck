@@ -3,6 +3,18 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.14.2
+
+- A chosen grid layout stays one block in the middle, spaced the same across as down, rather than spread
+  to the screen's edges.
+
+## 0.14.1
+
+- **Grid layouts show the rows you chose:** with names under every cover, a short screen couldn't fit many
+  rows (5 × 5 showed one row of tiny covers). Layouts too dense for names now show the covers alone,
+  closer together, filling the rows asked for, and the one in focus is named beside the grid's title.
+  Roomier layouts keep the names under the covers.
+
 ## 0.14.0
 
 - **Choose a grid's layout:** columns 1 to 5 and rows 1 to 5 in any combination (1×1, 2×3, 5×5...), or as
