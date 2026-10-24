@@ -334,6 +334,11 @@ class MusicService:
     async def star(self, track_id: str, starred: bool) -> None:
         raise NotImplementedError
 
+    #: The track menu's words for a favourite, in the source's own (Spotify's Liked Songs, SoundCloud's
+    #: likes): the item to add and to take back, and the notes that say it's done
+    LIKE_WORDS = {"add": "Add to favourites", "remove": "Remove from favourites",
+                  "added": "Added to favourites", "removed": "Removed from favourites"}
+
     #: kinds of collection the user can keep in their library on the service ("album", "artist",
     #: "playlist"): save an album, follow an artist. open() then gives those pages a `save` (models.saved).
     SAVES: frozenset[str] = frozenset()
@@ -382,3 +387,62 @@ class MusicService:
     async def resume_position(self, track_id: str) -> float:
         """Where to start a long track: where it was left (a little before), or 0."""
         raise NotImplementedError
+
+
+#: Liked songs kept on the Deck, per source
+MAX_LIKES = 5000
+#: The QAM Library's way into them
+LIKED_LIST = "md-liked"
+
+
+class LocalLikes:
+    """Mixed in before MusicService by sources used signed out (SoundCloud, YouTube, Bandcamp, the Live
+    Music Archive): liking a track keeps it on the Deck, in the source's config as radio keeps its
+    stations, newest first; nothing goes to the service. A "Liked songs" tab lists them, and the plugin
+    marks them liked wherever they show (mark_liked). The source adds "star" to its features."""
+
+    config: dict[str, Any]
+    save_config: Optional[Callable[[dict[str, Any]], None]]
+    LIKE_WORDS = {"add": "Like", "remove": "Unlike", "added": "Liked", "removed": "No longer liked"}
+
+    def likes(self) -> list[dict[str, Any]]:
+        return [models.clean_track(t) for t in self.config.get("likes") or []
+                if isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"]]
+
+    async def like(self, track: dict[str, Any], on: bool) -> None:
+        """Keeps the track (the UI's copy of it, cleaned) or lets it go."""
+        likes = [t for t in self.likes() if t["id"] != track["id"]]
+        if on:
+            likes.insert(0, models.clean_track(track))
+        self.config["likes"] = likes[:MAX_LIKES]
+        if self.save_config:
+            self.save_config(self.config)
+
+    async def star(self, track_id: str, starred: bool) -> None:
+        """Without the track itself only a like can be taken back (the plugin passes it to like())."""
+        if starred:
+            raise ServiceError("Couldn't like that track")
+        await self.like({"id": track_id}, False)
+
+    def mark_liked(self, tracks: list[dict[str, Any]]) -> None:
+        ids = {t["id"] for t in self.likes()}
+        for t in tracks:
+            if isinstance(t, dict):
+                t["starred"] = t.get("id") in ids
+
+    def liked_page(self) -> dict[str, Any]:
+        tracks = self.likes()
+        for t in tracks:
+            t["starred"] = True
+        return models.page("Liked songs", models.count(len(tracks), "song"), tracks=tracks)
+
+    def center_tabs(self) -> list[dict[str, Any]]:
+        return super().center_tabs() + [{"id": "liked", "title": "Liked songs", "group": "yours"}]  # type: ignore[misc]
+
+    async def tab(self, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == "liked":
+            page = self.liked_page()
+            if not page["tracks"]:
+                return [models.notice("Songs you like show here: Y on a song, then Like")]
+            return [models.section("Liked songs", [], page["tracks"], display="grid")]
+        return await super().tab(tab_id)  # type: ignore[misc]

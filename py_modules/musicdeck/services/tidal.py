@@ -104,6 +104,8 @@ class TidalService(MusicService):
     type = "tidal"
     display_name = "TIDAL"
     features = frozenset({"star", "playlists", "radio", "lyrics"})
+    LIKE_WORDS = {"add": "Add to My Collection", "remove": "Remove from My Collection",
+                  "added": "Added to My Collection", "removed": "Removed from My Collection"}
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:

@@ -35,6 +35,21 @@ def track(id: str, title: str, artist: str = "", album: str = "", duration: floa
     return t
 
 
+def clean_track(track: dict[str, Any]) -> dict[str, Any]:
+    """A track that came from the UI or a file (a playlist's, a like's, a backup's) as the model's fields
+    only, each of its own kind; never UI-only state like "starred". Its "id" must already be checked."""
+    def text(key: str, optional: bool = False) -> Optional[str]:
+        value = track.get(key)
+        return value[:500] if isinstance(value, str) else (None if optional else "")
+    duration = track.get("duration")
+    gain = track.get("gain")
+    return {"id": track["id"], "title": text("title"), "artist": text("artist"), "album": text("album"),
+            "duration": duration if isinstance(duration, (int, float)) and not isinstance(duration, bool) else 0,
+            "art": text("art", True), "album_id": text("album_id", True), "artist_id": text("artist_id", True),
+            "gain": {k: v for k, v in gain.items() if isinstance(k, str) and isinstance(v, (int, float))}
+            if isinstance(gain, dict) else None}
+
+
 def gain(track_db: Optional[float] = None, album_db: Optional[float] = None,
          track_peak: Optional[float] = None, album_peak: Optional[float] = None) -> Optional[dict[str, float]]:
     """ReplayGain values, or None when the source has none (so the player leaves volume untouched)."""

@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, urlparse
 from .. import debuglog, models, ytdlp_update
 from ..background import spawn
 from ..cache import Cache
-from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
+from .base import LocalLikes, MusicService, ServiceError, StreamSource, rows_or_tiles
 
 PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 # Shipped in the plugin's bin/; a copy in the data folder also works (e.g. updated or side-loaded)
@@ -217,12 +217,12 @@ def _artists(item: dict[str, Any]) -> tuple[str, Optional[str]]:
     return names or item.get("author") or item.get("channel") or "", first_id
 
 
-class YouTubeService(MusicService):
+class YouTubeService(LocalLikes, MusicService):
     """config: {"include_videos": bool}  (search also lists plain YouTube videos; default on)"""
 
     type = "youtube"
     display_name = "YouTube Music"
-    features = frozenset({"radio", "lyrics", "browse"})
+    features = frozenset({"star", "radio", "lyrics", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):

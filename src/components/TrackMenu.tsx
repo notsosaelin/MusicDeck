@@ -3,6 +3,7 @@ import { ReactNode } from "react";
 import { ConfirmModal, Menu, MenuItem, MenuSeparator, showContextMenu, showModal } from "@decky/ui";
 import {
   Collection,
+  LikeWords,
   Track,
   addToPlaylist,
   createPlaylist,
@@ -32,17 +33,27 @@ import { albumManageItems, artistManageItems, editTags, saveTrackLyrics } from "
 
 type Item = { instanceId: string; track: Track };
 
+/** A source's words for a favourite (Spotify's Liked Songs, SoundCloud's likes). */
+export const likeWords = (instanceId: string): LikeWords =>
+  pluginState.get()?.services.find((s) => s.id === instanceId)?.like_words ?? {
+    add: "Add to favourites",
+    remove: "Remove from favourites",
+    added: "Added to favourites",
+    removed: "Removed from favourites",
+  };
+
 export async function toggleStar(instanceId: string, track: Track) {
   const starred = !track.starred;
-  const r = await star(instanceId, track.id, starred);
+  const words = likeWords(instanceId);
+  const r = await star(instanceId, track.id, starred, track);
   if (!r.ok) {
-    notify("Couldn't update favourites", r.error, { instanceId, track });
+    notify(`Couldn't ${(starred ? words.add : words.remove).toLowerCase()}`, r.error, { instanceId, track });
     return;
   }
   player.updateTrack(instanceId, track.id, { starred });
   // lists showing this track (and the Favourites list) are now stale
   invalidateBrowserCache();
-  notify(starred ? "Added to favourites" : "Removed from favourites", track.title, { instanceId, track });
+  notify(starred ? words.added : words.removed, track.title, { instanceId, track });
 }
 
 /** A new playlist with the track in it: on the source when it keeps playlists, else MusicDeck's own. */
@@ -231,7 +242,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
       )}
       {hasFeature(instanceId, "star") && (
         <MenuItem onSelected={() => toggleStar(instanceId, track)}>
-          {track.starred ? "Remove from favourites" : "Add to favourites"}
+          {track.starred ? likeWords(instanceId).remove : likeWords(instanceId).add}
         </MenuItem>
       )}
       <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist</MenuItem>

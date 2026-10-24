@@ -62,8 +62,10 @@ import {
 /**
  * The height of an element, kept current. The page renders into Steam's main window while this code
  * runs in its shared context, so `window` here isn't the page's window; measure the element instead.
+ * `shown`: whether the element is on the page now; it's measured again when it comes (a page opened
+ * before the player had its queue back, after a reload, shows "Nothing playing" first).
  */
-function useHeight(ref: RefObject<HTMLElement | null>) {
+function useHeight(ref: RefObject<HTMLElement | null>, shown: boolean) {
   const [height, setHeight] = useState(0);
   useEffect(() => {
     const el = ref.current;
@@ -71,7 +73,7 @@ function useHeight(ref: RefObject<HTMLElement | null>) {
     const measure = () => setHeight(el.clientHeight);
     measure();
     return watchSize(el, measure);
-  }, []);
+  }, [shown]);
   return height;
 }
 
@@ -476,7 +478,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   const page = useRef<HTMLDivElement>(null);
   const room = useFitBelow(page);
   const area = useRef<HTMLDivElement>(null);
-  const height = useHeight(area);
+  const height = useHeight(area, !!item);
   // the queue, a station's neighbours: scrolled by whole lines, as the browsing tabs are
   useEffect(() => snapRows(area.current, { under: 0 }), [!!item]);
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
@@ -492,7 +494,8 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
       : lyrics === null
         ? book
           ? "No chapters in this part"
-          : "No lyrics for this track"
+          : // no lyrics: the visualizer alone (or nothing, while casting), without a line about it
+            null
         : "error" in lyrics
           ? `Couldn't load ${book ? "chapters" : "lyrics"}: ${lyrics.error}`
           : null;
@@ -595,7 +598,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   // no lyrics, or the lyrics sites didn't answer (LRCLIB's 503s): the music, drawn
                   <Visualizer
                     height={height}
-                    caption={lyrics === null ? "No lyrics for this track" : "Lyrics aren't available right now"}
+                    caption={lyrics === null ? undefined : "Lyrics aren't available right now"}
                   />
                 ) : message ? (
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>

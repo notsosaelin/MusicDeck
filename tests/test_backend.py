@@ -1633,6 +1633,61 @@ async def run():
         finally:
             main.SERVICE_TYPES.pop("fakestations", None)
 
+        print("songs liked on the Deck")
+        from musicdeck import models
+        from musicdeck.services.base import LIKED_LIST, LocalLikes, MusicService as LikesBase
+        song_a = {"id": "a", "title": "Song A", "artist": "X", "album": "", "duration": 60, "art": None,
+                  "album_id": None, "artist_id": None, "starred": False, "gain": None}
+
+        class Signedout(LocalLikes, LikesBase):
+            type = "fakelikes"
+            features = frozenset({"star"})
+            TABS = (("home", "Home"),)
+
+            async def home(self):
+                return [models.section("Popular", [], [dict(song_a), {**song_a, "id": "b", "title": "Song B"}])]
+
+            async def open(self, kind, id):
+                return models.page("Album", tracks=[dict(song_a)])
+
+            async def search(self, query):
+                return models.page("Results", tracks=[dict(song_a)], extra=[{"title": "Videos", "tracks": [dict(song_a)]}])
+
+        main.SERVICE_TYPES["fakelikes"] = Signedout
+        try:
+            fl = (await plugin.save_service({"type": "fakelikes", "name": "", "config": {}}))["data"]
+            lid = fl["id"]
+            check(fl["like_words"]["add"] == "Like" and "star" in fl["features"], f"a signed-out source likes: {fl['like_words']}")
+            check(not (await plugin.star(lid, "a", True))["ok"], "liking needs the track itself")
+            check(not (await plugin.star(lid, "a", True, {**song_a, "id": "other"}))["ok"], "and the track must be the one named")
+            check((await plugin.star(lid, "a", True, {**song_a, "starred": True, "title": "x" * 900, "duration": "long",
+                                                      "evil": "<script>"}))["ok"], "a song liked")
+            kept = next(s for s in plugin.settings.services() if s["id"] == lid)["config"]["likes"]
+            check(len(kept) == 1 and set(kept[0]) == {"id", "title", "artist", "album", "duration", "art", "album_id",
+                                                      "artist_id", "gain"}
+                  and len(kept[0]["title"]) == 500 and kept[0]["duration"] == 0, f"kept on the Deck, cleaned: {kept}")
+            home = (await plugin.home(lid))["data"]
+            check([t["starred"] for t in home[0]["tracks"]] == [True, False]
+                  and home[-1]["items"][0]["id"] == LIKED_LIST and home[-1]["items"][0]["subtitle"] == "1 song",
+                  f"liked songs marked wherever they show; the panel's Library leads to them: {home}")
+            found = (await plugin.search(lid, "q"))["data"]
+            check(found["tracks"][0]["starred"] and found["extra"][0]["tracks"][0]["starred"]
+                  and (await plugin.open_collection(lid, "album", "x"))["data"]["tracks"][0]["starred"],
+                  "in search results, their extra lists and pages")
+            liked = (await plugin.open_collection(lid, "list", LIKED_LIST))["data"]
+            tab = (await plugin.center_tab(lid, "liked"))["data"]
+            check([t["id"] for t in liked["tracks"]] == ["a"] and liked["tracks"][0]["starred"]
+                  and tab[0]["title"] == "Liked songs" and tab[0]["display"] == "grid"
+                  and any(t["id"] == "liked" for t in fl["tabs"]), "a Liked songs list and tab")
+            check((await plugin.star(lid, "a", False))["ok"]
+                  and not next(s for s in plugin.settings.services() if s["id"] == lid)["config"]["likes"]
+                  and (await plugin.center_tab(lid, "liked"))["data"][0].get("notice"), "unliked: gone, the tab says how")
+            for bad in [(None, True, song_a), ("a", "yes", song_a), (["a"], False, None)]:
+                check(not (await plugin.star(lid, *bad))["ok"], f"refused: {bad}")
+            await plugin.remove_service(lid)
+        finally:
+            main.SERVICE_TYPES.pop("fakelikes", None)
+
         print("soulseek")
         import zlib as slzlib
         from musicdeck import slsk
@@ -2696,7 +2751,7 @@ async def run():
         try:
             lm = (await plugin.save_service({"type": "livemusic", "name": "", "config": {}}))["data"]
             lid = lm["id"]
-            check(lm["name"] == "Live Music Archive" and lm["features"] == ["radio"], "add the Live Music Archive")
+            check(lm["name"] == "Live Music Archive" and lm["features"] == ["radio", "star"], "add the Live Music Archive (likes kept on the Deck)")
             home = (await plugin.home(lid))["data"]
             check([s["title"] for s in home] == ["On this day", "Popular this week", "Bands", "Just added"]
                   and [c["id"] for c in home[0]["items"]] == ["s:today"],

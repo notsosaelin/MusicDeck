@@ -13,18 +13,22 @@ How each source works, what it stores, and where it can break. Each section matc
 | Emby | `emby` | Server | Password → access token | Original, server transcodes the rest | favourites, play reports, radio, playlists |
 | Plex | `plex` | plex.tv (optional) | PIN: plex.tv/link code, or Plex's page | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
 | Audiobookshelf | `audiobookshelf` | Server | Password → access + refresh token, or an API key | Original files | resume (`progress`), chapters (as `lyrics`) |
-| SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | radio |
-| YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | radio, lyrics |
-| Bandcamp | `bandcamp` | — | — | MP3 128 kbps | radio, lyrics |
+| SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | likes (on the Deck), radio |
+| YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | likes (on the Deck), radio, lyrics |
+| Bandcamp | `bandcamp` | — | — | MP3 128 kbps | likes (on the Deck), radio, lyrics |
 | Internet radio | `radio` | — | — | Station streams (MP3/AAC/Ogg/HLS) | favourite stations |
 | Podcasts | `podcasts` | — | — | The episode's own file (usually MP3) | subscriptions, resume (`progress`) |
-| Live Music Archive | `livemusic` | — | — | archive.org's MP3s of each recording | radio |
+| Live Music Archive | `livemusic` | — | — | archive.org's MP3s of each recording | favourites (on the Deck), radio |
 | Qobuz | `qobuz` | Subscription | OAuth on qobuz.com | FLAC up to 24/192, MP3 | favourites, play reports, playlists |
 | TIDAL | `tidal` | Subscription | Device login on link.tidal.com | FLAC 16/44.1, AAC | favourites, radio, lyrics, playlists |
 | Spotify | `spotify` | Premium | Two OAuth consents (PKCE) | Ogg Vorbis via librespot | favourites, radio, lyrics, playlists |
 
 "Favourites" means the heart and a favourites list, kept on the service where it has one and on
-the Deck otherwise. Every source can also use MusicDeck playlists and ListenBrainz.
+the Deck otherwise. The track menu names them in each source's own words (`LIKE_WORDS`): Save to Liked
+Songs (Spotify), Add to My Collection (TIDAL), Add to your stations (radio), Like (SoundCloud, YouTube
+Music, Bandcamp), Add to favourites (the rest). Sources used signed out keep likes on the Deck
+(`LocalLikes` in base.py: the tracks themselves, in the source's config, up to 5,000) and list them under
+Liked songs; nothing goes to the service. Every source can also use MusicDeck playlists and ListenBrainz.
 
 **Several accounts.** Every source type can be added more than once. Sources with accounts say who
 they are signed in as through `account(config)` (Spotify username, Qobuz/TIDAL user id, server +

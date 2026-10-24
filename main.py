@@ -23,6 +23,7 @@ from musicdeck.offline import OfflineStore
 from musicdeck.playlists import PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError, StreamSource
+from musicdeck.services.base import LIKED_LIST, LocalLikes
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
 
@@ -212,6 +213,8 @@ class Plugin:
             "tabs": self._tabs(service["id"], instance) if instance else [{"id": "home", "title": "Home"}],
             # how Now Playing shows its tracks (MusicService.NOW_PLAYING)
             "now_playing": instance.NOW_PLAYING if instance else "music",
+            # the track menu's words for a favourite (MusicService.LIKE_WORDS)
+            "like_words": instance.LIKE_WORDS if instance else MusicService.LIKE_WORDS,
             "status": instance.status() if instance else {},
         }
 
@@ -374,8 +377,25 @@ class Plugin:
     @_when_ready
     async def home(self, instance_id: str) -> dict[str, Any]:
         async def work():
-            return self._with_ours(instance_id, await self._instance(instance_id).home())
+            instance = self._instance(instance_id)
+            sections = self._with_ours(instance_id, await instance.home())
+            if isinstance(instance, LocalLikes) and instance.likes():
+                # the panel's way into the songs liked on the Deck (the media center has a tab for them)
+                count = models.count(len(instance.likes()), "song")
+                sections.append(models.section("Library", [models.collection(LIKED_LIST, "list", "Liked songs", count)]))
+            return self._liked(instance_id, sections)
         return await _result(work())
+
+    def _liked(self, instance_id: str, found: Any) -> Any:
+        """Sections or a page with the songs liked on the Deck marked (LocalLikes), wherever they show."""
+        instance = self.instances.get(instance_id)
+        if isinstance(instance, LocalLikes):
+            for part in found if isinstance(found, list) else [found]:
+                if isinstance(part, dict):
+                    instance.mark_liked(part.get("tracks") or [])
+                    for extra in part.get("extra") or []:
+                        instance.mark_liked(extra.get("tracks") or [])
+        return found
 
     def _with_ours(self, instance_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Home with what was played lately and the playlists made in MusicDeck before what the source
@@ -415,7 +435,7 @@ class Plugin:
         async def work():
             if tab_id == OUR_PLAYLISTS:
                 return [models.section("Your playlists", self.playlists.for_instance(instance_id), display="grid")]
-            sections = await self._instance(instance_id).cached_tab(tab_id)
+            sections = self._liked(instance_id, await self._instance(instance_id).cached_tab(tab_id))
             if tab_id == "home":
                 return self._with_ours(instance_id, sections)
             ours = self.playlists.for_instance(instance_id)
@@ -443,15 +463,23 @@ class Plugin:
                     page = self.playlists.page(collection_id)
                 except KeyError:
                     raise ServiceError("Playlist not found")
-                return {**page, "offline": self._offline_state(instance_id, collection_id, page["tracks"])}
+                return self._liked(instance_id, {**page, "offline": self._offline_state(instance_id, collection_id,
+                                                                                       page["tracks"])})
             return await _result(local())
-        return await _result(self._call(instance_id, lambda s: s.open(kind, collection_id)))
+        async def work():
+            instance = self._instance(instance_id)
+            if isinstance(instance, LocalLikes) and kind == "list" and collection_id == LIKED_LIST:
+                return instance.liked_page()
+            return self._liked(instance_id, await instance.open(kind, collection_id))
+        return await _result(work())
 
     @_when_ready
     async def search(self, instance_id: str, query: str) -> dict[str, Any]:
         if self.settings.find_service(instance_id):
             self.recents.add_search(instance_id, query)
-        return await _result(self._call(instance_id, lambda s: s.search(query)))
+        async def work():
+            return self._liked(instance_id, await self._instance(instance_id).search(query))
+        return await _result(work())
 
     @_when_ready
     async def search_history(self, instance_id: str) -> list[str]:
@@ -601,8 +629,23 @@ class Plugin:
     # --- per-track features ---
 
     @_when_ready
-    async def star(self, instance_id: str, track_id: str, starred: bool) -> dict[str, Any]:
-        return await _result(self._call(instance_id, lambda s: s.star(track_id, starred)))
+    async def star(self, instance_id: str, track_id: str, starred: bool,
+                   track: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """A favourite added or taken back. Sources that keep likes on the Deck (LocalLikes) keep the
+        track itself, so liking there needs it."""
+        async def work():
+            instance = self._instance(instance_id)
+            if isinstance(instance, LocalLikes):
+                if not isinstance(track_id, str) or not track_id or not isinstance(starred, bool):
+                    raise ServiceError("Couldn't like that track")
+                if starred and not (isinstance(track, dict) and track.get("id") == track_id):
+                    raise ServiceError("Couldn't like that track")
+                await instance.like(track if starred else {"id": track_id}, starred)
+                # Browse's Liked songs tile counts them
+                instance.forget_browse_info()
+                return None
+            return await instance.star(track_id, starred)
+        return await _result(work())
 
     @_when_ready
     async def scrobble(self, instance_id: str, track_id: str, submission: bool,

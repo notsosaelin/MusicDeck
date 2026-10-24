@@ -3,6 +3,18 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.18.0
+
+- **Likes in each source's words:** Y on a song says Save to Liked Songs on Spotify, Add to My Collection on
+  TIDAL, Add to your stations on radio, Like on SoundCloud, YouTube Music and Bandcamp, and Add to favourites
+  elsewhere; the note after it says the same.
+- **SoundCloud, YouTube Music, Bandcamp and the Live Music Archive can like songs**, kept on the Deck (they're
+  used signed out): a heart wherever the song shows, and a Liked songs list in Browse and the panel's Library.
+- **The visualizer no longer gets stuck:** when the page changed size while the music was paused, its resting
+  dots were stretched into tall smudges until the music played again. It redraws at the new size.
+- A song without lyrics shows just the visualizer, without "No lyrics for this track". After MusicDeck
+  reloaded with the media center open, that space could stay empty: it's measured again once the song is back.
+
 ## 0.17.0
 
 - **Keep albums, artists and playlists in your library on the service**, from their pages in the Quick

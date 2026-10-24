@@ -173,6 +173,8 @@ class RadioService(MusicService):
     type = "radio"
     display_name = "Internet radio"
     features = frozenset({"star", "browse"})
+    LIKE_WORDS = {"add": "Add to your stations", "remove": "Remove from your stations",
+                  "added": "Added to your stations", "removed": "Removed from your stations"}
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)

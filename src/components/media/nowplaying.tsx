@@ -245,9 +245,11 @@ const FRAME_MS = 1000 / 30;
  * A quiet visualizer where a song's lyrics would be when it has none, from the music as it's heard:
  * "bars" (mirrored about the middle, low notes left, high right) where there's width, as full screen;
  * "wave" (an oscilloscope's line) in a squarer space, as the Quick Access panel's. It settles when
- * paused and then stops drawing until the music plays again, and draws only while it shows.
+ * paused and then stops drawing until the music plays again, or its size changes (a canvas left at its
+ * old size is stretched, its resting dots into tall smears), and draws only while it shows.
+ * `caption`: a line under it, when there's something to say (the lyrics sites didn't answer).
  */
-export const Visualizer: FC<{ height: number; caption: string; look?: "bars" | "wave" }> = ({
+export const Visualizer: FC<{ height: number; caption?: string; look?: "bars" | "wave" }> = ({
   height,
   caption,
   look = "bars",
@@ -321,15 +323,21 @@ export const Visualizer: FC<{ height: number; caption: string; look?: "bars" | "
     };
     frame = win.requestAnimationFrame(draw);
     const unsubscribe = player.state.subscribe(wake);
+    // resized while settled: one frame at the new size (draw() matches the canvas to it)
+    const resized = new win.ResizeObserver(() => {
+      if (!frame) frame = win.requestAnimationFrame(draw);
+    });
+    resized.observe(el);
     return () => {
       unsubscribe();
+      resized.disconnect();
       if (frame) win.cancelAnimationFrame(frame);
     };
   }, [look]);
   return (
     <div style={{ height, display: "flex", flexDirection: "column", justifyContent: "center", gap: 14 }}>
       <canvas ref={canvas} style={{ width: "100%", height: Math.min(look === "wave" ? 90 : 130, height * 0.4) }} />
-      <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>{caption}</div>
+      {caption && <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>{caption}</div>}
     </div>
   );
 };

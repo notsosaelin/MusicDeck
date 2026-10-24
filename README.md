@@ -76,6 +76,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Downloads:** download a MusicDeck playlist and it plays with no connection (and no data used), from
   your own servers, SoundCloud, YouTube, Bandcamp, podcasts and the Live Music Archive. Each song is kept
   once however many playlists hold it, and goes when the last one lets it go.
+- **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My
+  Collection on TIDAL, Add to favourites on Qobuz and your servers. SoundCloud, YouTube Music, Bandcamp and the
+  Live Music Archive keep likes on the Deck, listed under Liked songs (Browse, and the panel's Library).
 - **Synced lyrics:** the source's own lyrics, otherwise [LRCLIB](https://lrclib.net) with NetEase Cloud Music as a
   backup, following the song under Now playing or full screen over the album art.
 - **Sound:** 10-band EQ with presets (one for everything, or one each for the speakers, headphones and

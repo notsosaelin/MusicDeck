@@ -18,7 +18,7 @@ import aiohttp
 from .. import models
 from ..cache import Cache
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource, rows_or_tiles
+from .base import LocalLikes, MusicService, ServiceError, StreamSource, rows_or_tiles
 
 API = "https://api-v2.soundcloud.com"
 # Genres for the Browse tab: (tag its search filters by, name shown). SoundCloud's per-genre charts are
@@ -69,12 +69,12 @@ def _is_chart(section: dict[str, Any]) -> bool:
     return any(word in section["title"].lower() for word in ("trending", "chart"))
 
 
-class SoundCloudService(MusicService):
+class SoundCloudService(LocalLikes, MusicService):
     """config: {} (no account needed)"""
 
     type = "soundcloud"
     display_name = "SoundCloud"
-    features = frozenset({"radio", "browse"})
+    features = frozenset({"star", "radio", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):

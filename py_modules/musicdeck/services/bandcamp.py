@@ -17,7 +17,7 @@ import aiohttp
 from .. import lyrics, models
 from ..cache import Cache
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource
+from .base import LocalLikes, MusicService, ServiceError, StreamSource
 
 SEARCH = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic"
 DISCOVER = "https://bandcamp.com/api/discover/1/discover_web"
@@ -61,10 +61,10 @@ def _clean_url(url: str) -> str:
     return url.split("?")[0]
 
 
-class BandcampService(MusicService):
+class BandcampService(LocalLikes, MusicService):
     type = "bandcamp"
     display_name = "Bandcamp"
-    features = frozenset({"lyrics", "radio", "browse"})
+    features = frozenset({"star", "lyrics", "radio", "browse"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):

@@ -22,7 +22,7 @@ import aiohttp
 from .. import feeds, models
 from ..cache import Cache
 from ..net import tls
-from .base import MusicService, ServiceError, StreamSource
+from .base import LocalLikes, MusicService, ServiceError, StreamSource
 from ..version import USER_AGENT
 
 SEARCH = "https://archive.org/advancedsearch.php"
@@ -69,10 +69,12 @@ def _item_id(value: str) -> str:
     return value
 
 
-class LiveMusicService(MusicService):
+class LiveMusicService(LocalLikes, MusicService):
     type = "livemusic"
     display_name = "Live Music Archive"
-    features = frozenset({"radio"})
+    features = frozenset({"star", "radio"})
+    # archive.org calls them favourites
+    LIKE_WORDS = MusicService.LIKE_WORDS
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):

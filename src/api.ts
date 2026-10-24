@@ -190,6 +190,8 @@ export interface ServiceInfo {
   tabs: CenterTabInfo[];
   /** how the media center's Now Playing shows its tracks */
   now_playing: NowPlayingKind;
+  /** the track menu's words for a favourite, in the source's own ("Save to Liked Songs", "Like") */
+  like_words?: LikeWords;
 }
 
 export interface ServiceType {
@@ -289,7 +291,15 @@ export const openCollection = callable<[id: string, kind: CollectionKind, collec
 );
 export const search = callable<[id: string, query: string], Result<Page>>("search");
 
-export const star = callable<[id: string, trackId: string, starred: boolean], Result<null>>("star");
+export interface LikeWords {
+  add: string;
+  remove: string;
+  added: string;
+  removed: string;
+}
+
+/** A favourite added or taken back; sources that keep likes on the Deck keep the track itself. */
+export const star = callable<[id: string, trackId: string, starred: boolean, track: Track], Result<null>>("star");
 export const scrobble = callable<[id: string, trackId: string, submission: boolean, track: Track], Result<null>>(
   "scrobble",
 );

@@ -91,21 +91,6 @@ class PlaylistStore:
         """The playlist saved from this source's album or playlist, if there is one."""
         return next((p for p in self.playlists if p["instance_id"] == instance_id and p.get("source") == source), None)
 
-    @staticmethod
-    def _clean(track: dict[str, Any]) -> dict[str, Any]:
-        """The model fields only, each of its own kind (tracks arrive from the UI and from backup
-        files); never UI-only state like "starred"."""
-        def text(key: str, optional: bool = False) -> Optional[str]:
-            value = track.get(key)
-            return value[:500] if isinstance(value, str) else (None if optional else "")
-        duration = track.get("duration")
-        gain = track.get("gain")
-        return {"id": track["id"], "title": text("title"), "artist": text("artist"), "album": text("album"),
-                "duration": duration if isinstance(duration, (int, float)) and not isinstance(duration, bool) else 0,
-                "art": text("art", True), "album_id": text("album_id", True), "artist_id": text("artist_id", True),
-                "gain": {k: v for k, v in gain.items() if isinstance(k, str) and isinstance(v, (int, float))}
-                if isinstance(gain, dict) else None}
-
     @classmethod
     def _fresh(cls, have: list[dict[str, Any]], tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The tracks not in `have` yet, once each (anything without an id isn't a track)."""
@@ -114,7 +99,7 @@ class PlaylistStore:
         for t in tracks:
             if isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"] and t["id"] not in seen:
                 seen.add(t["id"])
-                fresh.append(cls._clean(t))
+                fresh.append(models.clean_track(t))
         return fresh
 
     def add(self, collection_id: str, tracks: list[dict[str, Any]]) -> int:

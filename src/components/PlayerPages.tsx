@@ -279,7 +279,7 @@ const PanelLyrics: FC<{ height: number }> = ({ height }) => {
       <Visualizer
         look="wave"
         height={height}
-        caption={lyrics === null ? "No lyrics for this track" : "Lyrics aren't available right now"}
+        caption={lyrics === null ? undefined : "Lyrics aren't available right now"}
       />,
     );
   return focusable(

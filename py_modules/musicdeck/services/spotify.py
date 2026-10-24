@@ -242,6 +242,8 @@ class SpotifyService(MusicService):
     # librespot decrypts the audio for this player only; Spotify Connect is how it plays on speakers
     castable = False
     features = frozenset({"star", "playlists", "radio", "lyrics"})
+    LIKE_WORDS = {"add": "Save to Liked Songs", "remove": "Remove from Liked Songs",
+                  "added": "Saved to Liked Songs", "removed": "Removed from Liked Songs"}
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:
