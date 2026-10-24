@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.30.1
+
+- **Burn to CD works out of the box on Linux**: cdrskin now comes with MusicDeck as a static executable for
+  x86_64 and ARM64 (with its licence, GPL-2.0-or-later, and where its source is), so no burner needs
+  installing. Still not tried with a real burner.
+
 ## 0.30.0
 
 - **Burn to CD**: an album, artist or playlist in Local files (Y → Burn to CD) written to a blank CD-R or

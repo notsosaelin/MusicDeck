@@ -87,7 +87,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Burn a CD:** with a CD drive plugged in and a blank CD-R or CD-RW in it, Y on an album, artist or
   playlist in Local files → Burn to CD writes it as an audio CD any CD player plays, gapless, with its titles
   (CD-Text) for car stereos and players that show them. It says first how long it is and whether a CD-RW is
-  erased. Linux only; uses cdrskin (bundled when built, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
+  erased. Linux only; cdrskin is bundled for x86_64 and ARM64 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
 - **In your Library:** Decky → MusicDeck → More → Show in your Library puts MusicDeck in the Steam library;
   Play there opens the media center.
 - **Delete, safely:** Y on a song, album, folder or playlist file in Local files deletes it to the trash;

@@ -47,6 +47,8 @@ python scripts/package.py               # out/MusicDeck-<version>-<platform>.zip
   pinned SHA-256. aiohttp and certifi come with Decky and are not vendored.
 - `build_spotify_helper.sh` builds with `--locked`; `Cargo.lock` pins `vergen` to 9.0.6 because
   later versions break librespot's build script.
+- `build_cdrskin.sh` accepts `LIBBURN_TARBALL=/path/to/libburn-1.5.8.tar.gz` to reuse a downloaded
+  archive; it checks the same pinned SHA-256 before building either Linux platform.
 
 ## Install on a device
 
@@ -253,6 +255,6 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
 3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py`.
-4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && python scripts/package.py`
+4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
 6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.
