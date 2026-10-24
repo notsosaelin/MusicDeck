@@ -251,7 +251,8 @@ class QobuzService(MusicService):
         return [t for t in (self._track(i, album) for i in items or []) if t]
 
     def _album(self, a: dict[str, Any]) -> dict[str, Any]:
-        year = str(a.get("released_at") and time.gmtime(a["released_at"]).tm_year or "")
+        released = models.utc_date(a.get("released_at")) if a.get("released_at") else None
+        year = str(released.year) if released else ""
         hires = " · Hi-Res" if a.get("hires_streamable") else ""
         sub = " · ".join(x for x in [(a.get("artist") or {}).get("name", ""), year] if x) + hires
         return models.collection(str(a["id"]), "album", a.get("title", ""), sub, self._image(a))

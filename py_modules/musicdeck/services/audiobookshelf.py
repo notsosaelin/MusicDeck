@@ -26,7 +26,6 @@ import json
 import re
 import time
 from collections import OrderedDict
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import aiohttp
@@ -84,10 +83,8 @@ def _id(value: str) -> str:
 
 
 def _date(ms: Optional[float]) -> str:
-    if not ms:
-        return ""
-    when = datetime.fromtimestamp(ms / 1000, timezone.utc)
-    return f"{when.day} {when:%b %Y}"
+    when = models.utc_date(ms / 1000) if isinstance(ms, (int, float)) and ms else None
+    return f"{when.day} {when:%b %Y}" if when else ""
 
 
 def _minutes(seconds: float) -> str:

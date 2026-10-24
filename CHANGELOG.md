@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.20.1
+
+- **Windows: Qobuz's library loads.** An album released before 1970 stopped it with "[Errno 22] Invalid
+  argument", as Windows can't read dates before 1970 the way Linux can; podcast and audiobook dates had the
+  same weakness. Dates are now worked out in a way that holds on every system.
+- One zip per system: `-linux-x86_64`, `-linux-arm64` and `-windows-x86_64`.
+
 ## 0.20.0
 
 **ARM and Windows, experimental.** Decky Loader 3.3 runs on ARM64 Linux and Windows, and so does MusicDeck now:

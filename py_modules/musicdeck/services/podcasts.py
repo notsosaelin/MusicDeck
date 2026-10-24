@@ -17,7 +17,7 @@ import binascii
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 import aiohttp
@@ -80,10 +80,8 @@ def _big_art(url: str) -> str:
 
 
 def _date(epoch: float) -> str:
-    if not epoch:
-        return ""
-    when = datetime.fromtimestamp(epoch, timezone.utc)
-    return f"{when.day} {when:%b %Y}"
+    when = models.utc_date(epoch) if epoch else None
+    return f"{when.day} {when:%b %Y}" if when else ""
 
 
 def _minutes(seconds: float) -> str:

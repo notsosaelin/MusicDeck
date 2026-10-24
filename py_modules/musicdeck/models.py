@@ -22,7 +22,10 @@ Section:    {"title", "items": [Collection], "tracks": [Track]}   a home row of 
 "art" is an opaque art id resolved by the service through the stream server (/art/...), or None.
 Ids are opaque strings owned by the service that produced them.
 """
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def track(id: str, title: str, artist: str = "", album: str = "", duration: float = 0,
@@ -113,6 +116,18 @@ def notice(text: str) -> dict[str, Any]:
 def is_categories(s: dict[str, Any]) -> bool:
     """A section of ways in ("All albums", genres), not music to pick from."""
     return bool(s["items"]) and not s.get("tracks") and all(c["kind"] in ("list", "folder") for c in s["items"])
+
+
+def utc_date(seconds: Any) -> Optional[datetime]:
+    """A Unix time as a date (UTC), before 1970 too: a 1959 album's release. Windows' gmtime and
+    fromtimestamp refuse those ("[Errno 22] Invalid argument"), so this counts from 1970 instead. None
+    for what isn't a time."""
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        return None
+    try:
+        return EPOCH + timedelta(seconds=seconds)
+    except (OverflowError, ValueError):
+        return None
 
 
 def count(n: int, noun: str) -> str:

@@ -3133,6 +3133,10 @@ async def run():
               and (await qb.open("album", "x2"))["save"]["on"] is False
               and (await qb.open("playlist", "11"))["save"]["on"] and (await qb.open("playlist", "12"))["save"] is None,
               "Qobuz: favourite albums and subscribed playlists; the user's own playlists get no button")
+        old = qb._album({"id": "k1", "title": "Kind of Blue", "artist": {"name": "Miles Davis"}, "released_at": -315619200})
+        from musicdeck import models as datemodels
+        check(old["subtitle"] == "Miles Davis · 1960" and datemodels.utc_date("x") is None and datemodels.utc_date(1e300) is None,
+              f"an album from before 1970 (Windows' gmtime refused it: Errno 22): {old['subtitle']}")
         await qb.save("album", "x2", True)
         await qb.save("playlist", "11", False)
         check(qb_asked[-2:] == [("favorite/create", {"album_ids": "x2"}), ("playlist/unsubscribe", {"playlist_id": "11"})]
