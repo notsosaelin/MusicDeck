@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import random
+import struct
 import re
 import time
 from typing import Any, Optional
@@ -48,6 +49,92 @@ except ImportError:  # vendored into py_modules by scripts/vendor.py; degrade to
     mutagen = None
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".mp4", ".aac", ".wav", ".webm"}
+#: containers that hold music as often as video (a phone's camera clips are .mp4): only audio-only ones count
+MAYBE_VIDEO = {".mp4", ".webm"}
+
+
+def has_video(path: str) -> bool:
+    """Whether an .mp4 or .webm holds a video track, from its headers alone (a phone's are read over USB):
+    MP4's moov/trak/mdia/hdlr handler "vide", Matroska's Tracks/TrackEntry/TrackType 1."""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        with open(path, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            return _mp4_video(f, 0, size, 0) if ext == ".mp4" else _ebml_video(f, 0, size, 0)
+    except (OSError, ValueError, struct.error):
+        return False
+
+
+def _mp4_video(f: Any, start: int, end: int, depth: int) -> bool:
+    at = start
+    for _ in range(4096):
+        if at + 8 > end or depth > 4:
+            return False
+        f.seek(at)
+        head = f.read(8)
+        if len(head) < 8:
+            return False
+        size, kind = struct.unpack(">I4s", head)
+        header = 8
+        if size == 1:
+            size = struct.unpack(">Q", f.read(8))[0]
+            header = 16
+        elif size == 0:
+            size = end - at
+        if size < header:
+            return False
+        if kind in (b"moov", b"trak", b"mdia"):
+            if _mp4_video(f, at + header, min(at + size, end), depth + 1):
+                return True
+        elif kind == b"hdlr":
+            body = f.read(12)
+            if len(body) == 12 and body[8:12] == b"vide":
+                return True
+        at += size
+    return False
+
+
+def _ebml_number(f: Any, keep_marker: bool) -> tuple[int, int]:
+    """An EBML variable-length number: (value, its length). IDs keep their length marker, sizes don't."""
+    first = f.read(1)
+    if not first:
+        raise ValueError("end of file")
+    b = first[0]
+    length = 1
+    while length <= 8 and not b & (0x80 >> (length - 1)):
+        length += 1
+    if length > 8:
+        raise ValueError("not EBML")
+    value = b if keep_marker else b & ((0x80 >> (length - 1)) - 1)
+    for byte in f.read(length - 1):
+        value = (value << 8) | byte
+    return value, length
+
+
+SEGMENT, TRACKS, TRACK_ENTRY, TRACK_TYPE, CLUSTER = 0x18538067, 0x1654AE6B, 0xAE, 0x83, 0x1F43B675
+
+
+def _ebml_video(f: Any, start: int, end: int, depth: int) -> bool:
+    at = start
+    for _ in range(4096):
+        if at >= end or depth > 4:
+            return False
+        f.seek(at)
+        element, id_len = _ebml_number(f, keep_marker=True)
+        size, size_len = _ebml_number(f, keep_marker=False)
+        body = at + id_len + size_len
+        unknown = size == (1 << (7 * size_len)) - 1  # "size unknown": runs to its parent's end
+        stop = end if unknown else min(body + size, end)
+        if element == CLUSTER:
+            return False  # the frames start: the tracks were all listed before them
+        if element in (SEGMENT, TRACKS, TRACK_ENTRY):
+            if _ebml_video(f, body, stop, depth + 1):
+                return True
+        elif element == TRACK_TYPE:
+            if int.from_bytes(f.read(size), "big") == 1:
+                return True
+        at = stop
+    return False
 PLAYLIST_EXTENSIONS = {".m3u", ".m3u8"}
 COVER_NAMES = ["cover", "folder", "front", "album", "albumart"]
 COVER_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"]
@@ -588,13 +675,20 @@ class LocalService(MusicService):
                     except OSError:
                         continue
                     old = previous.get(path)
-                    if old and old["mtime"] == st.st_mtime and old["size"] == st.st_size:
+                    unchanged = old and old["mtime"] == st.st_mtime and old["size"] == st.st_size
+                    # a video (a phone's camera clips): not music. Checked once per file (indexes from
+                    # before this check have them: "audio_only" marks the ones looked at)
+                    if ext in MAYBE_VIDEO and not (unchanged and old.get("audio_only")) and has_video(path):
+                        continue
+                    if unchanged:
                         record = old
                     else:
                         # "added": when it came into the library; its tags edited since don't make it new
                         added = old.get("added", old["mtime"]) if old else st.st_mtime
                         record = {"path": path, "mtime": st.st_mtime, "size": st.st_size, "added": added,
                                   **read_tags(path)}
+                    if ext in MAYBE_VIDEO:
+                        record["audio_only"] = True
                     tracks[_hash(path)] = record
                     self.scan_progress["found"] = len(tracks)
         by_path = {t["path"]: tid for tid, t in tracks.items()}

@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -1897,6 +1898,51 @@ async def run():
         check(removed["ok"] and len(pod_db.tracks) == 3, f"and taken off again: {removed}")
         check(not (await plugin.remove_from_device(sid, "album", deck_album))["ok"], "the Deck's own music isn't removed that way")
         await plugin._devices_changed([])
+
+        print("videos aren't music")
+        from musicdeck.services import local as localmod
+        from musicdeck.services.device import DeviceService as DevService
+
+        def box(kind, body):
+            return struct.pack(">I4s", 8 + len(body), kind) + body
+
+        def mp4_with(handler):
+            hdlr = box(b"hdlr", bytes(8) + handler + bytes(12))
+            return box(b"ftyp", b"isom" + bytes(4)) + box(b"mdat", bytes(64)) + box(b"moov", box(b"trak", box(b"mdia", hdlr)))
+
+        def ebml(element_id, body):
+            return element_id + bytes([0x80 | len(body)]) + body if len(body) < 127 else \
+                element_id + b"\x40" + bytes([len(body)]) + body
+
+        def webm_with(track_type):
+            entry = ebml(b"\xae", ebml(b"\x83", bytes([track_type])))
+            tracks = ebml(b"\x16\x54\xae\x6b", entry)
+            return ebml(b"\x1a\x45\xdf\xa3", b"\x42\x82\x84webm") + b"\x18\x53\x80\x67\x01\xff\xff\xff\xff\xff\xff\xff" + tracks
+        clips = tempfile.mkdtemp()
+        samples = {"clip.mp4": mp4_with(b"vide"), "song.mp4": mp4_with(b"soun"),
+                   "clip.webm": webm_with(1), "song.webm": webm_with(2)}
+        for name, data in samples.items():
+            with open(os.path.join(clips, name), "wb") as f:
+                f.write(data)
+        check([localmod.has_video(os.path.join(clips, n)) for n in samples] == [True, False, True, False],
+              "an .mp4 or .webm with a video track is told from an audio-only one by its headers")
+        if shutil.which("ffmpeg"):
+            for name, args in (("real-clip.mp4", ["-f", "lavfi", "-i", "testsrc=duration=1:size=64x64", "-f", "lavfi",
+                                                  "-i", "anullsrc", "-t", "1", "-shortest"]),
+                               ("real-song.mp4", ["-f", "lavfi", "-i", "anullsrc", "-t", "1", "-c:a", "aac"]),
+                               ("real-song.webm", ["-f", "lavfi", "-i", "anullsrc", "-t", "1", "-c:a", "libopus"])):
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *args, os.path.join(clips, name)], check=True)
+            check([localmod.has_video(os.path.join(clips, n)) for n in ("real-clip.mp4", "real-song.mp4", "real-song.webm")]
+                  == [True, False, False], "and in files ffmpeg made")
+        on_phone = DevService("videotest", {"paths": [clips], "kind": "mtp"}, decky.DECKY_PLUGIN_RUNTIME_DIR)
+        # an index from before the check, which had a clip in it
+        on_phone.tracks = {"old": {"path": os.path.join(clips, "clip.mp4"), "mtime": os.stat(os.path.join(clips, "clip.mp4")).st_mtime,
+                                   "size": os.path.getsize(os.path.join(clips, "clip.mp4")), "title": "clip"}}
+        await asyncio.to_thread(on_phone._scan_blocking)
+        found = sorted(os.path.basename(t["path"]) for t in on_phone.tracks.values())
+        check(all("clip" not in n for n in found) and "song.mp4" in found and "song.webm" in found,
+              f"a phone's videos aren't songs, ones indexed before included: {found}")
+        on_phone.remove()
 
         print("deleting from the library, and Recently deleted")
         from musicdeck import trash as trashmod

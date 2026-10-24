@@ -32,8 +32,8 @@ from typing import Any, Optional
 
 from .. import models, native
 from .base import MusicService, ServiceError, StreamSource
-from .local import (AUDIO_EXTENSIONS, COVER_EXTENSIONS, COVER_NAMES, _hash, extract_embedded_art, read_lyrics,
-                    read_tags)
+from .local import (AUDIO_EXTENSIONS, COVER_EXTENSIONS, COVER_NAMES, MAYBE_VIDEO, _hash, extract_embedded_art,
+                    has_video, read_lyrics, read_tags)
 
 INDEX_VERSION = 1
 # Steam installs (and removes) apps under these, so their modification times tell when to rescan
@@ -368,7 +368,9 @@ class SteamService(MusicService):
                 for directory, dirnames, filenames in os.walk(top):
                     dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
                     paths += [os.path.join(directory, n) for n in sorted(filenames)
-                              if os.path.splitext(n)[1].lower() in AUDIO_EXTENSIONS]
+                              if os.path.splitext(n)[1].lower() in AUDIO_EXTENSIONS
+                              and not (os.path.splitext(n)[1].lower() in MAYBE_VIDEO
+                                       and has_video(os.path.join(directory, n)))]
             tracks = {}
             for path in _pick_formats(paths):
                 try:

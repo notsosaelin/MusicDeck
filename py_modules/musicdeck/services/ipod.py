@@ -18,6 +18,8 @@ from .base import ServiceError
 from .device import DeviceService
 from .local import FORMATS, _hash
 
+VIDEO_KINDS = 0x02 | 0x20 | 0x40
+
 
 class IpodService(DeviceService):
     """config: {"paths": [its mount], "kind": "ipod", "source": "/dev/sdb1"}"""
@@ -62,7 +64,8 @@ class IpodService(DeviceService):
         by_id: dict[int, str] = {}
         for t in db.tracks:
             f = t.fields()
-            if not f["path"]:
+            # its videos (movies, TV shows, music videos: media types 0x02, 0x40, 0x20) aren't music
+            if not f["path"] or int.from_bytes(t.header[0xD0:0xD4], "little") & VIDEO_KINDS:
                 continue
             path = ipod.on_disk(root, f["path"])
             ext = os.path.splitext(path)[1].lower()

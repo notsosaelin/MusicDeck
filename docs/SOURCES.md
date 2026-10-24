@@ -112,6 +112,8 @@ source (`MusicService.remove`).
 - **Favourites**: `local-<id>-favourites.json` on the Deck. **Radio**: same artist and same genre
   first, then the rest of the library, shuffled.
 - **Security**: `open("folder", path)` refuses paths outside the configured folders.
+- **Videos**: .mp4 and .webm count only without a video track (`has_video`: MP4's handler types, Matroska's
+  track types, from the headers), as phones keep camera clips as .mp4.
 
 ## Plugged-in devices and CDs, in Local files (`shelf.py`, `device.py`, `audiocd.py`, `devices.py`, `cd.py`)
 

@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.28.3
+
+- **Videos aren't songs**: a phone's camera clips (and other .mp4 or .webm files with a picture in them)
+  showed up as songs in Devices and Local files. MusicDeck now looks inside .mp4 and .webm files and keeps
+  only audio-only ones (a song downloaded as .mp4 or .webm still plays); videos already in a library leave
+  it on its next scan. An iPod's movies, TV shows and music videos are left out too.
+
 ## 0.28.2
 
 - The Library entry's Play opens the media center: Steam names a shortcut's launch by its 64-bit game id,
