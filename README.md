@@ -84,13 +84,15 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   tagged FLAC (with ffmpeg, which Bazzite has). No Local files source yet? Plugging something in adds one on
   ~/Music. Players whose firmware calls them by a code name can be renamed in Decky → MusicDeck, under
   Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only.
+- **In your Library:** Decky → MusicDeck → More → Show in your Library puts MusicDeck in the Steam library;
+  Play there opens the media center.
 - **Delete, safely:** Y on a song, album, folder or playlist file in Local files deletes it to the trash;
   Local files' Recently deleted puts it back. Devices can be ejected from their card or from Decky → MusicDeck,
   and say how much room they have left. A data CD of MP3s plays too, and an iPhone's synced music (read only).
 - **iPods:** an iPod with Apple's software shows in Devices by its own name and model, and music copied to
   it goes into its library as iTunes put it there, so the iPod's menus play it (FLAC converted to Apple
-  Lossless; playlists, and plays made on the iPod, kept). Every iPod with a disk mode syncs but the nano
-  5th-7th generation, which only play; see [docs/IPOD.md](docs/IPOD.md).
+  Lossless; playlists, and plays made on the iPod, kept). Every iPod with a disk mode syncs, the nano 5th-7th
+  generation included (a nano 5G once it's been synced with iTunes); see [docs/IPOD.md](docs/IPOD.md).
 - **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My
   Collection on TIDAL, Add to favourites on Qobuz and your servers. SoundCloud, YouTube Music, Bandcamp and the
   Live Music Archive keep likes on the Deck, listed under Liked songs (Browse, and the panel's Library).
@@ -254,8 +256,6 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 Not planned yet:
 
 - **Album covers on an iPod's screen** for songs MusicDeck puts there (its separate artwork database).
-- **Syncing the iPod nano 5th-7th generation.** The 5th signs SQLite libraries with a key only an iTunes
-  sync leaves behind; the 6th and 7th with a scheme only a closed library implements. They play.
 - **Burning CDs.** Not investigated.
 
 Not possible:
@@ -287,4 +287,7 @@ Built on the work of [librespot](https://github.com/librespot-org/librespot) and
 ## License
 
 GPL-3.0-or-later. Bundled: mutagen (GPL-2.0+), yt-dlp and yt-dlp-ejs (Unlicense), ytmusicapi (MIT),
-requests (Apache-2.0), QuickJS-NG (MIT), hls.js (Apache-2.0), librespot (MIT, in spotify-helper).
+requests (Apache-2.0), QuickJS-NG (MIT), hls.js (Apache-2.0), librespot (MIT, in spotify-helper), hashab
+(dstaley/hashab, public domain: The Unlicense, in backend/hashab). The iPod code follows libgpod
+(LGPL-2.1-or-later): ipod_schema.py is generated from its itdb_sqlite_queries.h, and ipod_sqlite.py is ported
+from its itdb_sqlite.c.

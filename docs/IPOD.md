@@ -28,8 +28,8 @@ with the real libgpod, and the databases it wrote are in `tests/fixtures/ipod` f
 | iPod classic (all three) | yes | yes | hash58, from the FireWire ID |
 | iPod nano 3rd and 4th generation | yes | yes | hash58 |
 | iPod shuffle 1st-4th generation | yes | yes | not signed; reads iTunesSD (written too) |
-| iPod nano 5th generation | yes | not yet | hash72 + SQLite databases (see below) |
-| iPod nano 6th and 7th generation | yes | not yet | hashAB + SQLite databases (see below) |
+| iPod nano 5th generation | yes | yes, once synced with iTunes | hash72 (its key from iTunes' signature) + SQLite libraries |
+| iPod nano 6th and 7th generation | yes | yes | hashAB (the hashab helper) + SQLite libraries |
 | iPod touch, iPhone | yes, its synced music | no | AFC (GVfs), read only; no disk mode |
 | Any iPod running Rockbox | yes | yes | none: Rockbox plays files, so it's a player like any other |
 
@@ -70,19 +70,26 @@ Decky plugin doesn't have and shouldn't take. So MusicDeck plays them and says w
 Utility → the iPod → File → Disable Journaling (`diskutil disableJournal /Volumes/<iPod>`), after which Linux
 writes it; or restore the iPod with iTunes for Windows, which formats it FAT32.
 
-**The nano 5th-7th generation: possible, next.** They read SQLite libraries (`iTunes Library.itlp`: Library,
-Locations, Dynamic, Extras, Genius) beside a compressed iTunesCDB, and both are signed:
-- nano 5G: hash72, an AES signature whose key can be recovered from any database iTunes signed for that
-  iPod (libgpod's HashInfo): every nano 5G that was ever synced with iTunes has one.
-- nano 6G/7G: hashAB. [dstaley/hashab](https://github.com/dstaley/hashab) is a public-domain C
-  implementation (reverse engineered from the nano 6G's firmware, checked against the 2010 library on 10,000
-  inputs, with 100 test vectors). It would build into MusicDeck's per-platform helpers (`bin/<platform>/`) as
-  the Spotify helper does.
-- The SQLite libraries: libgpod's itdb_sqlite.c, and iOpenPodv2's MIT-licensed writer
-  ([chrismheiser/iOpenPodv2](https://github.com/chrismheiser/iOpenPodv2)), are the references; Decky's Python
-  has sqlite3.
-This is a large piece on its own and unforgiving without a nano to try it on (a wrong signature and the nano
-asks to be restored), so it's the next step rather than part of this one.
+**The nano 5th-7th generation: done (0.28.0), untested on a real nano.** They play from SQLite libraries in
+`iPod_Control/iTunes/iTunes Library.itlp` (Library, Locations, Dynamic, Extras, Genius) beside a compressed
+iTunesCDB, and both are signed. MusicDeck writes them as libgpod does:
+- `itunesdb.py`: the iTunesCDB (its body zlib-compressed after the header, flagged at 0xA8), signed with
+  hash72 (nano 5G: AES-CBC, `aes.py`, with a key recovered from any database or checksum file iTunes signed
+  for that iPod, kept as libgpod's `iPod_Control/Device/HashInfo`) or hashAB (nano 6G/7G); an empty iTunesDB
+  beside it.
+- `ipod_sqlite.py`: the five libraries (tables from `ipod_schema.py`), ported from libgpod's itdb_sqlite.c,
+  and `Locations.itdb.cbk` (the SHA-1 of every 1 KiB block of Locations.itdb, the SHA-1 of those, signed).
+  The iPod's own SQL for them (SysInfoExtended's SQLMusicLibraryPostProcessCommands, with its sort-key
+  functions) runs when the iPod gives it.
+- hashAB: [dstaley/hashab](https://github.com/dstaley/hashab) (public domain, reverse engineered from the
+  nano 6G's firmware, checked against the 2010 library on 10,000 inputs), vendored in `backend/hashab` and
+  built into `bin/<platform>/hashab` (`scripts/build_hashab.sh`, which checks its 100 test vectors).
+- SysInfoExtended is asked of the iPod over USB (a vendor control request, libgpod's ipod-usb.c) and kept on
+  it, which needs the iPod's USB device to be the user's (it is for media players under systemd's uaccess).
+Checked: `scripts/libgpod_check` has libgpod write for a nano 5G and compares every table, the hash72 and
+the checksum file; `tests/test_ipod.py` does the same against libgpod's output saved in `tests/fixtures/ipod`.
+Not checked: a real nano, the hashAB value at 0x30 (libgpod writes 3, iOpenPod 4; MusicDeck keeps what
+iTunes wrote, 4 for a new library), and whether the nanos need the post-process SQL (iOpenPod doesn't run it).
 
 **iPhone and iPod touch.** No disk mode, but Apple's AFC service (what photo import uses) shows the music
 an iTunes/Finder sync put on them; GVfs on Bazzite mounts it once the phone trusts the computer. MusicDeck
@@ -98,7 +105,6 @@ MFi licence. Not something software can do.
 - **Artwork on the iPod's screen.** Covers live in a separate database (ArtworkDB, with thumbnails in each
   model's own sizes). Songs MusicDeck adds show no cover on the iPod; songs iTunes put there keep theirs.
   MusicDeck shows covers for everything itself. iOpenPodv2's ArtworkDB writer (MIT) is a reference.
-- **Syncing the nano 5th-7th generation** (above).
 
 ## Testing with a real iPod
 

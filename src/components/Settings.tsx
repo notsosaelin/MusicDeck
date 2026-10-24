@@ -71,6 +71,7 @@ import {
 import { notify } from "../notify";
 import { deleteSource, switchSource } from "../sources";
 import { player } from "../player";
+import { syncLibraryEntry } from "../libraryEntry";
 import { pluginState, refreshState, useStore } from "../store";
 import { invalidateBrowserCache } from "../nav";
 import { ACCENT, DialogActions } from "./common";
@@ -900,6 +901,20 @@ export const Settings: FC = () => {
               const mode = on ? "replace" : "separate";
               pluginState.set({ ...state, qam_mode: mode });
               await setSetting("qam_mode", mode);
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Show in your Library"
+            description="Play opens the media center"
+            checked={!!state.library_entry?.enabled}
+            onChange={async (on) => {
+              const entry = { enabled: on, appid: state.library_entry?.appid ?? 0 };
+              pluginState.set({ ...state, library_entry: entry });
+              await setSetting("library_entry", entry);
+              await syncLibraryEntry();
+              await refreshState();
             }}
           />
         </PanelSectionRow>

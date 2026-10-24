@@ -65,12 +65,26 @@ class ITunesDBError(Exception):
     pass
 
 
+def _utc_offset(unix: float) -> int:
+    """This computer's offset from UTC now, in seconds: an iPod keeps local times, all of them in one time
+    zone (libgpod converts every date with the current offset, not each date's own summer time)."""
+    try:
+        return int(time.localtime().tm_gmtoff or 0)
+    except (OverflowError, OSError, ValueError):
+        return 0
+
+
 def mac_time(unix: float) -> int:
-    return int(unix + MAC_EPOCH) & 0xFFFFFFFF if unix else 0
+    """A time as an iPod keeps it: local time, in seconds since 1904 (libgpod's device_time_time_t_to_mac,
+    with this computer's time zone)."""
+    return int(unix + MAC_EPOCH + _utc_offset(unix)) & 0xFFFFFFFF if unix else 0
 
 
 def unix_time(mac: int) -> float:
-    return float(mac - MAC_EPOCH) if mac else 0.0
+    if not mac:
+        return 0.0
+    local = mac - MAC_EPOCH
+    return float(local - _utc_offset(local))
 
 
 def _u32(b: bytes, at: int) -> int:
@@ -540,18 +554,37 @@ class ITunesDB:
 
     # --- writing ---
 
-    def to_bytes(self, firewire_guid: Optional[bytes] = None, scheme: int = HASH_NONE) -> bytes:
-        """The whole file, sizes made right, and signed for an iPod that checks (hash58 needs its GUID)."""
+    def to_bytes(self, firewire_guid: Optional[bytes] = None, scheme: int = HASH_NONE, compressed: bool = False,
+                 hash72_key: Optional[tuple[bytes, bytes]] = None,
+                 hashab: Optional[Any] = None) -> bytes:
+        """The whole file, sizes made right, and signed for an iPod that checks: hash58 with its GUID;
+        hash72 (nano 5G) with the key recovered from a database iTunes signed (`hash72_key`: iv, random
+        bytes); hashAB (nano 6G/7G) through `hashab(sha1) -> 57 bytes`. `compressed`: an iTunesCDB (the
+        nano 5G on), its body zlib-compressed after the header, as libgpod writes it."""
         header = bytearray(self.header)
         if len(header) >= 0x14:
             _put32(header, 0x14, len(self.sections))
+        if len(header) > 0xA8:
+            # 0x0C: 2 where the database is compressed (libgpod); 0xA8: the compressed flag
+            _put32(header, 0x0C, 2 if compressed else (_u32(header, 0x0C) if _u32(header, 0x0C) == 1 else 1))
+            header[0xA8] = 1 if compressed else 0
         body = b"".join(s.to_bytes() for s in self.sections)
+        if compressed:
+            body = zlib.compress(body, 1)
         data = bytearray(bytes(header) + body)
         _put32(data, 8, len(data))
         if scheme == HASH58:
             if not firewire_guid:
                 raise ITunesDBError("This iPod checks its database against its FireWire ID, which wasn't found")
             write_hash58(data, firewire_guid)
+        elif scheme == HASH72:
+            if not hash72_key:
+                raise ITunesDBError("This iPod's signing key isn't known: it needs one sync with iTunes first")
+            write_hash72(data, *hash72_key)
+        elif scheme == HASHAB:
+            if not hashab:
+                raise ITunesDBError("Signing for this iPod needs MusicDeck's hashab helper, which isn't here")
+            write_hashab(data, hashab, self.hashing_scheme)
         elif scheme != HASH_NONE:
             raise ITunesDBError("This iPod's database is signed in a way MusicDeck can't write")
         else:
@@ -716,6 +749,64 @@ def write_hash58(data: bytearray, firewire_guid: bytes) -> None:
     data[0x58:0x6C] = digest
     data[0x18:0x20] = db_id
     data[0x32:0x46] = unk32
+
+
+# --- hash72 (nano 5G) and hashAB (nano 6G/7G) ---
+
+# the key every iPod's hash72 is made with (libgpod's itdb_hash72.c, from Chris Lee's work)
+HASH72_KEY = bytes.fromhex("618ca10dc7f57fd3b4723e08157463d7")
+
+
+def signed_sha1(data: bytes, hashab: bool = False) -> bytes:
+    """What an iPod's hash72 or hashAB signs: the file's SHA-1 with its id (0x18), hash58 (0x58) and
+    hash72 (0x72) zeroed, and hashAB (0xAB) for hashAB (libgpod's itdb_hash72/hashAB_compute_itunesdb_sha1)."""
+    copy = bytearray(data)
+    copy[0x18:0x20] = bytes(8)
+    copy[0x58:0x6C] = bytes(20)
+    copy[0x72:0xA0] = bytes(46)
+    if hashab:
+        copy[0xAB:0xE4] = bytes(57)
+    return hashlib.sha1(bytes(copy)).digest()
+
+
+def hash72_signature(sha1: bytes, iv: bytes, random_bytes: bytes) -> bytes:
+    """46 bytes: 01 00, the 12 random bytes, then AES-CBC(sha1 + random bytes) with the iPod's iv."""
+    from .aes import cbc_encrypt
+    return b"\x01\x00" + random_bytes + cbc_encrypt(HASH72_KEY, iv, sha1 + random_bytes)
+
+
+def hash72_key_from(signature: bytes, sha1: bytes) -> Optional[tuple[bytes, bytes]]:
+    """An iPod's (iv, random bytes), from a hash72 iTunes made for it and what it signed: what libgpod
+    keeps as its HashInfo file. CBC's first block gives the iv away: iv = D(C1) xor P1."""
+    from .aes import decrypt_block, expand_key
+    if len(signature) < 46 or signature[:2] != b"\x01\x00":
+        return None
+    random_bytes = signature[2:14]
+    first = decrypt_block(expand_key(HASH72_KEY), signature[14:30])
+    iv = bytes(a ^ b for a, b in zip(first, sha1[:16]))
+    if hash72_signature(sha1, iv, random_bytes) != signature[:46]:
+        return None
+    return iv, random_bytes
+
+
+def write_hash72(data: bytearray, iv: bytes, random_bytes: bytes) -> None:
+    """Signs a database for a nano 5G in place (scheme 2 at 0x30 and 0x70, the signature at 0x72)."""
+    data[0x32:0x46] = bytes(20)  # libgpod writes these as zeros: so do we, before signing
+    struct.pack_into("<H", data, 0x30, HASH72)
+    struct.pack_into("<H", data, 0x70, 2)
+    data[0x72:0xA0] = hash72_signature(signed_sha1(data), iv, random_bytes)
+
+
+def write_hashab(data: bytearray, sign: Any, current: int = 0) -> None:
+    """Signs a database for a nano 6G/7G in place: the 57-byte hashAB at 0xAB. The scheme at 0x30 is
+    left as iTunes wrote it (libgpod writes 3, other tools 4), 4 for a new database; 4 at 0x70."""
+    data[0x32:0x46] = bytes(20)
+    struct.pack_into("<H", data, 0x30, current if current in (3, 4) else 4)
+    struct.pack_into("<H", data, 0x70, 4)
+    signature = sign(signed_sha1(data, hashab=True))
+    if len(signature) != 57:
+        raise ITunesDBError("The hashab helper gave a signature of the wrong size")
+    data[0xAB:0xE4] = signature
 
 
 def guid_bytes(text: str) -> Optional[bytes]:

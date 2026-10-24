@@ -241,6 +241,10 @@ export interface PluginState {
   debug_log: boolean;
   debug_log_path: string;
   user_home: string;
+  /** native.py's platform: "linux-x86_64", "linux-arm64", "windows-x86_64"... */
+  platform?: string;
+  /** MusicDeck in the Steam library (src/libraryEntry.ts): on or off, and its shortcut's app id */
+  library_entry?: { enabled: boolean; appid: number };
   server: { base: string; key: string };
   service_types: ServiceType[];
   planned_types: ServiceType[];

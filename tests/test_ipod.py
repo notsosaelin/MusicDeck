@@ -114,9 +114,12 @@ def identify() -> None:
     info = ipod.identify(root)
     check(info.generation == "classic_1" and info.scheme == HASH58 and info.guid == GUID and info.why_not() == "",
           f"an 80 GB iPod classic: hash58, its GUID from SysInfo, can be synced: {info}")
-    for model, words in (("xC027", "only iTunes can sign"), ("xC525", "key MusicDeck doesn't have")):
-        nano = ipod.identify(pretend_ipod(model))
-        check(words in nano.why_not(), f"{nano.model}: played, not synced ({nano.why_not()})")
+    nano5 = ipod.identify(pretend_ipod("xC027"))
+    check(nano5.sqlite and "sync it with iTunes once" in nano5.why_not(),
+          f"a nano 5G iTunes never signed for: played, not synced yet, and it says why: {nano5.why_not()}")
+    nano6 = ipod.identify(pretend_ipod("xC525"))
+    check(nano6.sqlite and nano6.cbk_scheme == HASHAB and nano6.hashab and nano6.why_not() == "",
+          f"a nano 6G: synced, signed by the hashab helper: {nano6.why_not()!r} {nano6.hashab}")
     blind = pretend_ipod("", b"")
     os.remove(os.path.join(blind, "iPod_Control", "Device", "SysInfo"))
     check("couldn't be identified" in ipod.identify(blind).why_not(), "an iPod that can't be told isn't changed")
@@ -187,7 +190,7 @@ def sync() -> None:
         ipod.add(nano5, [{"path": song}], "", backups, done.append)
         check(False, "a nano 5G isn't synced")
     except itunesdb.ITunesDBError as e:
-        check("only iTunes" in str(e), "a nano 5G isn't synced: it says why")
+        check("sync it with iTunes once" in str(e), "a nano 5G iTunes never signed for isn't synced: it says why")
     return root
 
 
@@ -208,9 +211,119 @@ async def reading(root: str) -> None:
     await service.stop()
 
 
+def nanos() -> None:
+    print("the nano 5th-7th generation: signatures and SQLite libraries, against libgpod")
+    import base64
+    import json
+    import sqlite3
+    from musicdeck import aes, ipod_sqlite
+    k = aes.expand_key(bytes.fromhex("000102030405060708090a0b0c0d0e0f"))
+    check(aes.encrypt_block(k, bytes.fromhex("00112233445566778899aabbccddeeff")).hex() == "69c4e0d86a7b0430d8cdb78070b4c55a",
+          "AES-128 as FIPS-197's own example")
+    cdb = fixture("nano5-iTunesCDB")
+    key = itunesdb.hash72_key_from(cdb[0x72:0xA0], itunesdb.signed_sha1(cdb))
+    # what libgpod was given (scripts/libgpod_check): iv 16..31, random bytes 1..12
+    check(key == (bytes(range(16, 32)), bytes(range(1, 13))), "a nano 5G's key recovered from a database signed for it")
+    cbk = fixture("nano5-Locations.itdb.cbk")
+    check(itunesdb.hash72_key_from(cbk[:46], cbk[46:66]) == key, "and from its libraries' checksums")
+    again = bytearray(cdb)
+    itunesdb.write_hash72(again, *key)
+    check(bytes(again) == cdb, "hash72 signs as libgpod does, byte for byte")
+    db = ITunesDB.parse(cdb)
+    check([t.fields()["title"] for t in db.tracks] == ["Zebra", "apple"], "a compressed iTunesCDB read")
+    expected = json.loads(open(os.path.join(FIXTURES, "nano5-tables.json"), encoding="utf-8").read())
+    real_offset = itunesdb._utc_offset
+    itunesdb._utc_offset = lambda unix: expected["utc_offset"]  # the time zone libgpod wrote in
+    out = tempfile.mkdtemp()
+    try:
+        ipod_sqlite.write(db, out, lambda sha1: itunesdb.hash72_signature(sha1, *key), 46)
+    finally:
+        itunesdb._utc_offset = real_offset
+    ours = {}
+    for name in ipod_sqlite.FILES:
+        con = sqlite3.connect(os.path.join(out, name))
+        for (table,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+            rows = [[{"blob": base64.b64encode(v).decode()} if isinstance(v, bytes) else v for v in r]
+                    for r in con.execute(f'SELECT * FROM "{table}"')]
+            ours[f"{name}/{table}"] = sorted(rows, key=json.dumps)
+        con.close()
+    differing = [t for t in expected["tables"] if expected["tables"][t] != ours.get(t)]
+    check(not differing and set(ours) == set(expected["tables"]),
+          f"the five SQLite libraries, every table and row as libgpod writes them: {differing}")
+    loc = open(os.path.join(out, "Locations.itdb"), "rb").read()
+    ours_cbk = open(os.path.join(out, "Locations.itdb.cbk"), "rb").read()
+    check(itunesdb.hash72_key_from(ours_cbk[:46], ours_cbk[46:66]) == key and len(ours_cbk) == 66 + 20 * (len(loc) // 1024),
+          "their checksums, signed for the iPod")
+
+    print("syncing a nano 5G")
+    root = pretend_ipod("xC027")
+    itunes = os.path.join(root, "iPod_Control", "iTunes")
+    with open(os.path.join(itunes, "iTunesCDB"), "wb") as f:
+        f.write(cdb)
+    os.makedirs(os.path.join(itunes, "iTunes Library.itlp"))
+    with open(os.path.join(itunes, "iTunes Library.itlp", "Locations.itdb.cbk"), "wb") as f:
+        f.write(cbk)
+    info = ipod.identify(root)
+    check(info.sqlite and info.hash72_key == key and info.why_not() == ""
+          and os.path.isfile(os.path.join(root, "iPod_Control", "Device", "HashInfo")),
+          f"its key found and kept as libgpod's HashInfo: {info.why_not()!r}")
+    check(ipod.hash72_key(os.path.join(root, "iPod_Control"), GUID, None) == key, "HashInfo read back")
+    song = os.path.join(tempfile.mkdtemp(), "song.wav")
+    make_wav(song)
+    ipod.add(info, [{"path": song, "title": "Nano Song", "artist": "Band N", "album": "Small"}], "", tempfile.mkdtemp(),
+             lambda n: None)
+    written = open(os.path.join(itunes, "iTunesCDB"), "rb").read()
+    check(itunesdb.hash72_key_from(written[0x72:0xA0], itunesdb.signed_sha1(written)) == key
+          and written[0xA8] == 1 and [t.fields()["title"] for t in ITunesDB.parse(written).tracks][-1] == "Nano Song"
+          and os.path.getsize(os.path.join(itunes, "iTunesDB")) == 0,
+          "its iTunesCDB: compressed, signed, with the new song; iTunesDB left empty, as libgpod leaves it")
+    itlp = os.path.join(itunes, "iTunes Library.itlp")
+    lib = sqlite3.connect(os.path.join(itlp, "Library.itdb"))
+    locs = sqlite3.connect(os.path.join(itlp, "Locations.itdb"))
+    check(("Nano Song",) in lib.execute("SELECT title FROM item").fetchall()
+          and any(r[0].endswith(".wav") for r in locs.execute("SELECT location FROM location").fetchall()),
+          "and its SQLite libraries, where the nano looks")
+    new_cbk = open(os.path.join(itlp, "Locations.itdb.cbk"), "rb").read()
+    check(itunesdb.hash72_key_from(new_cbk[:46], new_cbk[46:66]) == key, "their checksums signed again")
+
+    print("syncing a nano 6G/7G")
+    root = pretend_ipod("xC525")
+    info = ipod.identify(root)
+    ipod.add(info, [{"path": song, "title": "Touch Song", "artist": "Band T", "album": "Tiny"}], "Mix", tempfile.mkdtemp(),
+             lambda n: None)
+    itunes = os.path.join(root, "iPod_Control", "iTunes")
+    written = bytearray(open(os.path.join(itunes, "iTunesCDB"), "rb").read())
+    signature = bytes(written[0xAB:0xE4])
+    check(signature == info.sign_hashab(itunesdb.signed_sha1(written, hashab=True)) and signature[:2] == b"\x03\x00",
+          "a new library signed with hashAB, through the helper")
+    new_cbk = open(os.path.join(itunes, "iTunes Library.itlp", "Locations.itdb.cbk"), "rb").read()
+    check(len(new_cbk) >= 57 + 20 and new_cbk[:57] == info.sign_hashab(new_cbk[57:77]),
+          "its libraries' checksums signed with hashAB too")
+    lib = sqlite3.connect(os.path.join(itunes, "iTunes Library.itlp", "Library.itdb"))
+    check([r[0] for r in lib.execute("SELECT name FROM container ORDER BY name_order")] == ["iPod", "Mix"],
+          "with its playlists")
+
+    print("the iPod's own SQL")
+    xml = ("<plist><dict><key>com.apple.mobile.iTunes.SQLMusicLibraryPostProcessCommands</key><dict>"
+           "<key>SQLCommands</key><dict><key>MakeKeys</key><string>CREATE TABLE keys AS SELECT pid, "
+           "iPhoneSortKey(title) AS k, iPhoneSortSection(iPhoneSortKey(title)) AS s FROM item;</string>"
+           "<key>Unused</key><string>DROP TABLE item;</string></dict>"
+           "<key>UserVersionCommandSets</key><dict><key>8</key><dict><key>Commands</key><array>"
+           "<string>Unused</string></array></dict><key>9</key><dict><key>Commands</key><array>"
+           "<string>MakeKeys</string></array></dict></dict></dict></dict></plist>")
+    commands = ipod_sqlite.post_process_commands(xml)
+    check(len(commands) == 1 and commands[0].startswith("CREATE TABLE keys"),
+          f"read from SysInfoExtended: the highest command set's commands: {commands}")
+    check(ipod_sqlite.run_post_process(os.path.join(itunes, "iTunes Library.itlp"), commands) == 1, "and run")
+    keys = sqlite3.connect(os.path.join(itunes, "iTunes Library.itlp", "Library.itdb")).execute(
+        "SELECT k, s FROM keys").fetchone()
+    check(keys[0][:1] == b"\x30" and keys[1] == (keys[0][1] - 0x2D) // 2, f"with the iPod's sort functions: {keys}")
+
+
 if __name__ == "__main__":
     format_against_libgpod()
     identify()
+    nanos()
     ipod_root = sync()
     asyncio.run(reading(ipod_root))
     print("all iPod checks passed")

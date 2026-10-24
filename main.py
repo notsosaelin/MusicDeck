@@ -11,7 +11,7 @@ import aiohttp
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import backup, debuglog, lyrics, models
+from musicdeck import backup, debuglog, lyrics, models, native
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
 from musicdeck import version
@@ -39,7 +39,7 @@ SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "se
 # Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
 RESTORED_SIGNED_OUT = "sign_in_again"
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
-FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "eq_per_output", "playback", "debug_log", "center"}
+FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "eq_per_output", "playback", "debug_log", "center", "library_entry"}
 # the media center's choices (settings.DEFAULTS["center"]); anything else is refused
 CENTER_CHOICES = {"open_on": {"last", "playing", "home", "library"}, "background": {"art", "plain"},
                   "cards": {"small", "medium", "large"}, "lyrics": {"small", "medium", "large"},
@@ -385,6 +385,10 @@ class Plugin:
             "debug_log_path": debuglog.path,
             # file pickers start here; distros don't all use /home/deck
             "user_home": decky.DECKY_USER_HOME,
+            # the platform (native.py): the Library entry's stand-in program differs on Windows
+            "platform": native.platform_id(),
+            # MusicDeck in the Steam library: {"enabled", "appid" of its shortcut} (src/libraryEntry.ts)
+            "library_entry": self.settings.get("library_entry"),
             "server": {"base": self.server.base_url, "key": self.server.key},
             "service_types": SERVICE_TYPES.listing(),
             "planned_types": PLANNED_TYPES,

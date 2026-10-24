@@ -159,7 +159,8 @@ source (`MusicService.remove`).
   `iPod_Control` and no `.rockbox` is an iPod (`devices.is_ipod`), an `IpodService`: its index comes from its
   iTunesDB (or iTunesCDB) rather than its files' tags, it goes by its master playlist's name, and a copy to it
   goes into that database (`ipod.add`: converted with ffmpeg where needed, signed with hash58 where the model
-  asks), as a removal does (`ipod.remove`). `why_not()` says when it can't be synced (nano 5G-7G, HFS+,
+  asks; for a nano 5G-7G a compressed iTunesCDB signed with hash72 or hashAB plus its SQLite libraries,
+  `ipod_sqlite.py`), as a removal does (`ipod.remove`). `why_not()` says when it can't be synced (nano 5G-7G, HFS+,
   unidentified); it still plays.
 - **More devices**: a data CD/DVD (`/dev/sr*` mounted with music files) is a read-only player ("disc");
   an iPhone or iPod touch is mounted by GVfs's AFC backend once trusted (`afc:host=<UDID>`) and its

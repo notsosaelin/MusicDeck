@@ -3,6 +3,26 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.28.2
+
+- The Library entry's Play opens the media center: Steam names a shortcut's launch by its 64-bit game id,
+  not its app id, so 0.28.0 missed it; and the media center now opens once Steam has shown the game's page.
+
+## 0.28.0
+
+- **The iPod nano 5th, 6th and 7th generation sync too.** They play from SQLite libraries beside their own
+  database, both signed for each iPod; MusicDeck writes both, as libgpod (gtkpod's library) does, checked
+  against libgpod's own output table by table. The nano 6th/7th generation's signature comes from a small
+  helper built from dstaley/hashab (public domain), checked against its 100 test vectors. A nano 5th
+  generation needs to have been synced with iTunes once (its key is in what iTunes signed); it says so if it
+  hasn't. Every iPod with a disk mode now syncs. Untested on a real nano so far.
+- MusicDeck asks an iPod for its full description (SysInfoExtended) over USB, as libgpod's helper does, and
+  keeps it on the iPod: its exact model, FireWire ID and the SQL the newer nanos want run on their libraries.
+- Dates on an iPod are its local time: MusicDeck read and wrote them as UTC, hours off.
+- **MusicDeck in your Library**: Decky → MusicDeck → More → Show in your Library adds MusicDeck to the Steam
+  library (with its own artwork), so it can be started from Big Picture like a game: Play opens the media
+  center. Off by default.
+
 ## 0.27.0
 
 - **Delete from your library**: Y on a song, album, folder or playlist file in Local files has Delete. It goes

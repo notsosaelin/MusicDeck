@@ -23,9 +23,10 @@ import random
 import re
 import shutil
 import string
+import struct
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from . import itunesdb, native
@@ -95,6 +96,11 @@ class IpodInfo:
     compressed: bool  # its database is an iTunesCDB (nano 5G and later)
     writable_fs: bool
     fs: str = ""  # how it's formatted: "vfat" (Windows-formatted) or "hfsplus" (Mac-formatted)
+    # the nano 5G-7G: they play from SQLite libraries (ipod_sqlite.py) signed with hash72 or hashAB
+    sqlite: bool = False
+    hash72_key: Optional[tuple[bytes, bytes]] = None  # (iv, random bytes), from a library iTunes signed
+    hashab: Optional[str] = None  # the hashab helper (bin/<platform>/hashab)
+    post_process: list[str] = field(default_factory=list)  # the iPod's own SQL for its libraries
 
     @property
     def model(self) -> str:
@@ -103,6 +109,12 @@ class IpodInfo:
     @property
     def shuffle(self) -> bool:
         return self.generation.startswith("shuffle")
+
+    @property
+    def cbk_scheme(self) -> int:
+        """How its libraries' checksums are signed: hashAB on a nano 6G/7G, hash72 on a nano 5G (whatever its
+        database says: libgpod notes the 5G expects hash72 there even when it reports hash58)."""
+        return HASHAB if self.generation in ("nano_6", "nano_7") or self.scheme == HASHAB else HASH72
 
     def why_not(self) -> str:
         """Why music can't be put on this iPod, or "" when it can."""
@@ -113,15 +125,36 @@ class IpodInfo:
                     "Or restore it with iTunes for Windows, which formats it for both")
         if not self.writable_fs:
             return "This iPod can only be read: it's mounted read only, or its files belong to another user"
-        if self.compressed or self.generation == "nano_5" or self.scheme == HASH72:
-            return f"The {self.model} keeps its library in a way only iTunes can sign; it can be played from, not synced"
-        if self.generation in ("nano_6", "nano_7") or self.scheme == HASHAB:
-            return f"The {self.model} signs its library with a key MusicDeck doesn't have; it can be played from, not synced"
-        if self.scheme == HASH58 and not self.guid:
-            return "This iPod's FireWire ID couldn't be found, which it needs to accept a new library"
         if self.scheme < 0:
             return "This iPod couldn't be identified, so MusicDeck won't risk changing its library"
+        needs_hash72 = self.scheme == HASH72 or (self.sqlite and self.cbk_scheme == HASH72)
+        if needs_hash72 and not self.hash72_key:
+            return (f"The {self.model} signs its library with a key iTunes leaves on it: sync it with iTunes once, "
+                    "and MusicDeck can sync it from then on. It can be played from meanwhile")
+        needs_hashab = self.scheme == HASHAB or (self.sqlite and self.cbk_scheme == HASHAB)
+        if needs_hashab and not self.hashab:
+            return f"Syncing the {self.model} needs MusicDeck's hashab helper, which this build doesn't have"
+        if (self.scheme in (HASH58, HASHAB) or needs_hashab) and not self.guid:
+            return "This iPod's FireWire ID couldn't be found, which it needs to accept a new library"
         return ""
+
+    def sign_hashab(self, sha1: bytes) -> bytes:
+        """A hashAB for a SHA-1 (the hashab helper, given the iPod's FireWire GUID)."""
+        if not self.hashab or not self.guid:
+            raise ITunesDBError("Signing for this iPod needs its FireWire ID and the hashab helper")
+        result = subprocess.run([self.hashab, sha1.hex(), self.guid[:8].hex()], capture_output=True, text=True,
+                                timeout=30, **native.NO_WINDOW)
+        out = result.stdout.strip()
+        if result.returncode != 0 or len(out) != 114:
+            raise ITunesDBError(f"The hashab helper failed: {result.stderr.strip()[-200:]}")
+        return bytes.fromhex(out)
+
+    def sign_cbk(self, sha1: bytes) -> bytes:
+        if self.cbk_scheme == HASHAB:
+            return self.sign_hashab(sha1)
+        if not self.hash72_key:
+            raise ITunesDBError("This iPod's signing key isn't known: it needs one sync with iTunes first")
+        return itunesdb.hash72_signature(sha1, *self.hash72_key)
 
 
 def control_dir(root: str) -> Optional[str]:
@@ -212,10 +245,22 @@ def database_path(control: str) -> tuple[Optional[str], bool]:
     return _find(itunes, "iTunesDB"), False
 
 
-def identify(root: str, source: str = "") -> Optional[IpodInfo]:
+def identify(root: str, source: str = "", runtime_dir: Optional[str] = None) -> Optional[IpodInfo]:
     control = control_dir(root)
     if not control:
         return None
+    usb_device = usb_node(source)
+    device_dir = _find(control, "Device") or os.path.join(control, "Device")
+    if usb_device and not _find(device_dir, "SysInfoExtended"):
+        # what libgpod's udev helper does: ask the iPod for SysInfoExtended over USB, and keep it on it
+        xml = read_sysinfo_extended(usb_device)
+        if xml:
+            try:
+                os.makedirs(device_dir, exist_ok=True)
+                with open(os.path.join(device_dir, "SysInfoExtended"), "w", encoding="utf-8") as f:
+                    f.write(xml)
+            except OSError:
+                pass
     info = sysinfo(control)
     product, serial = usb_facts(source)
     generation = ""
@@ -233,6 +278,8 @@ def identify(root: str, source: str = "") -> Optional[IpodInfo]:
             head = f.read(0x40)
         # how the database there is signed (its header's +0x30), without reading the rest of it
         current = int.from_bytes(head[0x30:0x32], "little") if head[:4] == b"mhbd" and len(head) >= 0x32 else None
+        if current == 4:
+            current = HASHAB  # some tools (and maybe iTunes) write 4 for hashAB, libgpod 3
     if info.get("xDBVersion", "").isdigit():
         scheme = DB_VERSIONS.get(int(info["xDBVersion"]), -1)
     elif generation:
@@ -247,7 +294,90 @@ def identify(root: str, source: str = "") -> Optional[IpodInfo]:
     guid = (itunesdb.guid_bytes(info.get("xFireWireGUID", "")) or itunesdb.guid_bytes(info.get("FirewireGuid", ""))
             or itunesdb.guid_bytes(serial))
     writable = os.access(control, os.W_OK)
-    return IpodInfo(root, generation, scheme, guid, compressed, writable, mount_type(root))
+    sqlite_library = compressed or generation in ("nano_5", "nano_6", "nano_7") or scheme in (HASH72, HASHAB)
+    result = IpodInfo(root, generation, scheme, guid, compressed, writable, mount_type(root), sqlite_library)
+    if sqlite_library:
+        result.hash72_key = hash72_key(control, guid, path)
+        result.hashab = native.helper("hashab", runtime_dir)
+        xml = _read(_find(device_dir, "SysInfoExtended")).decode("utf-8", "replace")
+        from .ipod_sqlite import post_process_commands
+        result.post_process = post_process_commands(xml) if xml else []
+    return result
+
+
+def hash72_key(control: str, guid: Optional[bytes], database: Optional[str]) -> Optional[tuple[bytes, bytes]]:
+    """A nano 5G's hash72 key (iv, random bytes): libgpod's HashInfo file when it's there and for this
+    iPod; else recovered from what iTunes signed (its libraries' checksums, or its database) and kept as
+    HashInfo, as libgpod does."""
+    device = _find(control, "Device") or os.path.join(control, "Device")
+    info = _read(_find(device, "HashInfo"))
+    if len(info) == 54 and info[:6] == b"HASHv0" and (not guid or info[6:6 + len(guid)] == guid):
+        return info[38:54], info[26:38]  # iv, random bytes (after "HASHv0" and the 20-byte uuid)
+    found = None
+    itunes = _find(control, "iTunes")
+    itlp = _find(itunes, "iTunes Library.itlp") if itunes else None
+    cbk = _read(_find(itlp, "Locations.itdb.cbk")) if itlp else b""
+    if len(cbk) >= 66:
+        found = itunesdb.hash72_key_from(cbk[:46], cbk[46:66])
+    if not found and database:
+        data = _read(database)
+        if len(data) >= 0xA0 and int.from_bytes(data[0x30:0x32], "little") == HASH72:
+            found = itunesdb.hash72_key_from(data[0x72:0xA0], itunesdb.signed_sha1(data))
+    if found and guid:
+        try:
+            with open(os.path.join(device, "HashInfo"), "wb") as f:
+                f.write(b"HASHv0" + guid.ljust(20, b"\0") + found[1] + found[0])
+        except OSError:
+            pass
+    return found
+
+
+def usb_node(source: str) -> Optional[str]:
+    """/dev/bus/usb/BBB/DDD of the Apple device a /dev/sd* partition is on (sysfs), for control requests."""
+    name = os.path.basename(source or "")
+    if not name or not os.path.isdir("/sys/class/block"):
+        return None
+    here = os.path.realpath(os.path.join("/sys/class/block", name))
+    while here and os.path.dirname(here) != here:
+        if _read(os.path.join(here, "idVendor")).decode().strip().lower() == "05ac":
+            bus = _read(os.path.join(here, "busnum")).decode().strip()
+            dev = _read(os.path.join(here, "devnum")).decode().strip()
+            return f"/dev/bus/usb/{int(bus):03d}/{int(dev):03d}" if bus.isdigit() and dev.isdigit() else None
+        here = os.path.dirname(here)
+    return None
+
+
+def read_sysinfo_extended(node: str) -> str:
+    """SysInfoExtended from the iPod itself: vendor control request 0x40, value 2, in 4 KiB pieces until
+    a short one (libgpod's ipod-usb.c), through usbdevfs. Needs the USB device to be the user's (uaccess,
+    as media players are); "" when it isn't, or the iPod doesn't answer."""
+    try:
+        import ctypes
+        import fcntl
+    except ImportError:
+        return ""
+    try:
+        fd = os.open(node, os.O_RDWR)
+    except OSError:
+        return ""
+    out = b""
+    try:
+        for index in range(0x100):
+            buf = ctypes.create_string_buffer(0x1000)
+            # struct usbdevfs_ctrltransfer: bRequestType, bRequest, wValue, wIndex, wLength, timeout, data
+            request = struct.pack("BBHHHI4xQ", 0xC0, 0x40, 2, index, 0x1000, 2000, ctypes.addressof(buf))
+            try:
+                got = fcntl.ioctl(fd, 0xC0185500, request)  # USBDEVFS_CONTROL
+            except OSError:
+                break
+            n = got if isinstance(got, int) else 0
+            out += buf.raw[:n]
+            if n != 0x1000:
+                break
+    finally:
+        os.close(fd)
+    text = out.split(b"\0", 1)[0].decode("utf-8", "replace")
+    return text if "<plist" in text else ""
 
 
 def load(root: str) -> Optional[ITunesDB]:
@@ -336,20 +466,49 @@ def _fold_extras(db: ITunesDB, itunes: str) -> list[str]:
 
 
 def _write(info: IpodInfo, db: ITunesDB, itunes: str, used: list[str], backup_dir: str) -> None:
-    """The database (and a shuffle's iTunesSD) written in full beside the old one, then moved over it;
-    the old one kept on the Deck first. Then "Play Counts" is put aside and On-The-Go's files go, as
-    libgpod does, as they're in the database now."""
-    target = _find(itunes, "iTunesDB") or os.path.join(itunes, "iTunesDB")
-    data = db.to_bytes(info.guid, info.scheme)
+    """The database (and a shuffle's iTunesSD, a nano 5G-7G's SQLite libraries) written in full beside
+    the old one, then moved over it; the old ones kept on the Deck first. Then "Play Counts" is put aside
+    and On-The-Go's files go, as libgpod does, as they're in the database now."""
+    os.makedirs(backup_dir, exist_ok=True)
+    if info.sqlite:
+        # an iTunesCDB, signed as the iPod's database is, and an empty iTunesDB (libgpod's layout)
+        target = _find(itunes, "iTunesCDB") or os.path.join(itunes, "iTunesCDB")
+        data = db.to_bytes(info.guid, info.scheme, compressed=True, hash72_key=info.hash72_key,
+                           hashab=info.sign_hashab)
+    else:
+        target = _find(itunes, "iTunesDB") or os.path.join(itunes, "iTunesDB")
+        data = db.to_bytes(info.guid, info.scheme)
     if os.path.isfile(target):
-        os.makedirs(backup_dir, exist_ok=True)
-        shutil.copyfile(target, os.path.join(backup_dir, "iTunesDB.previous"))
+        shutil.copyfile(target, os.path.join(backup_dir, os.path.basename(target) + ".previous"))
+    staged = []
+    if info.sqlite:
+        from . import ipod_sqlite
+        itlp = _find(itunes, "iTunes Library.itlp") or os.path.join(itunes, "iTunes Library.itlp")
+        work = tempfile.mkdtemp(prefix="musicdeck-itlp-")
+        try:
+            ipod_sqlite.write(db, work, info.sign_cbk, 57 if info.cbk_scheme == HASHAB else 46, info.post_process)
+            os.makedirs(itlp, exist_ok=True)
+            previous = os.path.join(backup_dir, "iTunes Library.itlp.previous")
+            shutil.rmtree(previous, ignore_errors=True)
+            if os.path.isdir(itlp):
+                shutil.copytree(itlp, previous)
+            for name in ipod_sqlite.FILES + ("Locations.itdb.cbk",):
+                shutil.copyfile(os.path.join(work, name), os.path.join(itlp, name + ".musicdeck"))
+                staged.append((os.path.join(itlp, name + ".musicdeck"), os.path.join(itlp, name)))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
     temp = target + ".musicdeck"
     with open(temp, "wb") as f:
         f.write(data)
         f.flush()
         os.fsync(f.fileno())
+    # everything written first, then moved into place together
+    for written, final in staged:
+        os.replace(written, final)
     os.replace(temp, target)
+    if info.sqlite:
+        plain = _find(itunes, "iTunesDB") or os.path.join(itunes, "iTunesDB")
+        open(plain, "wb").close()
     if info.shuffle:
         sd = _find(itunes, "iTunesSD") or os.path.join(itunes, "iTunesSD")
         old_format = info.generation in ("shuffle_1", "shuffle_2") or (os.path.isfile(sd) and _read(sd)[:4] != b"bdhs"
@@ -382,8 +541,9 @@ def _open(info: IpodInfo) -> tuple[ITunesDB, str, list[str]]:
         raise ITunesDBError("That's not an iPod any more")
     itunes = _find(control, "iTunes") or os.path.join(control, "iTunes")
     os.makedirs(itunes, exist_ok=True)
-    path = _find(itunes, "iTunesDB")
-    db = ITunesDB.parse(_read(path)) if path and _read(path) else itunesdb.new_database("iPod")
+    path = database_path(control)[0]
+    data = _read(path)
+    db = ITunesDB.parse(data) if data else itunesdb.new_database("iPod")
     return db, itunes, _fold_extras(db, itunes)
 
 

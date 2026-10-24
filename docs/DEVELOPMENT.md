@@ -35,6 +35,7 @@ pnpm install
 pnpm build                              # src/ -> dist/index.js
 python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/<platform>/
 bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static musl for x86_64 and arm64 Linux, Windows .exe
+bash scripts/build_hashab.sh            # bin/<platform>/hashab (the iPod nano 6G/7G signature), checked against its test vectors
 pnpm smoke                              # the built bundle loads, wires its player, unloads cleanly
 python scripts/package.py               # out/MusicDeck-<version>-<platform>.zip (linux-x86_64, linux-arm64,
                                         # windows-x86_64), each with its own helpers, and their .sha256
@@ -250,6 +251,6 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
 3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py`.
-4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && python scripts/package.py`
+4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && python scripts/package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
 6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.

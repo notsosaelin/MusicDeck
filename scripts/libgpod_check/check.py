@@ -102,6 +102,34 @@ out = gpod("dump", edited).stdout
 check("tracks 3" in out and "track|Fourth|" in out and "|apple|" not in out and "playlist|Test iPod|1|3" in out,
       "libgpod's database, changed")
 
+print("nano 5G: libgpod's SQLite libraries and signatures")
+sys.path.insert(0, os.path.join(REPO, "py_modules"))
+import sqlite3  # noqa: E402
+from musicdeck import ipod_sqlite  # noqa: E402
+from musicdeck import itunesdb as pkg_itunesdb  # noqa: E402
+nano = pretend("nano5", "xC027")
+IV, RANDOM = bytes(range(16, 32)), bytes(range(1, 13))
+with open(f"{nano}/iPod_Control/Device/HashInfo", "wb") as f:
+    f.write(b"HASHv0" + GUID.ljust(20, b"\0") + RANDOM + IV)
+r = gpod("make", nano, *SONGS)
+if r.returncode != 0:
+    sys.exit(f"libgpod couldn't write for a nano 5G: {r.stderr}")
+cdb = read(f"{nano}/iPod_Control/iTunes/iTunesCDB")
+key = pkg_itunesdb.hash72_key_from(cdb[0x72:0xA0], pkg_itunesdb.signed_sha1(cdb))
+again = bytearray(cdb)
+pkg_itunesdb.write_hash72(again, IV, RANDOM)
+check(key == (IV, RANDOM) and bytes(again) == cdb, "hash72: the key recovered, and the same signature")
+theirs_dir = f"{nano}/iPod_Control/iTunes/iTunes Library.itlp"
+ours_dir = f"{HOME}/check-nano5-ours"
+shutil.rmtree(ours_dir, ignore_errors=True)
+ipod_sqlite.write(pkg_itunesdb.ITunesDB.parse(cdb), ours_dir, lambda s: pkg_itunesdb.hash72_signature(s, IV, RANDOM), 46)
+for name in ipod_sqlite.FILES:
+    a, b = sqlite3.connect(f"{theirs_dir}/{name}"), sqlite3.connect(f"{ours_dir}/{name}")
+    for (table,) in a.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        rows_a = sorted(a.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr)
+        rows_b = sorted(b.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr)
+        check(rows_a == rows_b, f"{name} {table}: {len(rows_a)} rows the same")
+
 if "--fixtures" in sys.argv:
     dest = os.path.join(REPO, "tests", "fixtures", "ipod")
     os.makedirs(dest, exist_ok=True)

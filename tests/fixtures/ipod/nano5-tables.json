@@ -1,0 +1,421 @@
+{
+"made_by": "libgpod 0.8.3 (scripts/libgpod_check), TZ America/New_York (UTC-4 when written)",
+"utc_offset": -14400,
+"tables": {
+"Dynamic.itdb/container_ui": [
+[
+521757448789118401,
+7,
+0,
+1,
+0,
+0,
+0
+]
+],
+"Dynamic.itdb/item_stats": [
+[
+4099,
+0,
+-978307200,
+0,
+0,
+-978307200,
+0,
+0,
+0.0,
+0.0,
+0,
+0,
+0,
+0,
+0,
+0
+],
+[
+4103,
+0,
+-978307200,
+0,
+0,
+-978307200,
+0,
+0,
+0.0,
+0.0,
+0,
+0,
+0,
+0,
+0,
+0
+]
+],
+"Dynamic.itdb/rental_info": [],
+"Extras.itdb/chapter": [
+[
+4099,
+{
+"blob": "AAAAAAAAAAAAAAAAAAAAMHNlYW4AAAABAAAAAQAAAAAAAAAcaGVkcgAAAAEAAAAAAAAAAAAAAAAAAAAB"
+}
+],
+[
+4103,
+{
+"blob": "AAAAAAAAAAAAAAAAAAAAMHNlYW4AAAABAAAAAQAAAAAAAAAcaGVkcgAAAAEAAAAAAAAAAAAAAAAAAAAB"
+}
+]
+],
+"Extras.itdb/db_schema_upgrade_info": [
+[
+8,
+19
+]
+],
+"Extras.itdb/lyrics": [],
+"Extras.itdb/sqlite_stat1": [],
+"Genius.itdb/genius_config": [],
+"Genius.itdb/genius_metadata": [],
+"Genius.itdb/genius_similarities": [],
+"Library.itdb/album": [
+[
+-1631735738741308909,
+2,
+0,
+null,
+-2808873898180027012,
+0,
+"Abbey Road",
+200,
+0,
+null,
+0
+],
+[
+-3294851207019278198,
+2,
+0,
+null,
+-486935133113119208,
+0,
+"B Side",
+100,
+0,
+null,
+0
+]
+],
+"Library.itdb/artist": [
+[
+-2808873898180027012,
+2,
+0,
+0,
+"The Beatles",
+200,
+"The Beatles"
+],
+[
+-486935133113119208,
+2,
+0,
+0,
+"Artist B",
+100,
+"Artist B"
+]
+],
+"Library.itdb/avformat_info": [
+[
+4099,
+0,
+0,
+0,
+0.0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0
+],
+[
+4103,
+0,
+0,
+0,
+0.0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0
+]
+],
+"Library.itdb/category_map": [],
+"Library.itdb/composer": [],
+"Library.itdb/container": [
+[
+521757448789118401,
+0,
+814561702,
+814561702,
+"Test iPod",
+0,
+0,
+1,
+0,
+1,
+0,
+null,
+null,
+null,
+null,
+null,
+null,
+null,
+null,
+null,
+null,
+null
+]
+],
+"Library.itdb/container_seed": [],
+"Library.itdb/db_info": [
+[
+-1104024807292177450,
+521757448789118401,
+null,
+0,
+0,
+null,
+null,
+null
+]
+],
+"Library.itdb/genre_map": [],
+"Library.itdb/item": [
+[
+4099,
+null,
+1,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+721692800,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0.0,
+0.0,
+4000.0,
+null,
+1,
+0,
+0,
+0,
+0,
+0,
+null,
+null,
+0,
+0,
+0,
+-1631735738741308909,
+-2808873898180027012,
+0,
+"Zebra",
+"The Beatles",
+"Abbey Road",
+null,
+null,
+"Zebra",
+"The Beatles",
+"Abbey Road",
+null,
+null,
+200,
+200,
+100,
+100,
+100,
+200,
+200,
+100,
+null,
+null,
+null,
+null
+],
+[
+4103,
+null,
+1,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+721692800,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0.0,
+0.0,
+8000.0,
+null,
+2,
+0,
+0,
+0,
+0,
+0,
+null,
+null,
+0,
+0,
+0,
+-3294851207019278198,
+-486935133113119208,
+0,
+"apple",
+"Artist B",
+"B Side",
+null,
+null,
+"apple",
+"Artist B",
+"B Side",
+null,
+null,
+100,
+100,
+200,
+100,
+100,
+100,
+100,
+100,
+null,
+null,
+null,
+null
+]
+],
+"Library.itdb/item_to_album": [],
+"Library.itdb/item_to_artist": [],
+"Library.itdb/item_to_composer": [],
+"Library.itdb/item_to_container": [
+[
+4099,
+521757448789118401,
+0,
+null
+],
+[
+4103,
+521757448789118401,
+1,
+null
+]
+],
+"Library.itdb/location_kind_map": [
+[
+1,
+"MPEG audio file"
+]
+],
+"Library.itdb/podcast_info": [],
+"Library.itdb/store_info": [],
+"Library.itdb/store_link": [],
+"Library.itdb/version_info": [
+[
+1,
+2,
+48,
+0,
+0,
+0,
+1
+]
+],
+"Library.itdb/video_characteristics": [],
+"Library.itdb/video_info": [],
+"Locations.itdb/base_location": [
+[
+1,
+"iPod_Control/Music"
+]
+],
+"Locations.itdb/location": [
+[
+4099,
+0,
+1,
+1179208773,
+"F01/A.mp3",
+0,
+1,
+721692800,
+1000,
+null,
+null,
+null,
+null
+],
+[
+4103,
+0,
+1,
+1179208773,
+"F02/B.m4a",
+0,
+1,
+721692800,
+1000,
+null,
+null,
+null,
+null
+]
+],
+"Locations.itdb/sqlite_stat1": [
+[
+"location",
+"sqlite_autoindex_location_1",
+"1 1 1"
+]
+]
+}
+}

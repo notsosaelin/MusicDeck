@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     # music that starts with a game: [{"instance_id", "appid", "game", "collection": {id, kind, title, art}}],
     # one per source and game (it only plays while its source is live)
     "game_music": [],
+    # MusicDeck in the Steam library (a shortcut that opens the media center): on or off, and its app id
+    "library_entry": {"enabled": False, "appid": 0},
     # names given to plugged-in devices, {device id: name}, kept for the next time they're plugged in
     "device_names": {},
     # the media center (src/components/media): the tab it opens on, its look, which tabs show, and

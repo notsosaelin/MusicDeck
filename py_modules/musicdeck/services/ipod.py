@@ -31,7 +31,7 @@ class IpodService(DeviceService):
 
     async def start(self) -> None:
         root = self.roots[0] if self.roots else ""
-        self.info = await asyncio.to_thread(ipod.identify, root, self.config.get("source", ""))
+        self.info = await asyncio.to_thread(ipod.identify, root, self.config.get("source", ""), self.runtime_dir)
         await super().start()
 
     def name(self) -> str:

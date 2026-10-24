@@ -26,6 +26,7 @@ import { player } from "./player";
 import { setSleepTimer, sleepTimer } from "./sleep";
 import { syncSteam } from "./steam";
 import { duckFor, reconcile, runningGame, toggleGameMusic, watchGames } from "./games";
+import { syncLibraryEntry, watchLibraryEntry } from "./libraryEntry";
 import { installQamPatch } from "./qam";
 import { pluginState, refreshState } from "./store";
 
@@ -48,6 +49,8 @@ export default definePlugin(() => {
       player.setEq(state.eq);
       player.setPlayback(state.playback);
       syncSteam();
+      // MusicDeck in the Steam library, when it's switched on (and its shortcut was lost)
+      syncLibraryEntry().catch((e) => console.warn("[MusicDeck] Library entry", e));
       // Pick up where we left off (here, or on another device via the server's saved queue)
       if (state.playback.resume) {
         const session = await api.loadSession();
@@ -61,6 +64,7 @@ export default definePlugin(() => {
   reopenMediaCenterIfShowing();
   const unwatchGames = watchGames();
   const unwatchCast = watchCastStatus();
+  const unwatchLibraryEntry = watchLibraryEntry();
   // a source's own news (local files: what new albums got): a toast, and lists that show it again
   const sourceNote = (instanceId: string, text: string) => {
     const name = pluginState.get()?.services.find((s) => s.id === instanceId)?.name ?? "MusicDeck";
@@ -124,6 +128,7 @@ export default definePlugin(() => {
       routerHook.removeRoute(PLAYER_ROUTE);
       unwatchGames();
       unwatchCast();
+      unwatchLibraryEntry();
       removeEventListener("source_note", sourceNote);
       setSleepTimer(null);
       releaseToastHooks();
