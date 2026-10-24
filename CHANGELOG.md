@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.24.1
+
+- **Plugged-in phones and players have readable names**: their serial number, URL escapes and underscores
+  are gone ("HiBy_TRINKET-IOT-IDP__SN%3AAC53E709_ac53e709" is now "HiBy TRINKET-IOT-IDP").
+- **Rename a plugged-in device**: some firmware names a player after its circuit board, not its model. In
+  Decky → MusicDeck, its menu has Rename; the name stays for the next time it's plugged in.
+
 ## 0.24.0
 
 - **Audio CDs**: put a CD in a drive plugged into the device and it shows up in Decky → MusicDeck as a

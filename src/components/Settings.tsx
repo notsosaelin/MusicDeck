@@ -57,6 +57,7 @@ import {
   ServiceType,
   removeDownloads,
   rescan,
+  renameDevice,
   retryDownloads,
   setGameMusic,
   lastfmUnlink,
@@ -259,8 +260,28 @@ const DownloadRows: FC<{ status: DownloadStatus }> = ({ status }) => {
   );
 };
 
+/** Naming a plugged-in device: phones and players can call themselves by a board's code name. */
+const RenameDeviceModal: FC<{ closeModal?: () => void; service: ServiceInfo }> = ({ closeModal, service }) => {
+  const [name, setName] = useState(service.name);
+  const save = async () => {
+    await renameDevice(service.id, name);
+    await refreshState();
+    closeModal?.();
+  };
+  return (
+    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
+      <DialogHeader>Rename</DialogHeader>
+      <DialogBody>
+        <TextField value={name} placeholder={service.name} onChange={(e) => setName(e.target.value)} />
+      </DialogBody>
+      <DialogActions primary="Save" onPrimary={save} primaryDisabled={!name.trim()} onCancel={closeModal} />
+    </ModalRoot>
+  );
+};
+
 const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }> = ({ service, typeName, active }) => {
   const edit = () => showModal(<ServiceModal type={service.type} typeName={typeName} existing={service} />);
+  const rename = () => showModal(<RenameDeviceModal service={service} />);
   const test = async () => {
     const r = await testService(service.id);
     notify(service.name, r.ok ? r.data : r.error);
@@ -304,6 +325,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
         {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
         {/* a plugged-in device comes and goes by itself: nothing to edit or remove */}
         {!service.device && <MenuItem onSelected={edit}>Edit</MenuItem>}
+        {(service.device === "usb" || service.device === "mtp") && <MenuItem onSelected={rename}>Rename</MenuItem>}
         {service.device === "cd" ? null : service.type === "local" || service.type === "steam" || service.device ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
             Rescan library

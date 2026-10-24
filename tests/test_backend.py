@@ -1753,8 +1753,16 @@ async def run():
             os.makedirs(os.path.join(gvfs, "mtp:host=Old_Walkman", "Storage Media"))
             phones = devmod.phone_storage(gvfs)
             check([(p["name"], [os.path.basename(x) for x in p["paths"]]) for p in phones]
-                  == [("Google Pixel 8 1A2B", ["Music"]), ("Old Walkman", ["Storage Media"])],
+                  == [("Google Pixel 8", ["Music"]), ("Old Walkman", ["Storage Media"])],
                   f"a phone's Music folder (not its photos); a player with none, whole: {phones}")
+        hiby = "HiBy_TRINKET-IOT-IDP__SN%3AAC53E709_ac53e709"
+        check(devmod.phone_name(hiby, {"ac53e709": ("HiBy", "TRINKET-IOT-IDP _SN:AC53E709")}) == "HiBy TRINKET-IOT-IDP"
+              and devmod.phone_name(hiby, {}) == "HiBy TRINKET-IOT-IDP"
+              and devmod.phone_name("Sony_Mobile_Communications_NW-A105_1234ABCD",
+                                    {"1234ABCD": ("Sony Mobile Communications", "NW-A105")})
+              == "Sony Mobile Communications NW-A105"
+              and devmod.phone_name("Nintendo_SNES_Mini_9F3A", {}) == "Nintendo SNES Mini",
+              "a phone's name without its serial number, escapes or underscores")
         live_before = plugin.settings.get("active_service")
         stick = {"id": "devtest00001", "name": "WALKMAN", "kind": "usb", "paths": [lib]}
         await plugin._devices_changed([stick])
@@ -1766,6 +1774,16 @@ async def run():
               f"a plugged-in player is a source while it's there, read only, and not saved: {row}")
         await plugin.set_active_service(stick["id"])
         check(plugin.settings.get("active_service") == stick["id"], "it can be the live source")
+        await plugin.rename_device(stick["id"], "  My   Walkman ")
+        await plugin._devices_changed([stick])
+        check(plugin.devices[stick["id"]]["name"] == "My Walkman", "a device can be renamed")
+        await plugin._devices_changed([])
+        await plugin._devices_changed([stick])
+        check(plugin.devices[stick["id"]]["name"] == "My Walkman",
+              "and keeps the name the next time it's plugged in")
+        await plugin.rename_device(stick["id"], "")
+        check(plugin.devices[stick["id"]]["name"] == "WALKMAN", "an empty name goes back to its own")
+        await plugin.set_active_service(stick["id"])
         await plugin._devices_changed([])
         state = await plugin.get_state()
         check(plugin.settings.get("active_service") == live_before and stick["id"] not in plugin.instances

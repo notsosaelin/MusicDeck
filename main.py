@@ -235,12 +235,15 @@ class Plugin:
                 back = self.before_device if self._known(self.before_device) else None
                 self.settings.set("active_service", back or next((s["id"] for s in self.settings.services()), None))
             decky.logger.info(f"Unplugged: {gone['name']}")
+        names = self.settings.get("device_names") or {}
         for device in found:
+            own = device["name"]
+            device = {**device, "name": names.get(device["id"]) or own}
             if device["kind"] == "cd":
                 service = {"id": device["id"], "type": AudioCdService.type, "name": device["name"],
                            "config": {k: device[k] for k in ("drive", "toc", "disc_id")}, "device": "cd"}
             else:
-                service = {"id": device["id"], "type": DeviceService.type, "name": device["name"],
+                service = {"id": device["id"], "type": DeviceService.type, "name": device["name"], "own_name": own,
                            "config": {"paths": device["paths"], "kind": device["kind"]}, "device": device["kind"]}
             if self.devices.get(device["id"]) != service:
                 new = device["id"] not in self.devices
@@ -422,6 +425,22 @@ class Plugin:
                 self.before_device = current
             self.settings.set("active_service", instance_id)
             await _announce_change()
+
+    async def rename_device(self, instance_id: str, name: str) -> None:
+        """A plugged-in device's own name for it (a phone's firmware can say "TRINKET-IOT-IDP"), kept
+        for next time; empty goes back to the one it says."""
+        if not isinstance(instance_id, str) or instance_id not in self.devices or not isinstance(name, str):
+            return
+        names = dict(self.settings.get("device_names") or {})
+        name = " ".join(name.split())[:60]
+        if name:
+            names[instance_id] = name
+        else:
+            names.pop(instance_id, None)
+        self.settings.set("device_names", names)
+        device = self.devices[instance_id]
+        device["name"] = name or device.get("own_name") or device["name"]
+        await _announce_change()
 
     @_when_ready
     async def test_service(self, instance_id: str) -> dict[str, Any]:

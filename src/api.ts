@@ -271,6 +271,8 @@ export const removeService = callable<[id: string], void>("remove_service");
 export const setActiveService = callable<[id: string], void>("set_active_service");
 export const testService = callable<[id: string], Result<string>>("test_service");
 export const rescan = callable<[id: string], void>("rescan");
+/** A plugged-in device's name, kept for next time; "" goes back to the one it gives itself. */
+export const renameDevice = callable<[id: string, name: string], void>("rename_device");
 export const getHome = callable<[id: string], Result<Section[]>>("home");
 /** Genres, moods and charts, for sources with feature "browse" */
 export const getBrowse = callable<[id: string], Result<Section[]>>("browse");

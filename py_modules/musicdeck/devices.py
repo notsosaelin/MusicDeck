@@ -23,6 +23,7 @@ import hashlib
 import os
 import re
 import shutil
+import urllib.parse
 from typing import Any, Awaitable, Callable, Optional
 
 from . import cd, debuglog
@@ -56,6 +57,57 @@ def _uuids() -> dict[str, str]:
     return found
 
 
+SERIAL_TAG = re.compile(r"(?:^|[\s_-]+)S/?N\s*[:#]\s*[0-9A-Za-z]+", re.IGNORECASE)
+
+
+def tidy_name(vendor: str, product: str, serial: str = "") -> str:
+    """A device's name as it says it over USB, made readable: "HiBy" + "TRINKET-IOT-IDP _SN:AC53E709" is
+    "HiBy TRINKET-IOT-IDP". Serial numbers out (the device's, and "SN:..." tags firmware leaves in its
+    model), underscores as spaces, the maker once."""
+    text = product.replace(serial, " ") if serial else product
+    text = SERIAL_TAG.sub(" ", text).replace("_", " ")
+    text = re.sub(r"\s+", " ", text).strip(" -:")
+    vendor = re.sub(r"\s+", " ", vendor.replace("_", " ")).strip()
+    if vendor and not text.lower().startswith(vendor.lower()):
+        text = f"{vendor} {text}".strip()
+    return text or vendor
+
+
+def _usb_names() -> dict[str, tuple[str, str]]:
+    """{serial: (maker, product)} of what's plugged in by USB, as each says it (sysfs)."""
+    found = {}
+    try:
+        for name in os.listdir("/sys/bus/usb/devices"):
+            folder = os.path.join("/sys/bus/usb/devices", name)
+            fields = []
+            for field in ("serial", "manufacturer", "product"):
+                try:
+                    with open(os.path.join(folder, field), "r", encoding="utf-8", errors="replace") as f:
+                        fields.append(f.read().strip())
+                except OSError:
+                    fields.append("")
+            if fields[0]:
+                found[fields[0]] = (fields[1], fields[2])
+    except OSError:
+        pass
+    return found
+
+
+def phone_name(host: str, usb_names: dict[str, tuple[str, str]]) -> str:
+    """GVfs names a phone's folder <maker>_<model>_<serial>, spaces as underscores, URL-escaped
+    ("HiBy_TRINKET-IOT-IDP__SN%3AAC53E709_ac53e709"). The device's own names (sysfs, matched by the
+    serial at the end) keep their spaces; failing that, the folder's are used."""
+    text = urllib.parse.unquote(host)
+    for serial, (vendor, product) in usb_names.items():
+        if product and text.endswith("_" + serial.replace(" ", "_")):
+            return tidy_name(vendor, product, serial)
+    head, _, serial = text.rpartition("_")
+    if not head or not re.search(r"\d", serial) or len(serial) < 4:  # "Old_Walkman": no serial on the end
+        head, serial = text, ""
+    vendor, _, product = head.partition("_")
+    return tidy_name(vendor, product, serial)
+
+
 def usb_storage(mounts_text: str, user: str, uuids: dict[str, str]) -> list[dict[str, Any]]:
     """The USB mass storage mounted for `user` (MP3 players, iPods, sticks), from /proc/self/mounts."""
     found = []
@@ -74,7 +126,7 @@ def usb_storage(mounts_text: str, user: str, uuids: dict[str, str]) -> list[dict
     return found
 
 
-def phone_storage(gvfs_dir: str) -> list[dict[str, Any]]:
+def phone_storage(gvfs_dir: str, usb_names: Optional[dict[str, tuple[str, str]]] = None) -> list[dict[str, Any]]:
     """Phones mounted by GVfs: /run/user/<uid>/gvfs/mtp:host=<name>/<storage>/Music (and the others in
     PHONE_MUSIC); a phone whose storages have none of them is played whole."""
     found = []
@@ -90,7 +142,7 @@ def phone_storage(gvfs_dir: str) -> list[dict[str, Any]]:
             continue  # still mounting, or the phone said no
         paths = [os.path.join(s, folder) for s in storages for folder in PHONE_MUSIC
                  if os.path.isdir(os.path.join(s, folder))]
-        name = host.partition("=")[2].replace("_", " ")
+        name = phone_name(host.partition("=")[2], usb_names or {})
         found.append({"id": _device_id("mtp:" + host), "name": name, "kind": "mtp", "paths": paths or storages})
     return found
 
@@ -178,7 +230,7 @@ class DeviceWatcher:
         except OSError:
             mounts = ""
         return (usb_storage(mounts, self.user, _uuids())
-                + phone_storage(f"/run/user/{self.uid}/gvfs")
+                + phone_storage(f"/run/user/{self.uid}/gvfs", _usb_names())
                 + audio_cds(cd.drives(), cd.has_audio_disc, cd.read_toc, self.discs))
 
     async def _run(self) -> None:

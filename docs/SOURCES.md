@@ -125,6 +125,11 @@ source (`MusicService.remove`).
   process doesn't have it); MusicDeck mounts those not yet mounted and plays each storage's Music,
   Download and Podcasts folders from `/run/user/<uid>/gvfs/mtp:host=.../`. Needs GVfs in game mode
   (Bazzite) and the phone set to File transfer. Reading over MTP is slow: the first look at a phone takes a while.
+- **Names**: USB storage by its file system's label; phones by what they say over USB (sysfs `manufacturer`
+  and `product`, matched to GVfs's folder by the serial at its end), else GVfs's folder name, either way
+  without serial numbers or `SN:` tags (`phone_name`, `tidy_name`). Some firmware says only a board's code
+  name ("TRINKET-IOT-IDP"): the user can rename a device (`rename_device`, kept in settings as
+  `device_names` by device id; an empty name goes back to its own).
 - **Unplugged**: its source goes; if it was live, the source live before it is live again.
 - Polled every 3 s (`DeviceWatcher`). Linux only.
 

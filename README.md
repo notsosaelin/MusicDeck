@@ -79,7 +79,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Plug in a music player:** an MP3 player, an iPod in disk mode, a USB stick or a phone set to "File
   transfer" shows up in Decky → MusicDeck as a source while it's plugged in, as on the Xbox: pick it to
   browse and play what's on it. MusicDeck only reads it (no tag edits). Phones need a system with GVfs in
-  game mode (Bazzite has it); on others, USB storage only.
+  game mode (Bazzite has it); on others, USB storage only. Its menu has Rename, for players whose
+  firmware calls them by a code name; the name stays for next time.
 - **Audio CDs:** a CD in a drive plugged into the device is a source too, named by MusicBrainz, and its
   album page can rip it to your Local files folder as tagged FLAC (with ffmpeg, which Bazzite has).
 - **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My

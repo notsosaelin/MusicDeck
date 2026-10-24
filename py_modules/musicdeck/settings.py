@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     # music that starts with a game: [{"instance_id", "appid", "game", "collection": {id, kind, title, art}}],
     # one per source and game (it only plays while its source is live)
     "game_music": [],
+    # names given to plugged-in devices, {device id: name}, kept for the next time they're plugged in
+    "device_names": {},
     # the media center (src/components/media): the tab it opens on, its look, which tabs show, and
     # minutes idle on Now Playing before the screen goes off (0 = never)
     "center": {"open_on": "last", "background": "art", "cards": "medium", "lyrics": "medium",
