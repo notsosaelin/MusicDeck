@@ -10,11 +10,9 @@ export const DEFAULT_CENTER: CenterSettings = {
   show_library: true,
   show_browse: true,
   idle_off: 0,
-  grid_cols: 0,
-  grid_rows: 0,
 };
 
-/** Changes some of the media center's choices (from its Settings, the panel's, or a grid's layout button). */
+/** Changes some of the media center's choices (from its Settings or the panel's). */
 export async function setCenter(patch: Partial<CenterSettings>) {
   const current: Partial<CenterSettings> = { ...pluginState.get()?.center, ...patch };
   // only the choices there are: the backend refuses the whole setting over one it doesn't know

@@ -826,16 +826,6 @@ const CHOICES: { key: keyof CenterSettings; label: string; options: { data: any;
     ],
   },
   {
-    key: "grid_cols",
-    label: "Grid columns",
-    options: [{ data: 0, label: "As many as fit" }, ...[1, 2, 3, 4, 5].map((n) => ({ data: n, label: String(n) }))],
-  },
-  {
-    key: "grid_rows",
-    label: "Grid rows",
-    options: [{ data: 0, label: "As many as fit" }, ...[1, 2, 3, 4, 5].map((n) => ({ data: n, label: String(n) }))],
-  },
-  {
     key: "lyrics",
     label: "Lyrics size",
     options: [

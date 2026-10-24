@@ -616,7 +616,7 @@ export const AllPage: FC<{
     )}
     {tracks.length > 0 &&
       (allStations(tracks) ? (
-        <FittedGrid title={<SectionTitle>{items.length ? "Stations" : title}</SectionTitle>} gap={18}>
+        <FittedGrid title={<SectionTitle>{items.length ? "Stations" : title}</SectionTitle>}>
           {tracks.map((t, i) => (
             <StationCard
               key={t.id + i}
@@ -752,7 +752,7 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
     return (
       <>
         {shelves}
-        <FittedGrid title={mixed && <SectionTitle>Stations</SectionTitle>} gap={18}>
+        <FittedGrid title={mixed && <SectionTitle>Stations</SectionTitle>}>
           {page.tracks.map((t, i) => (
             <StationCard
               key={t.id + i}

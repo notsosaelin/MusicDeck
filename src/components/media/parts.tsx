@@ -1,18 +1,6 @@
-import {
-  DialogBody,
-  DialogButton,
-  DialogFooter,
-  DialogHeader,
-  DropdownItem,
-  Focusable,
-  ModalRoot,
-  Spinner,
-  gamepadDialogClasses,
-  showModal,
-} from "@decky/ui";
+import { Focusable, Spinner, gamepadDialogClasses } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, createContext, useContext, useEffect, useRef, useState } from "react";
-import { FaCompactDisc, FaFolder, FaList, FaTh, FaUser } from "react-icons/fa";
-import { setCenter } from "./center";
+import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
 import { mediaUrl, pluginState, useStore } from "../../store";
@@ -293,7 +281,7 @@ export const CardGrid: FC<{ title: string; count: number; children: (shown: numb
           {title}
         </SectionTitle>
       }
-      gap={22}
+
       onNearEnd={() => shown < count && setShown(Math.min(count, shown + GRID_STEP))}
     >
       {children(Math.min(shown, count))}
@@ -677,9 +665,7 @@ export const Tile: FC<{ c: Collection; onOpen: () => void; width?: number | stri
  */
 export const TileGrid: FC<{ title?: ReactNode; children: ReactNode }> = ({ title, children }) => (
   // squares as big as the covers elsewhere, so a page of genres or countries lines up like one of albums
-  <FittedGrid title={title} gap={22}>
-    {children}
-  </FittedGrid>
+  <FittedGrid title={title}>{children}</FittedGrid>
 );
 
 /** Live stations, not tracks: a page or shelf of them is shown as stations, played one at a time. */
@@ -1036,129 +1022,55 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR } = {}
   };
 }
 
-/** A card's name and artist under its cover, about how tall (a grid measures the real height) */
-const CAPTION = 48;
-/** The smallest cover that still has its name under it in a grid; smaller, the grid shows covers alone */
-const MIN_CAPTIONED = 110;
-/** The space between covers in a grid of covers alone */
-const BARE_GAP = 10;
-
-/** What a grid's layout button and Settings offer for its columns and rows: as many as fit, or 1 to 5 */
-const GRID_COUNTS = [
-  { data: 0, label: "As many as fit" },
-  ...[1, 2, 3, 4, 5].map((n) => ({ data: n, label: String(n) })),
-];
-
-/** The grid layout picker: columns and rows, each change showing at once in the grid behind it. */
-const GridLayoutModal: FC<{ closeModal?: () => void }> = ({ closeModal }) => {
-  const center = useStore(pluginState)?.center;
-  return (
-    <ModalRoot closeModal={closeModal} onCancel={closeModal}>
-      <DialogHeader>Grid layout</DialogHeader>
-      <DialogBody>
-        <DropdownItem
-          label="Columns"
-          rgOptions={GRID_COUNTS}
-          selectedOption={center?.grid_cols ?? 0}
-          onChange={(o) => setCenter({ grid_cols: o.data })}
-        />
-        <DropdownItem
-          label="Rows"
-          rgOptions={GRID_COUNTS}
-          selectedOption={center?.grid_rows ?? 0}
-          onChange={(o) => setCenter({ grid_rows: o.data })}
-        />
-      </DialogBody>
-      <DialogFooter>
-        <DialogButton onClick={closeModal}>Done</DialogButton>
-      </DialogFooter>
-    </ModalRoot>
-  );
-};
-
-/** A grid's layout, at its title's end: "5 × 2" (Fit for as many as fit). A opens the picker. */
-const GridLayoutButton: FC = () => {
-  const center = useStore(pluginState)?.center;
-  const cols = center?.grid_cols ?? 0;
-  const rows = center?.grid_rows ?? 0;
-  const label = cols || rows ? `${cols || "Fit"} × ${rows || "Fit"}` : "Layout";
-  const open = () => showModal(<GridLayoutModal />);
-  return (
-    <Focusable
-      className="mc-pill"
-      noFocusRing
-      onActivate={open}
-      onClick={open}
-      onOKActionDescription="Grid layout"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 14px",
-        borderRadius: 16,
-        fontSize: 13,
-        background: "rgba(255, 255, 255, 0.1)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      <FaTh style={{ opacity: 0.7 }} /> {label}
-    </Focusable>
-  );
-};
+/** The smallest cover a grid shows (or, when bigger, under a third of its height): fewer rows rather than smaller covers */
+const MIN_COVER = 100;
+/** The space between a grid's covers */
+const GRID_GAP = 14;
 
 /**
- * A grid of cards as a screen of whole rows, never a row cut off, the way Steam's own grids page:
- * - its layout as chosen (Settings, or the button at its title): so many columns and rows on screen, the
- *   covers sized to fill them exactly (by the width for its columns, by the height under the title for
- *   its rows, whichever's tighter); or as many as fit at the cover size chosen;
- * - the rows centred in the room, the rest slid into view a row at a time as the controller moves down.
- *   The slide is a transform, so held down the stick runs through the rows smoothly (each slide picks up
- *   from where the last one was).
+ * The grid's shape for its room: the most rows that keep the covers a good size, as many columns as
+ * those covers take across, and the covers then sized to fill the width and the height exactly (a card
+ * is its cover with 2px round it). Big screens get more and bigger covers; small ones, fewer rows.
+ */
+function gridShape(width: number, room: number, gap: number): { cols: number; size: number } {
+  let shape = { cols: 1, size: Math.max(40, Math.floor(Math.min(width, room) - 4)) };
+  for (let rows = 1; rows <= 6; rows++) {
+    const tall = (room - (rows - 1) * gap) / rows - 4;
+    const cols = Math.max(1, Math.round((width + gap) / (tall + 4 + gap)));
+    const size = Math.floor(Math.min(tall, (width - (cols - 1) * gap) / cols - 4));
+    if (rows === 1 || size >= Math.max(MIN_COVER, room * 0.3)) shape = { cols, size };
+  }
+  return shape;
+}
+
+/**
+ * A grid of covers filling the screen, never a row cut off, the way Steam's own grids page:
+ * - its shape picked for the room (gridShape): covers edge to edge across and top to bottom under the
+ *   title, the cover in focus named at the title (names under every cover would leave the covers small);
+ * - the rest slid into view a row at a time as the controller moves down. The slide is a transform, so
+ *   held down the stick runs through the rows smoothly (each slide picks up from where the last one was).
  * The block is a row to snapRows: entering it brings it up under the tabs. `onNearEnd`: more cards wanted
  * (a long list made a step at a time).
  */
 export const FittedGrid: FC<{
   title?: ReactNode;
-  gap: number;
   onNearEnd?: () => void;
   children: ReactNode;
-}> = ({ title, gap, onNearEnd, children }) => {
+}> = ({ title, onNearEnd, children }) => {
   const block = useRef<HTMLDivElement>(null);
   const grid = useRef<HTMLDivElement>(null);
-  const center = useStore(pluginState)?.center;
-  const cols = center?.grid_cols ?? 0;
-  const rowsWanted = center?.grid_rows ?? 0;
-  const cardSize = useCardSize();
-  // the room the grid has (wide, and tall under its title), and how tall a card's name is under its cover
+  const gap = GRID_GAP;
+  // the room the grid has: wide, and tall under its title
   const [space, setSpace] = useState<{ width: number; room: number } | null>(null);
-  const [caption, setCaption] = useState(48);
   const [fit, setFit] = useState<{ rows: number; pitch: number; total: number; spare: number } | null>(null);
   const [offset, setOffset] = useState(0);
+  const [named, setNamed] = useState("");
   const fitNow = useRef(fit);
   fitNow.current = fit;
   const offsetNow = useRef(0);
   const nearEnd = useRef(onNearEnd);
   nearEnd.current = onNearEnd;
-  const gapNow = useRef(gap);
-
-  // a chosen layout: the cover size that fills it (a card is its cover, 2px round it, its name below).
-  // When names under the covers would leave the covers small (many rows on a short screen), the grid
-  // is the covers alone, closer together, and the one in focus is named at its title: the rows asked
-  // for are the rows shown.
-  const roomy = (wanted: number) => space && (space.room - wanted * gap) / wanted - CAPTION - 4 >= MIN_CAPTIONED;
-  const bare = !!rowsWanted && !!space && !roomy(rowsWanted);
-  const gapUsed = bare ? BARE_GAP : gap;
-  const captionUsed = bare ? 0 : caption;
-  const fromWidth = cols && space ? (space.width - (cols - 1) * gapUsed) / cols - 4 : Infinity;
-  const fromHeight =
-    rowsWanted && space ? (space.room - rowsWanted * gapUsed) / rowsWanted - captionUsed - 4 : Infinity;
-  const fixed = Number.isFinite(Math.min(fromWidth, fromHeight))
-    ? Math.max(24, Math.floor(Math.min(fromWidth, fromHeight)))
-    : null;
-  const [named, setNamed] = useState("");
-  gapNow.current = gapUsed;
-  const track = fixed !== null ? `${fixed + 4}px` : `calc(${cardSize} + 4px)`;
-  const columns = cols ? `repeat(${cols}, ${track})` : `repeat(auto-fill, ${track})`;
+  const shape = space ? gridShape(space.width, space.room, gap) : null;
 
   // each row's top in the grid (a transform doesn't move these)
   const rowTops = () =>
@@ -1179,16 +1091,16 @@ export const FittedGrid: FC<{
     const measure = () => {
       // the title above the rows (the block is the rows' frame's offsetParent: its top is the title's height)
       const head = g.parentElement?.offsetTop ?? 0;
-      const room = scroller.clientHeight - TAB_BAR - 8 - head - 24;
+      const room = scroller.clientHeight - TAB_BAR - 8 - head - 16;
       setSpace((was) =>
         was && was.width === g.clientWidth && was.room === room ? was : { width: g.clientWidth, room },
       );
       const rows = rowTops();
       const first = g.children[0] as HTMLElement | undefined;
       if (!rows.length || !first) return setFit(null);
-      const pitch = rows.length > 1 ? rows[1] - rows[0] : first.offsetHeight + gapNow.current;
-      const fits = Math.max(1, Math.floor(room / pitch));
-      setFit({ rows: fits, pitch, total: rows.length, spare: Math.max(0, room - fits * pitch) });
+      const pitch = rows.length > 1 ? rows[1] - rows[0] : first.offsetHeight + gap;
+      const fits = Math.max(1, Math.floor((room + gap) / pitch));
+      setFit({ rows: fits, pitch, total: rows.length, spare: Math.max(0, room + gap - fits * pitch) });
     };
     measure();
     const Observer: typeof ResizeObserver = (b.ownerDocument.defaultView as any)?.ResizeObserver ?? ResizeObserver;
@@ -1197,13 +1109,6 @@ export const FittedGrid: FC<{
     watch.observe(g);
     return () => watch.disconnect();
   }, []);
-  // the name under a cover as it really is, so the rows chosen fill the height exactly
-  useEffect(() => {
-    const first = grid.current?.children[0] as HTMLElement | undefined;
-    if (fixed === null || bare || !first) return;
-    const real = first.offsetHeight - fixed - 4;
-    if (Math.abs(real - caption) > 1) setCaption(real);
-  });
 
   const showRow = (row: number) => {
     const f = fitNow.current;
@@ -1235,14 +1140,13 @@ export const FittedGrid: FC<{
   return (
     // not a slot (snapRows' rows of one height): it fits itself to the screen
     <div ref={block} className="mc-row-block" style={{ position: "relative", marginBottom: 28 }}>
-      <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
         <div style={{ flex: 1, minWidth: 0 }}>{title}</div>
-        {bare && named && (
-          // the covers alone: the one in focus named here
+        {named && (
+          // the cover in focus, named
           <div
             style={{
-              marginBottom: 12,
-              maxWidth: "45%",
+              maxWidth: "55%",
               fontSize: 14,
               opacity: 0.8,
               whiteSpace: "nowrap",
@@ -1253,22 +1157,19 @@ export const FittedGrid: FC<{
             {named}
           </div>
         )}
-        <div style={{ marginBottom: 12 }}>
-          <GridLayoutButton />
-        </div>
-      </Focusable>
+      </div>
       <div
         style={{
           position: "relative",
-          // the rows centred in the room they have; the next row a whole gap below, out of sight
+          // the rows in the middle of the room; the next row a whole gap below, out of sight
           marginTop: paged ? Math.floor(fit.spare / 2) : 0,
           height: paged ? fit.rows * fit.pitch : undefined,
           overflowY: paged ? "clip" : "visible",
           overflowX: "visible",
         }}
       >
-        <CardSizeOverride.Provider value={fixed !== null ? `${fixed}px` : null}>
-          <CoverOnly.Provider value={bare}>
+        <CardSizeOverride.Provider value={shape ? `${shape.size}px` : null}>
+          <CoverOnly.Provider value={true}>
             <Focusable
               ref={grid}
               className="mc-grid mc-fit"
@@ -1276,13 +1177,11 @@ export const FittedGrid: FC<{
               style={{
                 position: "relative",
                 display: "grid",
-                gridTemplateColumns: columns,
-                // a chosen layout one block, centred, spaced the same across as down (covers sized by the
-                // height leave room at the sides); as many as fit spread to the edges
-                justifyContent: cols ? "center" : "space-between",
-                gap: gapUsed,
-                // room for a focused card to grow, inside the clip
-                paddingTop: gapUsed / 2,
+                gridTemplateColumns: shape ? `repeat(${shape.cols}, ${shape.size + 4}px)` : "none",
+                justifyContent: "center",
+                gap,
+                // room for a focused cover to grow, inside the clip
+                paddingTop: gap / 2,
                 transform: `translateY(${-offset * (fit?.pitch ?? 0)}px)`,
                 transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1)",
               }}

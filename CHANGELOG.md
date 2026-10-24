@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.15.0
+
+- **Grids fill the screen on their own:** the columns-and-rows setting and the Layout button are gone. A
+  grid picks its shape for the screen it's on: as many rows as keep the covers a good size, and covers
+  sized to fill the width edge to edge and the height under the title (2 rows of 6 on a small screen,
+  3 rows of 6 on a Steam Deck). The cover in focus is named beside the grid's title.
+
 ## 0.14.2
 
 - A chosen grid layout stays one block in the middle, spaced the same across as down, rather than spread
