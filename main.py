@@ -1090,6 +1090,20 @@ class Plugin:
         return await _result(work())
 
     @_when_ready
+    async def save_to_library(self, instance_id: str, kind: str, collection_id: str, on: bool) -> dict[str, Any]:
+        """Saves an album or playlist to the user's library on the service, or follows an artist (`on`
+        False takes it back), for the kinds in the source's SAVES."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not isinstance(kind, str) or kind not in instance.SAVES or not isinstance(collection_id, str) \
+                    or not collection_id or not isinstance(on, bool):
+                raise ServiceError("This source can't keep that in your library")
+            await instance.save(kind, collection_id, on)
+            # Browse's tiles count what's saved
+            instance.forget_browse_info()
+        return await _result(work())
+
+    @_when_ready
     async def save_progress(self, instance_id: str, track: dict[str, Any], position: float, duration: float) -> None:
         """How far a long track (a podcast episode, a book) got, so it resumes there (feature "progress")."""
         instance = self.instances.get(instance_id)

@@ -13,6 +13,7 @@ import {
   centerTab,
   invalidateBrowserCache,
   navigation,
+  openInLibrary,
   openMediaCenter,
   panelTab,
   reopenMediaCenterIfShowing,
@@ -84,6 +85,8 @@ export default definePlugin(() => {
     // the media center: centerTab.set({ tab: "playing" }) shows a tab, openMediaCenter() opens it
     centerTab,
     openMediaCenter,
+    // an album's, artist's or playlist's page ({ id, kind, title }), in the media center when it's showing
+    openInLibrary,
     // another source's Home, Browse and Search in the media center, the live one left playing:
     // previewSource("<source id>"), then previewSource() to stop
     previewSource: (id?: string) => browsePreview.set({ id: id || null }),

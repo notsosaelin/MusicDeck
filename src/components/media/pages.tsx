@@ -66,6 +66,7 @@ import {
   mostCommon,
   playCollection,
   runAction,
+  useLibrarySave,
   useResult,
 } from "../Browser";
 import { confirmClearQueue } from "../Queue";
@@ -829,6 +830,7 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
   const game = useStore(runningGame);
   useStore(pluginState); // the game music choices
   const withGame = !!game && musicFor(game.appid, instanceId)?.collection.id === collection.id;
+  const saved = useLibrarySave(instanceId, collection, page);
   const pictured = collection.kind !== "list" && collection.kind !== "folder";
   const albumArtist = page && collection.kind === "album" ? mostCommon(page.tracks.map((t) => t.artist)) : undefined;
   const total = page?.tracks.reduce((sum, t) => sum + (t.duration || 0), 0) ?? 0;
@@ -884,6 +886,11 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
             {canSave(instanceId, collection) && page && page.tracks.length > 0 && (
               <PageButton label="Save playlist" onClick={() => saveCollection(instanceId, collection)}>
                 <FaPlus /> Save
+              </PageButton>
+            )}
+            {saved && (
+              <PageButton active={saved.on} onClick={saved.toggle}>
+                {saved.icon} {saved.label}
               </PageButton>
             )}
             {game && canPlayWithGame(collection) && page && page.tracks.length > 0 && (

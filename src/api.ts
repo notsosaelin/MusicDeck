@@ -91,6 +91,16 @@ export interface Page {
   notice?: string | null;
   /** MusicDeck playlists of a source that can download: whether it's downloaded, and how far */
   offline?: OfflineState | null;
+  /**
+   * an album, artist or playlist the source can keep in the user's library (saveToLibrary): whether it's
+   * there; style "library" (albums and playlists saved, artists followed) or "favourite" (a server's)
+   */
+  save?: SaveState | null;
+}
+
+export interface SaveState {
+  on: boolean;
+  style: "library" | "favourite";
 }
 
 export interface OfflineState {
@@ -384,6 +394,11 @@ export const collectionAction = callable<
   [id: string, kind: CollectionKind, collectionId: string, call: string],
   Result<string>
 >("collection_action");
+/** Saves an album or playlist to the user's library on the service, or follows an artist (Page.save). */
+export const saveToLibrary = callable<
+  [id: string, kind: CollectionKind, collectionId: string, on: boolean],
+  Result<null>
+>("save_to_library");
 export const saveProgress = callable<[id: string, track: Track, position: number, duration: number], void>(
   "save_progress",
 );

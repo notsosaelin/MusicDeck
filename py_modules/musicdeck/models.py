@@ -14,6 +14,9 @@ Page:       {"title", "subtitle", "art", "collections": [Collection], "tracks": 
                      {"label", "call"}: asks the source to do something (collection_action, e.g.
                      subscribing to a podcast), then the page reloads.
             notice = a sentence shown above the content (why there's nothing to play yet), or None
+            save = whether the page's album, artist or playlist is in the user's library on the service
+                   (saved, followed, starred), for sources whose SAVES has its kind: {"on", "style"}, or None.
+                   style: "library" (add to library; artists followed) or "favourite" (servers' favourites)
 Section:    {"title", "items": [Collection], "tracks": [Track]}   a home row of collections and/or tracks
 
 "art" is an opaque art id resolved by the service through the stream server (/art/...), or None.
@@ -51,12 +54,19 @@ def page(title: str, subtitle: str = "", art: Optional[str] = None,
          collections: Optional[list[dict[str, Any]]] = None,
          tracks: Optional[list[dict[str, Any]]] = None,
          extra: Optional[list[dict[str, Any]]] = None, tracks_first: bool = False,
-         action: Optional[dict[str, str]] = None, notice: Optional[str] = None) -> dict[str, Any]:
+         action: Optional[dict[str, str]] = None, notice: Optional[str] = None,
+         save: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     # tracks_first: show songs/videos above albums/artists/playlists (search results)
     return {"title": title, "subtitle": subtitle, "art": art,
             "collections": collections or [], "tracks": tracks or [],
             "extra": [e for e in extra or [] if e["tracks"]], "tracks_first": tracks_first,
-            "action": action, "notice": notice}
+            "action": action, "notice": notice, "save": save}
+
+
+def saved(on: Optional[bool], style: str = "library") -> Optional[dict[str, Any]]:
+    """A page's save state (Page.save): None when it isn't known (the service didn't say), so no
+    button shows rather than a wrong one."""
+    return None if on is None else {"on": bool(on), "style": style}
 
 
 # How the media center shows a section (its tabs, see MusicService.tab):

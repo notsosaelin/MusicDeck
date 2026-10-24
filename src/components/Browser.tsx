@@ -10,17 +10,21 @@ import {
   TextField,
   showModal,
 } from "@decky/ui";
-import { FC, Fragment, ReactNode, useEffect, useState } from "react";
+import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import {
   FaCheck,
   FaDownload,
   FaExternalLinkAlt,
   FaGamepad,
+  FaHeart,
   FaHistory,
   FaPlay,
   FaPlus,
   FaRandom,
+  FaRegHeart,
   FaSearch,
+  FaUserCheck,
+  FaUserPlus,
 } from "react-icons/fa";
 import {
   Collection,
@@ -28,6 +32,7 @@ import {
   OfflineState,
   Page,
   Result,
+  SaveState,
   Section,
   Track,
   collectionAction,
@@ -37,6 +42,7 @@ import {
   openCollection,
   playlistOffline,
   retryDownloads,
+  saveToLibrary,
   search,
   searchHistory,
   setPlaylistOffline,
@@ -400,6 +406,60 @@ export async function callAction(instanceId: string, c: Collection, call: string
   if (result.ok) invalidateBrowserCache();
 }
 
+/** What a page's library button says and shows, by what it holds and how the source keeps it. */
+export function saveLook(kind: Collection["kind"], style: SaveState["style"], on: boolean) {
+  if (style === "favourite")
+    return { label: on ? "In favourites" : "Add to favourites", icon: on ? <FaHeart /> : <FaRegHeart /> };
+  if (kind === "artist") return { label: on ? "Following" : "Follow", icon: on ? <FaUserCheck /> : <FaUserPlus /> };
+  return { label: on ? "In library" : "Add to library", icon: on ? <FaCheck /> : <FaPlus /> };
+}
+
+/**
+ * An album's, artist's or playlist's place in the user's library on the service (Page.save): whether it's
+ * there, and a toggle that shows the change at once and takes it back if the service refuses. Null when
+ * the page has no such button.
+ */
+export function useLibrarySave(instanceId: string, collection: Collection, page: Page | null) {
+  const [on, setOn] = useState(page?.save?.on);
+  const busy = useRef(false);
+  // the page as fetched again (after a change, or another view's) is what's true
+  useEffect(() => setOn(page?.save?.on), [page?.save?.on, collection.id]);
+  if (!page?.save || on === undefined) return null;
+  const { style } = page.save;
+  const toggle = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    const next = !on;
+    setOn(next);
+    const result = await saveToLibrary(instanceId, collection.kind, collection.id, next).catch((e) => ({
+      ok: false as const,
+      error: String(e),
+    }));
+    busy.current = false;
+    if (!result.ok) {
+      setOn(!next);
+      notify(collection.title, result.error);
+      return;
+    }
+    // the library's own lists (Albums, Artists, Favourites) now hold it, or don't
+    invalidateBrowserCache();
+    const words =
+      style === "favourite"
+        ? next
+          ? "Added to favourites"
+          : "Removed from favourites"
+        : collection.kind === "artist"
+          ? next
+            ? "Following"
+            : "No longer following"
+          : next
+            ? "Added to your library"
+            : "Removed from your library";
+    notify(page.title || collection.title, words);
+  };
+  return { on, toggle, ...saveLook(collection.kind, style, on) };
+}
+
 /**
  * A page's header button: installing a soundtrack runs Steam's own install dialog (in the main window,
  * so the menu closes); web pages open in Steam's browser. No other steam:// command is run, whatever
@@ -483,6 +543,8 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
   const game = useStore(runningGame);
   useStore(pluginState); // the game music choices
   const withGame = !!game && musicFor(game.appid, instanceId)?.collection.id === collection.id;
+  const saved = useLibrarySave(instanceId, collection, page);
+  const playable = !!page && page.tracks.length > 0;
   return (
     <>
       <Header
@@ -509,6 +571,11 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
                 <FaPlus />
               </IconButton>
             )}
+            {saved && (
+              <IconButton label={saved.label} active={saved.on} grow={0.45} onClick={saved.toggle}>
+                {saved.icon}
+              </IconButton>
+            )}
             {game && canPlayWithGame(collection) && (
               <IconButton
                 // short: the hint bar has one line, and a game's name can fill it
@@ -520,6 +587,14 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
                 <FaGamepad />
               </IconButton>
             )}
+          </ButtonRow>
+        )}
+        {/* an artist with no songs of their own on the page: the button gets a row, and its words */}
+        {saved && !playable && (
+          <ButtonRow>
+            <IconButton active={saved.on} onClick={saved.toggle}>
+              {saved.icon} {saved.label}
+            </IconButton>
           </ButtonRow>
         )}
         {page?.offline && page.tracks.length > 0 && (

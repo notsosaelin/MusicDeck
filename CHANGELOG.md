@@ -3,6 +3,20 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.17.0
+
+- **Keep albums, artists and playlists in your library on the service**, from their pages in the Quick
+  Access panel and the media center:
+  - **Spotify:** Add to library for albums and other people's playlists; Follow for artists.
+  - **Qobuz** and **TIDAL:** the same (they keep them as favourites and in My Collection).
+  - **Navidrome**, **Jellyfin**, **Emby** and **Plex:** Add to favourites for albums and artists (starred on
+    Navidrome, five stars on Plex).
+  - The button shows whether it's there already, and what you add shows in the source's Albums, Artists,
+    Playlists and Favourites at once.
+- Plex's Favourites list your favourite artists too.
+- Spotify asks for permission to follow artists when you sign in. Sources signed in before this version
+  say so when you first follow someone: edit the source and sign in again.
+
 ## 0.16.0
 
 - **One grid, the same everywhere** (Show all, genres, moods, countries, stations, albums):

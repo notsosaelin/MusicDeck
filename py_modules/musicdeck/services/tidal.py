@@ -34,6 +34,11 @@ DEFAULT_QUALITY = "LOSSLESS"
 PAGE = 100
 MAX_TRACKS = 2000
 FAVOURITES_TTL = 300
+# an album's, artist's (digits) or playlist's (a UUID) id, as it goes into a path
+TIDAL_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+# favorites/ids' keys, and the favourites paths, for each kind of collection
+SAVE_KINDS = {"album": ("ALBUM", "albums", "albumIds"), "artist": ("ARTIST", "artists", "artistIds"),
+              "playlist": ("PLAYLIST", "playlists", "uuids")}
 # Decky's bundled Python has no xml package, so the (small, flat) DASH manifest is read with patterns
 DASH_TAG = re.compile(r"<(?:\w+:)?(Representation|SegmentTemplate|S)\b([^>]*?)/?>")
 DASH_ATTR = re.compile(r'([\w:]+)="([^"]*)"')
@@ -112,6 +117,9 @@ class TidalService(MusicService):
         self.token_lock = asyncio.Lock()
         self.favourites: set[str] = set()
         self.favourites_at = 0.0
+        # favourite albums, artists and playlists by kind (My Collection), from the same request; None
+        # until TIDAL has answered
+        self.collection: Optional[dict[str, set[str]]] = None
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
@@ -260,12 +268,15 @@ class TidalService(MusicService):
         return models.collection(f"mix:{m['id']}", "playlist", m.get("title", ""), m.get("subTitle", ""), art)
 
     async def _load_favourites(self, force: bool = False) -> None:
-        """Favourite track ids in one request, so hearts show on every list without asking per track."""
+        """Favourite track ids in one request, so hearts show on every list without asking per track; and
+        the albums, artists and playlists in My Collection, for their pages' buttons."""
         if not force and time.time() - self.favourites_at < FAVOURITES_TTL:
             return
         try:
             ids = await self._get(f"users/{self._user()}/favorites/ids")
             self.favourites = {str(x) for x in (ids or {}).get("TRACK", [])}
+            self.collection = {kind: {str(x) for x in (ids or {}).get(key, [])}
+                               for kind, (key, _, _) in SAVE_KINDS.items()}
             self.favourites_at = time.time()
         except ServiceError as e:
             debuglog.debug("tidal", "favourites unavailable", error=str(e))
@@ -373,7 +384,8 @@ class TidalService(MusicService):
         if kind == "album":
             a, items = await asyncio.gather(self._get(f"albums/{id}"), self._all(f"albums/{id}/tracks"))
             c = self._album(a)
-            return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(items))
+            return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(items),
+                               save=models.saved(self._saved("album", id)))
         if kind == "artist":
             a, top, albums, singles = await asyncio.gather(
                 self._get(f"artists/{id}"), self._get(f"artists/{id}/toptracks", limit=10),
@@ -385,7 +397,8 @@ class TidalService(MusicService):
             releases.sort(key=lambda x: x.get("releaseDate") or "", reverse=True)
             c = self._artist(a)
             return models.page(c["title"], c["subtitle"], c["art"], collections=[self._album(x) for x in releases],
-                               tracks=self._tracks(top.get("items", [])) if isinstance(top, dict) else [])
+                               tracks=self._tracks(top.get("items", [])) if isinstance(top, dict) else [],
+                               save=models.saved(self._saved("artist", id)))
         if kind == "playlist" and id.startswith("mix:"):
             page = await self._get("pages/mix", mixId=id[4:], deviceType="BROWSER", locale="en_US")
             title, tracks = page.get("title") or "Mix", []
@@ -400,7 +413,10 @@ class TidalService(MusicService):
         if kind == "playlist":
             p, items = await asyncio.gather(self._get(f"playlists/{id}"), self._all(f"playlists/{id}/items"))
             c = self._playlist(p)
-            return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(items))
+            # the user's own playlists are in My Collection already: no button
+            own = str((p.get("creator") or {}).get("id")) == self._user()
+            return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(items),
+                               save=None if own else models.saved(self._saved("playlist", id)))
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:
@@ -421,6 +437,22 @@ class TidalService(MusicService):
         else:
             await self._request("DELETE", f"users/{self._user()}/favorites/tracks/{track_id}")
             self.favourites.discard(track_id)
+
+    SAVES = frozenset(SAVE_KINDS)
+
+    def _saved(self, kind: str, id: str) -> Optional[bool]:
+        return None if self.collection is None else id in self.collection[kind]
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        if not TIDAL_ID.match(id):
+            raise ServiceError("Not found on TIDAL")
+        _, path, field = SAVE_KINDS[kind]
+        if on:
+            await self._request("POST", f"users/{self._user()}/favorites/{path}", data={field: id})
+        else:
+            await self._request("DELETE", f"users/{self._user()}/favorites/{path}/{id}")
+        if self.collection is not None:
+            (self.collection[kind].add if on else self.collection[kind].discard)(id)
 
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
         data = await self._get(f"tracks/{track['id']}/radio", limit=100)

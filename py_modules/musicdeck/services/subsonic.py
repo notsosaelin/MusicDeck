@@ -228,7 +228,8 @@ class SubsonicService(MusicService):
             a = (await self._call("getAlbum", id=id))["album"]
             c = self._album(a)
             return models.page(c["title"], c["subtitle"], c["art"],
-                               tracks=[self._track(s) for s in a.get("song", [])])
+                               tracks=[self._track(s) for s in a.get("song", [])],
+                               save=models.saved("starred" in a, "favourite"))
         if kind == "artist":
             a = (await self._call("getArtist", id=id))["artist"]
             albums = sorted(a.get("album", []), key=lambda x: x.get("year") or 0, reverse=True)
@@ -239,7 +240,7 @@ class SubsonicService(MusicService):
                 songs = []  # needs an external metadata agent (Last.fm) on the server
             return models.page(a.get("name", ""), models.count(len(albums), "album"), a.get("coverArt"),
                                collections=[self._album(x) for x in albums],
-                               tracks=[self._track(x) for x in songs])
+                               tracks=[self._track(x) for x in songs], save=models.saved("starred" in a, "favourite"))
         if kind == "playlist":
             p = (await self._call("getPlaylist", id=id))["playlist"]
             return models.page(p.get("name", ""), "Playlist", p.get("coverArt"),
@@ -267,6 +268,12 @@ class SubsonicService(MusicService):
 
     async def star(self, track_id: str, starred: bool) -> None:
         await self._call("star" if starred else "unstar", id=track_id)
+
+    SAVES = frozenset({"album", "artist"})
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        """Starred albums and artists, as every Subsonic app shows them."""
+        await self._call("star" if on else "unstar", **{f"{kind}Id": id})
 
     async def scrobble(self, track_id: str, submission: bool) -> None:
         # submission=false marks "now playing"; true records a finished play (play counts, Last.fm via server)

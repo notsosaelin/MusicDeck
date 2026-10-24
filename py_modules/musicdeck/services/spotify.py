@@ -48,7 +48,8 @@ PLAYBACK_SCOPES = ["streaming"]
 WEB_CLIENT_ID = "d420a117a32841c2b3474932e49fb54b"
 WEB_PORT = 8989
 WEB_SCOPES = ["playlist-modify-private", "playlist-modify-public", "playlist-read-collaborative",
-              "playlist-read-private", "user-follow-read", "user-library-modify", "user-library-read",
+              "playlist-read-private", "user-follow-modify", "user-follow-read", "user-library-modify",
+              "user-library-read",
               "user-read-private", "user-read-recently-played", "user-top-read"]
 LOGIN_TIMEOUT = 10 * 60
 CACHE_TTL = 180
@@ -61,6 +62,8 @@ MISSING = object()  # a cached answer can be None
 MAX_WAIT = 4
 # The Web API's search caps at 10 results per type for apps in development mode (personal apps).
 SEARCH_LIMIT = {"shared": 20, "personal": 10}
+# an album's, artist's or playlist's id, as it goes into a spotify: URI (a comma would add another)
+SPOTIFY_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
 
 
 def web_client(config: dict[str, Any]) -> str:
@@ -254,8 +257,11 @@ class SpotifyService(MusicService):
         self.client_id = web_client(config)
         self.gate = _Gate.of(self.client_id)
         self.cache: Cache[Any] = Cache(CACHE_TTL, CACHE_KEPT)
-        # which tracks are in Liked Songs (kept for the session; liking here updates it)
+        # which tracks are in Liked Songs, by id, and which albums, artists and playlists are in the
+        # library, by URI (kept for the session; saving here updates it)
         self.liked: Cache[bool] = Cache(LIKED_TTL, LIKED_KEPT)
+        # what the Web API token was granted (sign-ins before following artists lack user-follow-modify)
+        self.scopes: Optional[set[str]] = None
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
@@ -307,6 +313,8 @@ class SpotifyService(MusicService):
                 raise ServiceError("Spotify signed you out; edit the source and sign in again")
             self.access_token = data["access_token"]
             self.token_expires = time.time() + int(data.get("expires_in", 3600))
+            if isinstance(data.get("scope"), str):
+                self.scopes = set(data["scope"].split())
             if data.get("refresh_token") and data["refresh_token"] != self.config.get("refresh_token"):
                 self.config["refresh_token"] = data["refresh_token"]
                 if self.save_config:
@@ -576,9 +584,9 @@ class SpotifyService(MusicService):
             try:
                 a = await self._read("album", target=id)
                 tracks = self._tracks(a.get("tracks", []))
-                await self._starred(tracks)
+                _, saved = await asyncio.gather(self._starred(tracks), self._in_library("album", id))
                 c = self._album(a)
-                return models.page(c["title"], c["subtitle"], c["art"], tracks=tracks)
+                return models.page(c["title"], c["subtitle"], c["art"], tracks=tracks, save=models.saved(saved))
             except ServiceError as e:
                 debuglog.debug("spotify", "album over the session failed", error=str(e))
             a = await self._get(f"/albums/{id}")
@@ -586,16 +594,17 @@ class SpotifyService(MusicService):
             if (a.get("tracks") or {}).get("next"):
                 items += await self._all(f"/albums/{id}/tracks", offset=len(items))
             tracks = self._tracks([{**t, "album": a} for t in items])
-            await self._starred(tracks)
+            _, saved = await asyncio.gather(self._starred(tracks), self._in_library("album", id))
             c = self._album(a)
-            return models.page(c["title"], c["subtitle"], c["art"], tracks=tracks)
+            return models.page(c["title"], c["subtitle"], c["art"], tracks=tracks, save=models.saved(saved))
         if kind == "artist":
             try:
                 a = await self._read("artist", target=id)
                 tracks = self._tracks(a.get("top", []))
-                await self._starred(tracks)
+                _, saved = await asyncio.gather(self._starred(tracks), self._in_library("artist", id))
                 return models.page(a.get("name", ""), "Artist", _image(a.get("images")),
-                                   collections=[self._album(x) for x in a.get("albums", [])], tracks=tracks)
+                                   collections=[self._album(x) for x in a.get("albums", [])], tracks=tracks,
+                                   save=models.saved(saved))
             except ServiceError as e:
                 debuglog.debug("spotify", "artist over the session failed", error=str(e))
             a, top, albums = await asyncio.gather(
@@ -605,27 +614,28 @@ class SpotifyService(MusicService):
             if isinstance(a, Exception):
                 raise a
             tracks = self._tracks(top.get("tracks", [])) if isinstance(top, dict) else []
-            await self._starred(tracks)
+            _, saved = await asyncio.gather(self._starred(tracks), self._in_library("artist", id))
             releases = [self._album(x) for x in albums] if isinstance(albums, list) else []
             return models.page(a.get("name", ""), self._artist(a)["subtitle"], _image(a.get("images")),
-                               collections=releases, tracks=tracks)
+                               collections=releases, tracks=tracks, save=models.saved(saved))
         if kind == "playlist":
             try:
                 p = await self._read("playlist", target=id)
                 tracks = self._tracks(p.get("items", []))
-                await self._starred(tracks)
+                _, saved = await asyncio.gather(self._starred(tracks), self._playlist_saved(p, id))
                 c = self._playlist(p)
                 # Spotify's generated mixes have no cover of their own
                 art = c["art"] or next((t["art"] for t in tracks if t.get("art")), None)
-                return models.page(c["title"], c["subtitle"], art, tracks=tracks)
+                return models.page(c["title"], c["subtitle"], art, tracks=tracks, save=models.saved(saved))
             except ServiceError as e:
                 debuglog.debug("spotify", "playlist over the session failed", error=str(e))
-            p = await self._get(f"/playlists/{id}", fields="name,owner(display_name),images,tracks(total),items(total)")
+            p = await self._get(f"/playlists/{id}",
+                                fields="name,owner(id,display_name),images,tracks(total),items(total)")
             items = await self._all(f"/playlists/{id}/items", limit=100, max_items=3000, additional_types="track")
             tracks = self._tracks(items)
-            await self._starred(tracks)
+            _, saved = await asyncio.gather(self._starred(tracks), self._playlist_saved(p, id))
             c = self._playlist({**p, "id": id})
-            return models.page(c["title"], c["subtitle"], c["art"], tracks=tracks)
+            return models.page(c["title"], c["subtitle"], c["art"], tracks=tracks, save=models.saved(saved))
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:
@@ -649,6 +659,41 @@ class SpotifyService(MusicService):
         await self._api("PUT" if starred else "DELETE", "/me/library", params={"uris": f"spotify:track:{track_id}"})
         self.liked.put(track_id, starred)
         self.cache.drop(lambda k: k.startswith("/me/tracks"))
+
+    SAVES = frozenset({"album", "artist", "playlist"})
+
+    async def _in_library(self, kind: str, id: str) -> Optional[bool]:
+        """Whether an album or playlist is saved, or an artist followed; None when Spotify won't say."""
+        if not SPOTIFY_ID.match(id):
+            return None
+        uri = f"spotify:{kind}:{id}"
+        if uri in self.liked:
+            return self.liked.get(uri)
+        try:
+            flags = await self._api("GET", "/me/library/contains", params={"uris": uri})
+        except ServiceError as e:
+            debuglog.debug("spotify", "library check failed", uri=uri, error=str(e))
+            return None
+        return self.liked.put(uri, bool(flags and flags[0]))
+
+    async def _playlist_saved(self, p: dict[str, Any], id: str) -> Optional[bool]:
+        """Someone else's playlist can be saved; the user's own are theirs already (and taking one out
+        of the library would lose it), so they get no button."""
+        if (p.get("owner") or {}).get("id") == self.config.get("username"):
+            return None
+        return await self._in_library("playlist", id)
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        if not SPOTIFY_ID.match(id):
+            raise ServiceError("Not found on Spotify")
+        if kind == "artist":
+            await self._token()
+            if self.scopes is not None and "user-follow-modify" not in self.scopes:
+                raise ServiceError("To follow artists, edit the Spotify source and sign in again")
+        uri = f"spotify:{kind}:{id}"
+        await self._api("PUT" if on else "DELETE", "/me/library", params={"uris": uri})
+        self.liked.put(uri, on)
+        self.cache.drop(lambda k: k.startswith(("/me/albums", "/me/following", "/me/playlists")) or "rootlist" in k)
 
     async def user_playlists(self) -> list[dict[str, Any]]:
         items = await self._library_playlists()

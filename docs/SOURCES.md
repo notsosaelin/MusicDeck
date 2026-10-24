@@ -154,6 +154,8 @@ source (`MusicService.remove`).
 - **Extras**: `getSimilarSongs2`/`getTopSongs` radio, `getLyricsBySongId` (OpenSubsonic), play
   reports via `scrobble` (which also feeds Last.fm if the server links it), and queue sync with
   `savePlayQueue`/`getPlayQueue` so a queue can be resumed on another device.
+- **Starred albums and artists**: `star`/`unstar` with `albumId` or `artistId`; an album's or artist's
+  page knows from its own `starred` field.
 - Tested against `demo.navidrome.org`.
 
 ## Jellyfin (`jellyfin.py`)
@@ -167,7 +169,8 @@ source (`MusicService.remove`).
 - **Audio**: `/Audio/{id}/universal` with the containers Chromium decodes, so originals stream
   untouched and anything else (ALAC, WMA) is transcoded to MP3 by the server. Token in a header,
   added by the stream server.
-- **Extras**: favourites (`/UserFavoriteItems`, with the pre-10.9 path as fallback), play reports
+- **Extras**: favourites for tracks, albums and artists alike (`/UserFavoriteItems`, with the pre-10.9
+  path as fallback; a page knows from its item's `UserData.IsFavorite`), play reports
   (`/Sessions/Playing` then `/UserPlayedItems`), lyrics (`/Audio/{id}/Lyrics`, 10.9+), Instant Mix
   radio, playlist editing, loudness from `NormalizationGain`.
 - Tested against `demo.jellyfin.org/stable` (12.2).
@@ -212,7 +215,7 @@ source (`MusicService.remove`).
 - **Audio**: the file part directly (byte ranges) when its codec plays in Chromium; otherwise
   `/music/:/transcode/universal/start` to MP3 320, one session id per stream. Transcoded streams
   have no byte ranges, so seeking only works within what has loaded.
-- **Extras**: favourites are star ratings (`/:/rate`: favouriting sets five stars, taking it back
+- **Extras**: favourites (tracks, albums and artists) are star ratings (`/:/rate`: favouriting sets five stars, taking it back
   clears the rating; four stars or more shows as a favourite), play reports (`/:/timeline`, then
   `/:/scrobble`), lyrics (stream type 4: sidecar `.lrc`, or Plex Pass's provider, sent as timed
   lines), loudness from Plex's analysis (`gain`/`albumGain` on the audio stream), radio from sonic
@@ -379,6 +382,10 @@ source (`MusicService.remove`).
   one-shot loopback listener receives the code, exchanged via `oauth/callback` for a user token.
 - **Audio**: `track/getFileUrl` (signed with the secret) at the chosen quality returns a direct
   FLAC/MP3 link. Plays are reported with `track/reportStreamingStart`, as the web player does.
+- **Library**: albums and artists favourited with `favorite/create`/`favorite/delete` (`album_ids`,
+  `artist_ids`), others' playlists subscribed with `playlist/subscribe`/`unsubscribe`. Whether a page's
+  is in the library comes from the first 500 favourite albums and artists and playlists, asked once
+  every five minutes; the user's own playlists get no button.
 - **Breaks when**: Qobuz changes its bundle layout (update the regexes).
 
 ## TIDAL (`tidal.py`)
@@ -391,7 +398,9 @@ source (`MusicService.remove`).
   Anything marked encrypted is refused rather than decrypted.
 - **Quality**: up to FLAC 16-bit/44.1 kHz. TIDAL only grants 24-bit "Max" to its browser-redirect
   sign-in, which Steam's browser can't hand back to a plugin.
-- **Extras**: favourites (one `favorites/ids` request marks hearts everywhere), track radio, lyrics
+- **Extras**: favourites (one `favorites/ids` request marks hearts everywhere, and says which albums,
+  artists and playlists are in My Collection; they're added through `favorites/albums`, `/artists` and
+  `/playlists`, the user's own playlists aside), track radio, lyrics
   (synced LRC when available), home page modules (playlists, albums, mixes, tracks), playlist
   editing (with TIDAL's required `If-None-Match` ETag).
 - Catalogue calls were tested with an app-only token; sign-in, playback, favourites and lyrics need
@@ -455,6 +464,11 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
   they don't count against the shared app's rate limit.
 - **Rate limiting** (`_Gate`): two requests in flight per app, a shared `Retry-After` cooldown, and
   fail-fast while it lasts; GETs cached for 3 minutes.
+- **Library**: albums and other people's playlists saved, and artists followed, through `PUT`/`DELETE
+  /me/library` with `spotify:` URIs (the February 2026 API's one endpoint for all of them);
+  `/me/library/contains` says whether a page's is there, remembered for the session. Following artists
+  needs the `user-follow-modify` scope, asked for since 0.17.0: a sign-in from before is told to sign in
+  again when it tries.
 - **Requirements**: Spotify Premium. Some newer accounts can't get audio keys through librespot
   ("audio key error"); that is a librespot/Spotify limitation.
 - Build: `scripts/build_spotify_helper.sh` (cargo-zigbuild, static x86_64 musl).

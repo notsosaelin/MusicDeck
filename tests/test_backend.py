@@ -912,7 +912,8 @@ async def run():
             if request.headers.get("Authorization", "").find('Token="etok"') < 0:
                 return emweb.Response(status=401)
             if request.path == "/Users/eu/Items/al1":
-                return emweb.json_response({"Id": "al1", "Name": "Album", "AlbumArtist": "A", "ImageTags": {}})
+                return emweb.json_response({"Id": "al1", "Name": "Album", "AlbumArtist": "A", "ImageTags": {},
+                                            "UserData": {"IsFavorite": False}})
             if request.path == "/Items/al1":  # the Jellyfin path: Emby doesn't have it
                 return emweb.Response(status=404)
             if request.path == "/Playlists" and request.method == "POST":
@@ -931,7 +932,8 @@ async def run():
                 return emweb.json_response({"Items": [{"Id": "ar1", "Name": "A", "ImageTags": {}}]})
             if request.path == "/MusicGenres":
                 return emweb.json_response({"Items": [{"Id": "g1", "Name": "Rock"}, {"Name": "no id"}]})
-            if request.path in ("/Sessions/Playing", "/Users/eu/FavoriteItems/t1", "/Users/eu/PlayedItems/t1"):
+            if request.path in ("/Sessions/Playing", "/Users/eu/FavoriteItems/t1", "/Users/eu/FavoriteItems/a11",
+                                "/Users/eu/PlayedItems/t1"):
                 return emweb.Response(status=204 if body is None or body.get("PlaySessionId") or request.path != "/Sessions/Playing" else 400)
             return emweb.Response(status=500)
         em_app = emweb.Application()
@@ -968,6 +970,13 @@ async def run():
             await plugin.instances[eid].star("t1", False)
             check([c[:2] for c in emby_calls[-2:]] == [("POST", "/Users/eu/FavoriteItems/t1"), ("DELETE", "/Users/eu/FavoriteItems/t1")],
                   "favourites under the user")
+            check(em_page["save"] == {"on": False, "style": "favourite"}, f"an album says whether it's a favourite: {em_page['save']}")
+            saved = await plugin.save_to_library(eid, "artist", "a11", True)
+            check(saved["ok"] and emby_calls[-1][:2] == ("POST", "/Users/eu/FavoriteItems/a11"),
+                  "an artist made a favourite: the same call on its id")
+            for bad in [("playlist", "p1", True), ("album", "../Items", True), ("album", "al1", "yes"), (["album"], "al1", True),
+                        ("album", None, True)]:
+                check(not (await plugin.save_to_library(eid, *bad))["ok"], f"refused: {bad}")
             await plugin.instances[eid].scrobble("t1", False)
             await plugin.instances[eid].scrobble("t1", True)
             check(emby_calls[-2][1] == "/Sessions/Playing" and emby_calls[-2][3]["MediaSourceId"] == "t1"
@@ -1159,6 +1168,11 @@ async def run():
             await inst.star("11", False)
             check([(c[1], c[2].get("rating")) for c in px_calls[-2:]] == [("/:/rate", "10"), ("/:/rate", "-1")],
                   "favourite = five stars; taking it back clears the rating")
+            check(page["save"] == {"on": False, "style": "favourite"}, f"an album without stars isn't a favourite: {page['save']}")
+            saved = await plugin.save_to_library(pid, "album", "20", True)
+            check(saved["ok"] and (px_calls[-1][1], px_calls[-1][2].get("key"), px_calls[-1][2].get("rating")) == ("/:/rate", "20", "10"),
+                  "an album made a favourite: five stars")
+            check(not (await plugin.save_to_library(pid, "artist", "../20", True))["ok"], "a key that isn't Plex's is refused")
             await inst.scrobble("11", False)
             await inst.scrobble("11", True)
             check([c[1] for c in px_calls[-2:]] == ["/:/timeline", "/:/scrobble"], "now playing, then a play")
@@ -2770,6 +2784,7 @@ async def run():
             ("set_active", plugin.set_active_service(gone)), ("remove", plugin.remove_service(gone)),
             ("scrobble", plugin.scrobble(gone, "1", True, track)), ("scrobble no track", plugin.scrobble(sid, "1", False)),
             ("save_as_playlist", plugin.save_as_playlist(gone, "album", "1")),
+            ("save_to_library", plugin.save_to_library(gone, "album", "1", True)),
             ("sign_in_poll", plugin.sign_in_poll("nope", {})), ("sign_in_cancel", plugin.sign_in_cancel("nope")),
             ("sign_in_start", plugin.sign_in_start("nope", {})),
         ]:
@@ -2956,6 +2971,119 @@ async def run():
               and opened["playlists"][0]["mine"] and opened["frequent"][0]["title"] == "Most played"
               and {t["group"] for t in sub.center_tabs() if t["id"] in Sub.PICKS} == {"listening"},
               f"Navidrome's Browse: its library in parts, picks from it: {opened}")
+
+        print("albums and artists in the library")
+        sub_asked = []
+
+        async def sub_save_call(method, **kw):
+            sub_asked.append((method, kw))
+            if method == "getAlbum":
+                return {"album": {"id": "a1", "name": "One", "starred": "2026-01-01T00:00:00Z", "song": []}}
+            if method == "getArtist":
+                return {"artist": {"id": "r1", "name": "Band", "album": []}}
+            if method == "getTopSongs":
+                return {"topSongs": {}}
+            return {}
+        sub._call = sub_save_call
+        check((await sub.open("album", "a1"))["save"] == {"on": True, "style": "favourite"}
+              and (await sub.open("artist", "r1"))["save"] == {"on": False, "style": "favourite"},
+              "Navidrome: a starred album, an artist that isn't")
+        await sub.save("artist", "r1", True)
+        await sub.save("album", "a1", False)
+        check(sub_asked[-2:] == [("star", {"artistId": "r1"}), ("unstar", {"albumId": "a1"})], f"starred by kind: {sub_asked[-2:]}")
+
+        td = TidalService("t", {"user_id": "9"}, tmp)
+        td_asked = []
+
+        async def td_request(method, path, params=None, data=None, **kw):
+            td_asked.append((method, path, data))
+            if path.endswith("favorites/ids"):
+                return {"TRACK": [], "ALBUM": ["5"], "ARTIST": [], "PLAYLIST": ["aaaa-bbbb"]}
+            if path == "albums/5":
+                return {"id": 5, "title": "Five"}
+            if path.startswith("playlists/"):
+                pid_ = path.split("/")[1]
+                return {"uuid": pid_, "title": "List", "creator": {"id": 9 if pid_ == "mine-1" else 0}}
+            return {"items": [], "totalNumberOfItems": 0}
+        td._request = td_request
+        check((await td.open("album", "5"))["save"] == {"on": True, "style": "library"}
+              and (await td.open("playlist", "aaaa-bbbb"))["save"]["on"] and (await td.open("playlist", "mine-1"))["save"] is None,
+              "TIDAL: My Collection's albums and playlists, and no button on the user's own playlist")
+        await td.save("artist", "7", True)
+        await td.save("album", "5", False)
+        check(td_asked[-2:] == [("POST", "users/9/favorites/artists", {"artistIds": "7"}), ("DELETE", "users/9/favorites/albums/5", None)]
+              and (await td.open("album", "5"))["save"]["on"] is False, f"TIDAL: favourites by kind, remembered: {td_asked[-2:]}")
+        try:
+            await td.save("album", "5/../x", True)
+            check(False, "TIDAL: an id with a slash is refused")
+        except ServiceErrorForTest:
+            check(True, "TIDAL: an id with a slash is refused")
+
+        qb = QobuzService("q", {"user_id": "3"}, tmp)
+        qb_asked = []
+
+        async def qb_get(path, **params):
+            qb_asked.append((path, params))
+            if path == "favorite/getUserFavorites":
+                return {params["type"]: {"items": [{"id": "x1"}] if params["type"] == "albums" else []}}
+            if path == "playlist/getUserPlaylists":
+                return {"playlists": {"items": [{"id": 11, "owner": {"id": 4}}]}}
+            if path == "album/get":
+                return {"id": params["album_id"], "title": "X", "tracks": {"items": []}}
+            if path == "playlist/get":
+                return {"id": params["playlist_id"], "name": "P", "owner": {"id": 3 if params["playlist_id"] == "12" else 4}}
+            return {}
+        qb._get = qb_get
+        check((await qb.open("album", "x1"))["save"] == {"on": True, "style": "library"}
+              and (await qb.open("album", "x2"))["save"]["on"] is False
+              and (await qb.open("playlist", "11"))["save"]["on"] and (await qb.open("playlist", "12"))["save"] is None,
+              "Qobuz: favourite albums and subscribed playlists; the user's own playlists get no button")
+        await qb.save("album", "x2", True)
+        await qb.save("playlist", "11", False)
+        check(qb_asked[-2:] == [("favorite/create", {"album_ids": "x2"}), ("playlist/unsubscribe", {"playlist_id": "11"})]
+              and (await qb.open("album", "x2"))["save"]["on"], f"Qobuz: saved by kind, remembered: {qb_asked[-2:]}")
+        try:
+            await qb.save("artist", "1,2", True)
+            check(False, "Qobuz: a list of ids is refused")
+        except ServiceErrorForTest:
+            check(True, "Qobuz: a list of ids is refused")
+
+        sp = SpotifyService("sp", {"username": "me"}, tmp)
+        sp_asked = []
+
+        async def sp_api(method, path, params=None, body=None):
+            sp_asked.append((method, path, params))
+            if path == "/me/library/contains":
+                return [params["uris"] == "spotify:album:AL"]
+            return None
+
+        async def sp_read(op, **args):
+            if op == "playlist":
+                return {"id": args["target"], "name": "P", "owner": {"id": "me" if args["target"] == "MINE" else "dj"}, "items": []}
+            return {"id": args["target"], "name": "N", "tracks": [], "top": [], "albums": []}
+
+        async def sp_token():
+            return "tok"
+        sp._api, sp._read, sp._token = sp_api, sp_read, sp_token
+        check((await sp.open("album", "AL"))["save"] == {"on": True, "style": "library"}
+              and (await sp.open("artist", "AR"))["save"]["on"] is False
+              and (await sp.open("playlist", "MINE"))["save"] is None,
+              "Spotify: saved albums, followed artists; no button on the user's own playlist")
+        sp.scopes = {"user-library-modify"}
+        try:
+            await sp.save("artist", "AR", True)
+            check(False, "Spotify: following needs the newer sign-in")
+        except ServiceErrorForTest as e:
+            check("sign in again" in str(e), "Spotify: following needs the newer sign-in")
+        sp.scopes = None
+        await sp.save("artist", "AR", True)
+        check(sp_asked[-1] == ("PUT", "/me/library", {"uris": "spotify:artist:AR"})
+              and (await sp.open("artist", "AR"))["save"]["on"], f"Spotify: followed by URI, remembered: {sp_asked[-1]}")
+        try:
+            await sp.save("album", "AL,spotify:track:x", True)
+            check(False, "Spotify: an id can't add another URI")
+        except ServiceErrorForTest:
+            check(True, "Spotify: an id can't add another URI")
 
         tidal = TidalService("t", {}, tmp)
         real_tab = tidal.tab

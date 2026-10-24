@@ -65,6 +65,11 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   controls stay on the Deck.
 - **Jump back in:** each source's home starts with the albums and playlists you played last, and an empty
   search shows your recent searches.
+- **Your library on the service:** an album's page has **Add to library** (Spotify, Qobuz, TIDAL) or **Add to
+  favourites** (Navidrome, Jellyfin, Emby, Plex), an artist's **Follow** or **Add to favourites**, and someone
+  else's playlist on Spotify, Qobuz or TIDAL **Add to library**, in the Quick Access panel and the media
+  center. What you add shows in the source's Albums, Artists, Playlists and Favourites at once, there and in
+  the service's own apps.
 - **Playlists:** Navidrome, Jellyfin, Emby, Plex, Qobuz, Spotify and TIDAL keep yours on the service: add
   to them, or make a new one from any track. Every other source gets **MusicDeck playlists**, stored on the
   device, with custom artwork. Save any playlist or album from a source as your own.
@@ -129,6 +134,9 @@ read them, as with every other app's saved sign-ins. They never reach the Steam 
 Removing a source deletes its tokens; signing out on the service's website revokes them.
 
 **English only.** The interface isn't translated yet; text from the sources (titles, lyrics) shows as they send it.
+
+**Spotify and following artists:** Spotify sources signed in before 0.17.0 can save albums and playlists
+but not follow artists; edit the source and sign in again to allow it.
 
 **Spotify tip:** Spotify's public Web API app is shared by every client that uses it and is often
 rate-limited. Most of MusicDeck's Spotify browsing avoids it, but search and your listening history use it.

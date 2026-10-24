@@ -12,6 +12,7 @@ with byte ranges, so seeking and every MusicDeck feature work as for local files
 import asyncio
 import json
 import platform
+import re
 import secrets as pysecrets
 import time
 from typing import Any, Optional
@@ -297,7 +298,8 @@ class JellyfinService(MusicService):
             album = await self._item(id)
             tracks = await self._items(ParentId=id, IncludeItemTypes="Audio", SortBy="ParentIndexNumber,IndexNumber")
             c = self._album(album)
-            return models.page(c["title"], c["subtitle"], c["art"], tracks=[self._track(t) for t in tracks])
+            return models.page(c["title"], c["subtitle"], c["art"], tracks=[self._track(t) for t in tracks],
+                               save=self._favourite(album))
         if kind == "artist":
             artist, albums, top = await asyncio.gather(
                 self._item(id),
@@ -307,7 +309,8 @@ class JellyfinService(MusicService):
                             SortOrder="Descending", Limit=10))
             c = self._artist(artist)
             return models.page(c["title"], models.count(len(albums), "album"), c["art"],
-                               collections=[self._album(a) for a in albums], tracks=[self._track(t) for t in top])
+                               collections=[self._album(a) for a in albums], tracks=[self._track(t) for t in top],
+                               save=self._favourite(artist))
         if kind == "playlist":
             playlist = await self._item(id)
             data = await self._get(f"/Playlists/{id}/Items", userId=self.config.get("user_id"))
@@ -348,6 +351,19 @@ class JellyfinService(MusicService):
         except ServiceError:
             # servers before 10.9 only have the per-user path
             await self._request(method, f"/Users/{self.config.get('user_id')}/FavoriteItems/{track_id}")
+
+    SAVES = frozenset({"album", "artist"})
+
+    @staticmethod
+    def _favourite(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+        data = item.get("UserData")
+        return models.saved(bool(data.get("IsFavorite")), "favourite") if isinstance(data, dict) else None
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        """Albums and artists are favourites like tracks: the same call on their ids."""
+        if not re.fullmatch(r"[0-9A-Fa-f-]{1,64}", id):
+            raise ServiceError(f"Not found on {self.display_name}")
+        await self.star(id, on)
 
     async def scrobble(self, track_id: str, submission: bool) -> None:
         """Now playing shows in Jellyfin's dashboard; a finished listen marks the track played,

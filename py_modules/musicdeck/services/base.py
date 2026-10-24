@@ -334,6 +334,15 @@ class MusicService:
     async def star(self, track_id: str, starred: bool) -> None:
         raise NotImplementedError
 
+    #: kinds of collection the user can keep in their library on the service ("album", "artist",
+    #: "playlist"): save an album, follow an artist. open() then gives those pages a `save` (models.saved).
+    SAVES: frozenset[str] = frozenset()
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        """Puts an album, artist or playlist (a kind in SAVES) in the user's library on the service, or
+        takes it out."""
+        raise NotImplementedError
+
     async def scrobble(self, track_id: str, submission: bool) -> None:
         raise NotImplementedError
 

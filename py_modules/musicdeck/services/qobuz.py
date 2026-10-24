@@ -31,6 +31,11 @@ from .base import MusicService, ServiceError, SignIn, StreamSource, rows_or_tile
 
 API = "https://www.qobuz.com/api.json/0.2"
 PLAYER = "https://play.qobuz.com"
+# how long what's in the library (favourite albums and artists, playlists) is trusted before asking again
+LIBRARY_TTL = 300
+LIBRARY_LIMIT = 500
+# an album's, artist's or playlist's id as it goes into a list parameter (a comma would add another)
+QOBUZ_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/130.0 Safari/537.36")
 BUNDLE_RE = re.compile(r'<script src="(/resources/\d+\.\d+\.\d+-[a-z]\d{3}/bundle\.js)"></script>')
@@ -116,6 +121,10 @@ class QobuzService(MusicService):
         self.session: Optional[aiohttp.ClientSession] = None
         self.app: Optional[dict[str, Any]] = None
         self._app_lock = asyncio.Lock()
+        # ids of the favourite albums and artists and the playlists in the library, by kind; and
+        # which of those playlists are the user's own
+        self.library: Optional[dict[str, set[str]]] = None
+        self.library_at = 0.0
 
     # --- credentials ---
 
@@ -391,21 +400,28 @@ class QobuzService(MusicService):
                 t["starred"] = True
             return models.page("Favourite tracks", models.count(len(tracks), "track"), tracks=tracks)
         if kind == "album":
-            a = await self._get("album/get", album_id=id)
+            a, library = await asyncio.gather(self._get("album/get", album_id=id), self._library())
             c = self._album(a)
             return models.page(c["title"], c["subtitle"], c["art"],
-                               tracks=self._tracks((a.get("tracks") or {}).get("items", []), album=a))
+                               tracks=self._tracks((a.get("tracks") or {}).get("items", []), album=a),
+                               save=models.saved(self._saved(library, "album", id)))
         if kind == "artist":
-            a = await self._get("artist/get", artist_id=id, extra="albums", limit=100)
+            a, library = await asyncio.gather(self._get("artist/get", artist_id=id, extra="albums", limit=100),
+                                              self._library())
             albums = sorted((a.get("albums") or {}).get("items", []), key=lambda x: x.get("released_at") or 0,
                             reverse=True)
             return models.page(a.get("name", ""), self._artist(a)["subtitle"], self._image(a),
-                               collections=[self._album(x) for x in albums])
+                               collections=[self._album(x) for x in albums],
+                               save=models.saved(self._saved(library, "artist", id)))
         if kind == "playlist":
-            p = await self._get("playlist/get", playlist_id=id, extra="tracks", limit=500)
+            p, library = await asyncio.gather(self._get("playlist/get", playlist_id=id, extra="tracks", limit=500),
+                                              self._library())
             c = self._playlist(p)
+            # the user's own playlists are theirs already: no button
+            own = str((p.get("owner") or {}).get("id")) == str(self.config.get("user_id"))
             return models.page(c["title"], c["subtitle"], c["art"],
-                               tracks=self._tracks((p.get("tracks") or {}).get("items", [])))
+                               tracks=self._tracks((p.get("tracks") or {}).get("items", [])),
+                               save=None if own else models.saved(self._saved(library, "playlist", id)))
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:
@@ -420,6 +436,42 @@ class QobuzService(MusicService):
 
     async def star(self, track_id: str, starred: bool) -> None:
         await self._get("favorite/create" if starred else "favorite/delete", track_ids=track_id)
+
+    SAVES = frozenset({"album", "artist", "playlist"})
+
+    async def _library(self) -> Optional[dict[str, set[str]]]:
+        """What's in the library, by kind: favourite albums and artists, and the playlists (the user's own
+        and those subscribed to). None when Qobuz doesn't answer."""
+        if self.library is not None and time.time() - self.library_at < LIBRARY_TTL:
+            return self.library
+        user_id = self.config.get("user_id")
+        found = await asyncio.gather(
+            self._get("favorite/getUserFavorites", user_id=user_id, type="albums", limit=LIBRARY_LIMIT),
+            self._get("favorite/getUserFavorites", user_id=user_id, type="artists", limit=LIBRARY_LIMIT),
+            self._get("playlist/getUserPlaylists", user_id=user_id, limit=LIBRARY_LIMIT), return_exceptions=True)
+        if any(isinstance(f, BaseException) or not isinstance(f, dict) for f in found):
+            debuglog.debug("qobuz", "library unavailable", errors=[str(f) for f in found if isinstance(f, BaseException)])
+            return None
+        ids = lambda data, key: {str(x["id"]) for x in (data.get(key) or {}).get("items", [])  # noqa: E731
+                                 if isinstance(x, dict) and x.get("id") is not None}
+        self.library = {"album": ids(found[0], "albums"), "artist": ids(found[1], "artists"),
+                        "playlist": ids(found[2], "playlists")}
+        self.library_at = time.time()
+        return self.library
+
+    @staticmethod
+    def _saved(library: Optional[dict[str, set[str]]], kind: str, id: str) -> Optional[bool]:
+        return None if library is None else id in library[kind]
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        if not QOBUZ_ID.match(id):
+            raise ServiceError("Not found on Qobuz")
+        if kind == "playlist":
+            await self._get("playlist/subscribe" if on else "playlist/unsubscribe", playlist_id=id)
+        else:
+            await self._get("favorite/create" if on else "favorite/delete", **{f"{kind}_ids": id})
+        if self.library is not None:
+            (self.library[kind].add if on else self.library[kind].discard)(id)
 
     async def scrobble(self, track_id: str, submission: bool) -> None:
         """Qobuz counts a play when the stream starts (as its web player reports it)."""

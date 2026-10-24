@@ -341,13 +341,16 @@ class PlexService(MusicService):
             playlists = await self._metadata("/playlists", playlistType="audio")
             return [models.section("Playlists", [self._playlist(p) for p in playlists], display="grid", mine=True)]
         if tab_id == "favourites":
-            albums, tracks = await asyncio.gather(
+            albums, artists, tracks = await asyncio.gather(
                 self._all(ALBUM, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}),
+                self._all(ARTIST, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}),
                 self.open("list", "favourite-tracks"), return_exceptions=True)
-            return [models.section("Favourite albums", [self._album(a) for a in albums]
-                                   if isinstance(albums, list) else [], display="grid"),
-                    models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
-                                   display="grid")]
+            sections = [models.section("Favourite albums", [self._album(a) for a in albums]
+                                       if isinstance(albums, list) else [], display="grid")]
+            if isinstance(artists, list) and artists:
+                sections.append(models.section("Favourite artists", [self._artist(a) for a in artists]))
+            return sections + [models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict)
+                                              else [], display="grid")]
         if tab_id == "albums":
             return [models.section("All albums", [self._album(a) for a in await self._all(ALBUM, sort="titleSort")],
                                    display="grid")]
@@ -365,13 +368,15 @@ class PlexService(MusicService):
             genres = [models.collection(f"genre:{key}#{title}", "list", title) for title, key in sorted(seen.items())]
             return [rows_or_tiles(models.section("Genres", genres))]
         if tab_id == "library":
-            playlists, albums, tracks = await asyncio.gather(
+            playlists, albums, artists, tracks = await asyncio.gather(
                 self._metadata("/playlists", playlistType="audio"),
                 self._all(ALBUM, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}),
+                self._all(ARTIST, sort="titleSort", **{"userRating>>": FAVOURITE_RATING - 1}),
                 self.open("list", "favourite-tracks"), return_exceptions=True)
             ok = lambda r: r if isinstance(r, list) else []  # noqa: E731
             return [models.section("Playlists", [self._playlist(p) for p in ok(playlists)], display="grid", mine=True),
                     models.section("Favourite albums", [self._album(a) for a in ok(albums)], display="grid"),
+                    models.section("Favourite artists", [self._artist(a) for a in ok(artists)]),
                     models.section("Favourite tracks", [], tracks["tracks"] if isinstance(tracks, dict) else [],
                                    display="grid")]
         return await super().tab(tab_id)
@@ -400,7 +405,8 @@ class PlexService(MusicService):
             album = await self._of_type(key, "album")
             tracks = await self._metadata(f"/library/metadata/{key}/children")
             c = self._album(album)
-            return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(tracks))
+            return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(tracks),
+                               save=self._favourite(album))
         if kind == "artist":
             artist = await self._of_type(key, "artist")
             albums = await self._metadata(f"/library/metadata/{key}/children")
@@ -410,7 +416,8 @@ class PlexService(MusicService):
             c = self._artist(artist)
             albums = [a for a in albums if a.get("type") == "album"]
             return models.page(c["title"], models.count(len(albums), "album"), c["art"],
-                               collections=[self._album(a) for a in albums], tracks=self._tracks(top))
+                               collections=[self._album(a) for a in albums], tracks=self._tracks(top),
+                               save=self._favourite(artist))
         if kind == "playlist":
             playlist = await self._of_type(key, "playlist")
             tracks = self._tracks(await self._metadata(f"/playlists/{key}/items"))
@@ -472,6 +479,16 @@ class PlexService(MusicService):
         """Favourite = five stars; taking it back clears the rating."""
         await self._request("PUT", "/:/rate", key=_rating_key(track_id), identifier=LIBRARY,
                             rating=10 if starred else -1)
+
+    SAVES = frozenset({"album", "artist"})
+
+    @staticmethod
+    def _favourite(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+        return models.saved((item.get("userRating") or 0) >= FAVOURITE_RATING, "favourite")
+
+    async def save(self, kind: str, id: str, on: bool) -> None:
+        """Albums and artists are favourites like tracks: five stars."""
+        await self.star(id, on)
 
     async def scrobble(self, track_id: str, submission: bool) -> None:
         """Now playing shows on the server's dashboard; a finished listen counts a play, which
