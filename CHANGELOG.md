@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.18.1
+
+- Songs say nothing about their lyrics any more: no "Lyrics aren't available right now" under the visualizer
+  (Quick Access and full screen), and no "Looking for lyrics…" or "Couldn't load lyrics" in the media center.
+  The lyrics show when there are some, the visualizer when there aren't.
+
 ## 0.18.0
 
 - **Likes in each source's words:** Y on a song says Save to Liked Songs on Spotify, Add to My Collection on

@@ -246,14 +246,10 @@ const FRAME_MS = 1000 / 30;
  * "bars" (mirrored about the middle, low notes left, high right) where there's width, as full screen;
  * "wave" (an oscilloscope's line) in a squarer space, as the Quick Access panel's. It settles when
  * paused and then stops drawing until the music plays again, or its size changes (a canvas left at its
- * old size is stretched, its resting dots into tall smears), and draws only while it shows.
- * `caption`: a line under it, when there's something to say (the lyrics sites didn't answer).
+ * old size is stretched, its resting dots into tall smears), and draws only while it shows. No line
+ * under it: no lyrics, or none to be had right now, it just shows the music.
  */
-export const Visualizer: FC<{ height: number; caption?: string; look?: "bars" | "wave" }> = ({
-  height,
-  caption,
-  look = "bars",
-}) => {
+export const Visualizer: FC<{ height: number; look?: "bars" | "wave" }> = ({ height, look = "bars" }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const el = canvas.current;
@@ -337,7 +333,6 @@ export const Visualizer: FC<{ height: number; caption?: string; look?: "bars" | 
   return (
     <div style={{ height, display: "flex", flexDirection: "column", justifyContent: "center", gap: 14 }}>
       <canvas ref={canvas} style={{ width: "100%", height: Math.min(look === "wave" ? 90 : 130, height * 0.4) }} />
-      {caption && <div style={{ fontSize: 13, opacity: 0.4, textAlign: "center" }}>{caption}</div>}
     </div>
   );
 };

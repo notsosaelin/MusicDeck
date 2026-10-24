@@ -490,15 +490,17 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
     : lyrics === undefined
       ? book
         ? "Looking for chapters…"
-        : "Looking for lyrics…"
+        : null
       : lyrics === null
         ? book
           ? "No chapters in this part"
-          : // no lyrics: the visualizer alone (or nothing, while casting), without a line about it
-            null
+          : null
         : "error" in lyrics
-          ? `Couldn't load ${book ? "chapters" : "lyrics"}: ${lyrics.error}`
+          ? book
+            ? `Couldn't load chapters: ${lyrics.error}`
+            : null
           : null;
+  // songs say nothing about their lyrics: they show, or the visualizer does (nothing while casting)
 
   return (
     <div ref={page} style={{ height: room || undefined, boxSizing: "border-box", padding: "1vh 2.8vw 1.5vh" }}>
@@ -596,10 +598,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                   !state.castingTo &&
                   height > 0 ? (
                   // no lyrics, or the lyrics sites didn't answer (LRCLIB's 503s): the music, drawn
-                  <Visualizer
-                    height={height}
-                    caption={lyrics === null ? undefined : "Lyrics aren't available right now"}
-                  />
+                  <Visualizer height={height} />
                 ) : message ? (
                   <div style={{ fontSize: 16, opacity: 0.6, paddingTop: height / 3 }}>{message}</div>
                 ) : lyrics && !("error" in lyrics) && height > 0 ? (

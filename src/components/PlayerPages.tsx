@@ -274,14 +274,7 @@ const PanelLyrics: FC<{ height: number }> = ({ height }) => {
         <Spinner style={{ width: 32, height: 32 }} />
       </div>,
     );
-  if (!lyrics || "error" in lyrics)
-    return focusable(
-      <Visualizer
-        look="wave"
-        height={height}
-        caption={lyrics === null ? undefined : "Lyrics aren't available right now"}
-      />,
-    );
+  if (!lyrics || "error" in lyrics) return focusable(<Visualizer look="wave" height={height} />);
   return focusable(
     <>
       {lyrics.synced ? (
