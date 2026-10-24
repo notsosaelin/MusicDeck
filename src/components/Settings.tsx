@@ -36,6 +36,7 @@ import {
   FaSoundcloud,
   FaShareAlt,
   FaSpotify,
+  FaSyncAlt,
   FaSteam,
   FaYoutube,
 } from "react-icons/fa";
@@ -79,6 +80,7 @@ const TYPE_ICONS: Record<string, ReactNode> = {
   emby: <SiEmby />,
   plex: <SiPlex />,
   audiobookshelf: <SiAudiobookshelf />,
+  soulsync: <FaSyncAlt />,
   soundcloud: <FaSoundcloud />,
   youtube: <FaYoutube />,
   bandcamp: <FaBandcamp />,
@@ -120,6 +122,8 @@ const describeStatus = (s: ServiceInfo): string => {
     case "audiobookshelf":
     case "subsonic":
       return parts(s.config.username, host(s.config.url));
+    case "soulsync":
+      return host(s.config.url) ?? "";
     case "soulseek":
       return s.status.connected
         ? parts(

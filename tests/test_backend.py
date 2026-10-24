@@ -906,6 +906,96 @@ async def run():
         check(t["artist"] == "A, B" and t["duration"] == 180 and t["art"] == "al1" and t["starred"]
               and t["artist_id"] == "a1" and t["gain"]["track"] == -6.2, "track mapping (ticks, album art fallback)")
 
+        print("soulsync")
+        from aiohttp import web as ssweb
+        ss_calls = []
+        ss_track = {"id": "512", "album_id": "87", "artist_id": "42", "title": "Paranoid Android",
+                    "artist_name": "Radiohead", "album_title": "OK Computer", "track_number": 2, "disc_number": 1,
+                    "duration": 383000, "file_path": "/music/Radiohead/OK Computer/02 - Paranoid Android.flac"}
+        ss_first = {**ss_track, "id": "511", "title": "Airbag", "track_number": 1,
+                    "file_path": "/music/Radiohead/OK Computer/01 - Airbag.flac"}
+
+        async def fake_soulsync(request):
+            ss_calls.append((request.path, dict(request.query), request.headers.get("Authorization")))
+            key = request.headers.get("Authorization", "")
+            ok = lambda data, pagination=None: ssweb.json_response(  # noqa: E731
+                {"success": True, "data": data, "error": None, "pagination": pagination})
+            if key not in ("Bearer sk_admin", "Bearer sk_read"):
+                return ssweb.json_response({"success": False, "data": None,
+                                            "error": {"code": "INVALID_KEY", "message": "nope"}}, status=403)
+            if request.path == "/stream/library-audio":
+                if key == "Bearer sk_read":
+                    return ssweb.json_response({"success": False, "error": {"code": "INSUFFICIENT_SCOPE"}}, status=403)
+                return ssweb.json_response({"error": "path is required"}, status=400)
+            if request.path == "/api/v1/system/status":
+                return ok({"version": "2.4.1"})
+            if request.path == "/api/v1/library/recently-added":
+                if request.query.get("type") == "tracks":
+                    return ok({"items": [ss_track], "type": "tracks"})
+                return ok({"items": [{"id": "87", "title": "OK Computer", "year": 1997, "thumb_url": "https://img/ok.jpg",
+                                      "artist_name": "Radiohead"}], "type": "albums"})
+            if request.path == "/api/v1/library/albums":
+                page = int(request.query.get("page", 1))
+                return ok({"albums": [{"id": f"a{page}", "title": f"Album {page}"}]},
+                          {"page": page, "has_next": page < 3})
+            if request.path == "/api/v1/library/albums/87":
+                return ok({"album": {"id": "87", "title": "OK Computer", "year": 1997, "thumb_url": "/api/image/87",
+                                     "tracks": [ss_track, ss_first]}})
+            if request.path == "/api/v1/library/tracks":
+                return ok({"tracks": [ss_track]})
+            if request.path == "/api/v1/library/artists":
+                return ok({"artists": [{"id": "42", "name": "Radiohead"}]})
+            return ssweb.Response(status=404)
+        ss_app = ssweb.Application()
+        ss_app.router.add_route("*", "/{path:.*}", fake_soulsync)
+        ss_runner = ssweb.AppRunner(ss_app)
+        await ss_runner.setup()
+        ss_site = ssweb.TCPSite(ss_runner, "127.0.0.1", 0)
+        await ss_site.start()
+        ss_url = f"http://127.0.0.1:{ss_site._server.sockets[0].getsockname()[1]}"
+        try:
+            for key, words in [("sk_wrong", "didn't accept"), ("sk_read", "read-only")]:
+                bad = await plugin.save_service({"type": "soulsync", "name": "", "config": {"url": ss_url, "api_key": key}})
+                check(not bad["ok"] and words in bad["error"], f"SoulSync: {key} refused ({bad.get('error')})")
+            saved_ss = await plugin.save_service({"type": "soulsync", "name": "", "config": {"url": ss_url, "api_key": "sk_admin"}})
+            check(saved_ss["ok"] and "token" not in saved_ss["data"]["config"] and "api_key" not in saved_ss["data"]["config"]
+                  and saved_ss["data"]["has_credentials"], f"SoulSync: an admin key accepted and kept out of the UI: {saved_ss}")
+            ssid = saved_ss["data"]["id"]
+            stored = next(x for x in plugin.settings.services() if x["id"] == ssid)["config"]
+            check(stored == {"url": ss_url, "token": "sk_admin"}, f"SoulSync: only the address and key stored: {stored}")
+            home = (await plugin.home(ssid))["data"]
+            check([s["title"] for s in home if s["title"] in ("Recently added", "New songs")] == ["Recently added", "New songs"]
+                  and home[-2]["items"][0]["subtitle"] == "Radiohead · 1997", f"SoulSync: Home: {[s['title'] for s in home]}")
+            albums = (await plugin.center_tab(ssid, "albums"))["data"][0]["items"]
+            check([a["id"] for a in albums] == ["a1", "a2", "a3"], f"SoulSync: every page of albums: {albums}")
+            album = (await plugin.open_collection(ssid, "album", "87"))["data"]
+            check([t["title"] for t in album["tracks"]] == ["Airbag", "Paranoid Android"]
+                  and album["tracks"][0]["duration"] == 383 and album["tracks"][0]["art"] == "/api/image/87",
+                  f"SoulSync: an album in order, its cover on its songs: {album['tracks']}")
+            inst = plugin.instances[ssid]
+            src = await inst.stream("512")
+            check(src.url.startswith(ss_url + "/stream/library-audio?path=%2Fmusic%2FRadiohead") and "track_id=512" in src.url
+                  and "sk_admin" not in src.url and src.headers == {"Authorization": "Bearer sk_admin"},
+                  f"SoulSync: the song streams from its file, the key in a header: {src.url}")
+            own = await inst.art("/api/image/87")
+            web = await inst.art("https://img/ok.jpg")
+            check(own.url == ss_url + "/api/image/87" and own.headers and web.headers == {},
+                  "SoulSync: covers on the server get the key, covers elsewhere don't")
+            for bad in ["../../etc/passwd", "a/b", ""]:
+                check(not (await plugin.open_collection(ssid, "album", bad))["ok"], f"SoulSync: refused id {bad!r}")
+            check(not (await plugin.stream_info(ssid, "../x"))["ok"], "SoulSync: refused track id")
+            try:
+                await inst.art("file:///etc/passwd")
+                check(False, "SoulSync: a file:// picture is refused")
+            except ServiceErrorForTest:
+                check(True, "SoulSync: a file:// picture is refused")
+            found = (await plugin.search(ssid, "radiohead"))["data"]
+            check([t["id"] for t in found["tracks"]] == ["512"] and found["collections"][0]["kind"] == "artist",
+                  f"SoulSync: search finds artists, albums and songs, each song once: {found['tracks']}")
+            await plugin.remove_service(ssid)
+        finally:
+            await ss_runner.cleanup()
+
         print("emby")
         from aiohttp import web as emweb
         emby_calls = []

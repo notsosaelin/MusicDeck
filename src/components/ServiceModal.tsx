@@ -352,6 +352,31 @@ const ServerFields: FC<{
   </>
 );
 
+/** SoulSync: the server's address and an admin API key made in SoulSync. */
+const SoulSyncFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  hasCredentials: boolean;
+}> = ({ draft, setConfig, hasCredentials }) => (
+  <>
+    <Field label="Server URL" hint={unencryptedWarning(draft.config.url)}>
+      <TextField
+        value={draft.config.url ?? ""}
+        placeholder="http://192.168.1.10:8008"
+        onChange={(e) => setConfig({ ...draft.config, url: e.target.value })}
+      />
+    </Field>
+    <Field label="API key" hint="From SoulSync's Settings > Advanced > SoulSync API: an admin key">
+      <TextField
+        bIsPassword
+        value={draft.config.api_key ?? ""}
+        placeholder={hasCredentials ? "Unchanged" : "sk_..."}
+        onChange={(e) => setConfig({ ...draft.config, api_key: e.target.value })}
+      />
+    </Field>
+  </>
+);
+
 /** Soulseek: a name and password (a new name is registered on sign-in), and where albums are saved. */
 const SoulseekFields: FC<{
   draft: ServiceDraft;
@@ -687,6 +712,9 @@ export const ServiceModal: FC<{
         {type === "local" && <NewMusicFields draft={draft} setConfig={setConfig} />}
         {type === "soulseek" && (
           <SoulseekFields draft={draft} setConfig={setConfig} hasCredentials={!!existing?.has_credentials} />
+        )}
+        {type === "soulsync" && (
+          <SoulSyncFields draft={draft} setConfig={setConfig} hasCredentials={!!existing?.has_credentials} />
         )}
         {type === "subsonic" && (
           <ServerFields

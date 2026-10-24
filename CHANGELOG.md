@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.22.0
+
+- **SoulSync**: play the library of the SoulSync you run. Add it with its address and an admin API key
+  (SoulSync: Settings > Advanced > SoulSync API): recently added albums and songs on Home, Albums, Artists,
+  Recently added, and search; songs play from SoulSync with seeking, and playlists made in MusicDeck can be
+  downloaded for offline like your other servers'.
+
 ## 0.21.2
 
 - **Now Playing at rest**: with nothing playing it's the player, idle: a turntable where the cover goes, with

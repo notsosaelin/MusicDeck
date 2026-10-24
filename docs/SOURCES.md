@@ -13,6 +13,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Emby | `emby` | Server | Password → access token | Original, server transcodes the rest | favourites, play reports, radio, playlists |
 | Plex | `plex` | plex.tv (optional) | PIN: plex.tv/link code, or Plex's page | Original, server transcodes the rest | favourites, play reports, lyrics, radio, playlists |
 | Audiobookshelf | `audiobookshelf` | Server | Password → access + refresh token, or an API key | Original files | resume (`progress`), chapters (as `lyrics`) |
+| SoulSync | `soulsync` | Server | An admin API key made in SoulSync | Its library files | — |
 | SoundCloud | `soundcloud` | — | — | HLS (AAC/MP3) | likes (on the Deck), radio |
 | YouTube Music | `youtube` | — | — | Opus/AAC via yt-dlp | likes (on the Deck), radio, lyrics |
 | Bandcamp | `bandcamp` | — | — | MP3 128 kbps | likes (on the Deck), radio, lyrics |
@@ -230,6 +231,25 @@ source (`MusicService.remove`).
 - Tested against Plex Media Server 1.43 in a container (unclaimed, so without plex.tv), with
   sidecar lyrics; the plex.tv sign-in and server discovery against a fake plex.tv in the tests,
   and Plex's sign-in page opened on the Deck.
+
+## SoulSync (`soulsync.py`)
+
+- **What**: [SoulSync](https://github.com/nezreka/soulsync), the self-hosted server that fills a library
+  from Soulseek, TIDAL, Qobuz and more (into Plex, Jellyfin, Navidrome, or its own Standalone library).
+  MusicDeck plays the library of one the user already runs.
+- **Sign-in**: its address and an API key (SoulSync: Settings > Advanced > SoulSync API), sent as
+  `Authorization: Bearer sk_...`. It has to be an **admin** key: a read-only key only reaches `/api/v1`,
+  and the audio isn't there. On save, `/api/v1/system/status` checks the key and `/stream/library-audio`
+  without a path checks it may stream (400 for an admin key, 403 for a read-only one). Stored as `token`.
+- **Browsing**: `/api/v1/library/` (recently-added albums and tracks, albums and artists in pages of 200,
+  an album with its tracks, an artist's albums) and its search by name (artists, albums, songs by title and
+  by artist). SoulSync allows 60 requests a minute from one address: answers are kept two minutes.
+  Its playlists and Discover pool aren't in the library (Spotify's and iTunes' tracks), so they're not shown.
+- **Audio**: `/stream/library-audio?path=<file_path>&track_id=<id>`, the route SoulSync's web player
+  uses, with byte ranges; it serves only files in SoulSync's library folders (or proxies Navidrome's
+  stream). Not part of the documented API: a SoulSync update could change it.
+- **Art**: albums' `thumb_url`: a picture elsewhere on the web as it is, a path on the server with the key.
+- **Ids**: `[\w.:-]`, checked before they reach a path.
 
 ## Audiobookshelf (`audiobookshelf.py`)
 

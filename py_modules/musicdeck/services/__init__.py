@@ -18,6 +18,7 @@ CATALOGUE = [
     ("emby", "emby", "EmbyService", "Emby", "yours"),
     ("plex", "plex", "PlexService", "Plex", "yours"),
     ("audiobookshelf", "audiobookshelf", "AudiobookshelfService", "Audiobookshelf", "yours"),
+    ("soulsync", "soulsync", "SoulSyncService", "SoulSync", "yours"),
     ("soundcloud", "soundcloud", "SoundCloudService", "SoundCloud", "streaming"),
     ("youtube", "youtube", "YouTubeService", "YouTube Music", "streaming"),
     ("bandcamp", "bandcamp", "BandcampService", "Bandcamp", "streaming"),

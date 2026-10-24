@@ -5,8 +5,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 ## Features
 
-- **Seventeen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
-  Audiobookshelf, SoundCloud, YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live
+- **Eighteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
+  Audiobookshelf, SoulSync, SoundCloud, YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live
   Music Archive, Qobuz, TIDAL, Spotify and Soulseek. One source is live at a time, chosen in the plugin's Decky page.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
@@ -109,6 +109,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | Emby | Your server | Favourites, play reports, Instant Mix radio, add to playlists, original-quality audio |
 | Plex | Your server (Plex account, or none for a server open to your network) | Sign in with a plex.tv/link code, server picker, favourites (star ratings), play reports, lyrics, radio, add to playlists, loudness levelling, original-quality audio |
 | Audiobookshelf | Your server | Audiobooks and podcasts: continue listening, series, authors, collections and playlists, search; books resume where any of your Audiobookshelf apps left them, chapters to jump between, mark as played |
+| SoulSync | Your server (an admin API key) | The library of the SoulSync you run: recently added albums and songs, albums, artists, search; plays its files, seeking included |
 | SoundCloud | None | Search, curated selections, artists, playlists and albums, related-track radio |
 | YouTube Music | None | Home, search across YouTube Music **and** regular YouTube, artists and channels, radio, lyrics |
 | Bandcamp | None | Genre charts, search, albums and artist discographies, full-track streaming, lyrics, same-artist radio |
