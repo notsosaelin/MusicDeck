@@ -3,6 +3,17 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.16.0
+
+- **One grid, the same everywhere** (Show all, genres, moods, countries, stations, albums):
+  - **Width sets the columns.** Covers are about as big as on the rows elsewhere (the Cover size choice)
+    and fill the width edge to edge, names under them again.
+  - **Height only caps the size.** Covers never get so big that a whole row doesn't fit under the title.
+  - **Only whole rows.** As many whole rows show as fit, centred, sliding in a row at a time.
+  - **No reshaping.** The grid's shape no longer changes when the mini player appears or goes, and it
+    doesn't jump between shapes.
+- The covers-only look and the name beside the title are gone.
+
 ## 0.15.1
 
 - **Grids stop flickering:** a grid flipped between two shapes (three big covers, then four with a row

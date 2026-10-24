@@ -5,6 +5,7 @@ import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
 import { mediaUrl, pluginState, useStore } from "../../store";
 import { ACCENT, ScrollingText, formatTime } from "../common";
+import { GRID_GAP, GRID_SHARE, gridShape } from "./grid";
 
 /**
  * The media center's look, in Steam's own terms: capsules that grow and glow under the controller
@@ -79,10 +80,8 @@ const CARD_SIZES = {
   medium: "min(clamp(96px, 14vw, 190px), 25vh)",
   large: "min(clamp(120px, 20vw, 260px), 28vh)",
 };
-/** A grid's own cover size (its layout chosen), over the setting's */
+/** A grid's own cover size (sized to fill its width), over the setting's */
 const CardSizeOverride = createContext<string | null>(null);
-/** A dense grid's cards: the cover alone, the name of the one in focus shown by the grid instead */
-const CoverOnly = createContext(false);
 export const useCardSize = () => {
   const own = useContext(CardSizeOverride);
   const chosen = CARD_SIZES[useStore(pluginState)?.center?.cards ?? "medium"] ?? CARD_SIZES.medium;
@@ -149,7 +148,6 @@ export const Card: FC<{
 }> = ({ instanceId, c, onOpen, onPlay, onOptions }) => {
   const [focused, setFocused] = useState(false);
   const size = useCardSize();
-  const coverOnly = useContext(CoverOnly);
   return (
     <Focusable
       className="mc-card"
@@ -164,18 +162,15 @@ export const Card: FC<{
       onOptionsActionDescription={onOptions ? "Options" : undefined}
       onGamepadFocus={() => setFocused(true)}
       onGamepadBlur={() => setFocused(false)}
-      data-name={[c.title, c.subtitle].filter(Boolean).join(" · ")}
       style={{ width: size, flexShrink: 0, padding: 2 }}
     >
       <Cover instanceId={instanceId} c={c} size={size} />
-      {!coverOnly && (
-        <div style={{ marginTop: 10, textAlign: c.kind === "artist" ? "center" : "left" }}>
-          <ScrollingText text={c.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
-          {c.subtitle && (
-            <ScrollingText text={c.subtitle} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
-          )}
-        </div>
-      )}
+      <div style={{ marginTop: 10, textAlign: c.kind === "artist" ? "center" : "left" }}>
+        <ScrollingText text={c.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
+        {c.subtitle && (
+          <ScrollingText text={c.subtitle} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
+        )}
+      </div>
     </Focusable>
   );
 };
@@ -659,13 +654,12 @@ export const Tile: FC<{ c: Collection; onOpen: () => void; width?: number | stri
   </Focusable>
 );
 
-/**
- * Tiles across the page's whole width, as many to a row as fit at a readable size, all as wide; a row's
- * tiles as tall as its tallest (a two-line name).
- */
+/** Genres, moods, countries...: square tiles in a grid like every other (FittedGrid), named inside. */
 export const TileGrid: FC<{ title?: ReactNode; children: ReactNode }> = ({ title, children }) => (
-  // squares as big as the covers elsewhere, so a page of genres or countries lines up like one of albums
-  <FittedGrid title={title}>{children}</FittedGrid>
+  // squares laid out as covers are, their names inside them rather than under
+  <FittedGrid title={title} captioned={false}>
+    {children}
+  </FittedGrid>
 );
 
 /** Live stations, not tracks: a page or shelf of them is shown as stations, played one at a time. */
@@ -681,7 +675,6 @@ export const StationCard: FC<{
 }> = ({ instanceId, track, onPlay, onOptions, width }) => {
   const [focused, setFocused] = useState(false);
   const size = useCardSize();
-  const coverOnly = useContext(CoverOnly);
   return (
     <Focusable
       className="mc-card"
@@ -693,7 +686,6 @@ export const StationCard: FC<{
       onOptionsActionDescription={onOptions ? "Options" : undefined}
       onGamepadFocus={() => setFocused(true)}
       onGamepadBlur={() => setFocused(false)}
-      data-name={[track.title, track.artist].filter(Boolean).join(" · ")}
       style={{ width: width ?? size, flexShrink: 0, padding: 2 }}
     >
       <StationArt
@@ -701,18 +693,12 @@ export const StationCard: FC<{
         name={track.title}
         style={{ width: "100%", aspectRatio: "1", borderRadius: 6 }}
       />
-      {!coverOnly && (
-        <div style={{ marginTop: 10 }}>
-          <ScrollingText
-            text={track.title}
-            play={focused}
-            style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}
-          />
-          {track.artist && (
-            <ScrollingText text={track.artist} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
-          )}
-        </div>
-      )}
+      <div style={{ marginTop: 10 }}>
+        <ScrollingText text={track.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
+        {track.artist && (
+          <ScrollingText text={track.artist} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
+        )}
+      </div>
     </Focusable>
   );
 };
@@ -726,7 +712,6 @@ export const TrackCard: FC<{
 }> = ({ instanceId, track, onPlay, onSecondary }) => {
   const [focused, setFocused] = useState(false);
   const size = useCardSize();
-  const coverOnly = useContext(CoverOnly);
   return (
     <Focusable
       className="mc-card"
@@ -738,22 +723,15 @@ export const TrackCard: FC<{
       onSecondaryActionDescription={onSecondary ? "Add to queue" : undefined}
       onGamepadFocus={() => setFocused(true)}
       onGamepadBlur={() => setFocused(false)}
-      data-name={[track.title, track.artist].filter(Boolean).join(" · ")}
       style={{ width: size, flexShrink: 0, padding: 2 }}
     >
       <Cover instanceId={instanceId} c={{ art: track.art, kind: "album" }} size={size} />
-      {!coverOnly && (
-        <div style={{ marginTop: 10 }}>
-          <ScrollingText
-            text={track.title}
-            play={focused}
-            style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }}
-          />
-          {track.artist && (
-            <ScrollingText text={track.artist} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
-          )}
-        </div>
-      )}
+      <div style={{ marginTop: 10 }}>
+        <ScrollingText text={track.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
+        {track.artist && (
+          <ScrollingText text={track.artist} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
+        )}
+      </div>
     </Focusable>
   );
 };
@@ -1022,55 +1000,37 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR } = {}
   };
 }
 
-/** The smallest cover a grid shows (or, when bigger, under a third of its height): fewer rows rather than smaller covers */
-const MIN_COVER = 100;
-/** The space between a grid's covers */
-const GRID_GAP = 14;
+/** How a grid lays out (gridShape), and how many rows it has in all, and the room left round its rows */
+type GridLayout = { cols: number; size: number; rows: number; pitch: number; total: number; spare: number };
 
 /**
- * The grid's shape for its room: the most rows that keep the covers a good size, as many columns as
- * those covers take across, and the covers then sized to fill the width and the height exactly (a card
- * is its cover with 2px round it). Big screens get more and bigger covers; small ones, fewer rows.
- */
-function gridShape(width: number, room: number, gap: number): { cols: number; size: number } {
-  let shape = { cols: 1, size: Math.max(40, Math.floor(Math.min(width, room) - 4)) };
-  for (let rows = 1; rows <= 6; rows++) {
-    const tall = (room - (rows - 1) * gap) / rows - 4;
-    const cols = Math.max(1, Math.round((width + gap) / (tall + 4 + gap)));
-    const size = Math.floor(Math.min(tall, (width - (cols - 1) * gap) / cols - 4));
-    if (rows === 1 || size >= Math.max(MIN_COVER, room * 0.3)) shape = { cols, size };
-  }
-  return shape;
-}
-
-/**
- * A grid of covers filling the screen, never a row cut off, the way Steam's own grids page:
- * - its shape picked for the room (gridShape): covers edge to edge across and top to bottom under the
- *   title, the cover in focus named at the title (names under every cover would leave the covers small);
- * - the rest slid into view a row at a time as the controller moves down. The slide is a transform, so
- *   held down the stick runs through the rows smoothly (each slide picks up from where the last one was).
- * The block is a row to snapRows: entering it brings it up under the tabs. `onNearEnd`: more cards wanted
- * (a long list made a step at a time).
+ * Every grid of the media center (a Show all, a genre's or a country's page, stations): cards filling
+ * the width edge to edge with their names under them (gridShape), as many whole rows on screen as fit
+ * under the title, never one cut off. The rest slide into view a row at a time as the controller moves
+ * down; the slide is a transform, so held down the stick runs through the rows smoothly (each slide
+ * picks up from where the last one was). The block is a row to snapRows: entering it brings it up under
+ * the tabs. `captioned` false for tiles (genres, countries) that carry their name inside; `onNearEnd`:
+ * more cards wanted (a long list made a step at a time).
  */
 export const FittedGrid: FC<{
   title?: ReactNode;
+  captioned?: boolean;
   onNearEnd?: () => void;
   children: ReactNode;
-}> = ({ title, onNearEnd, children }) => {
+}> = ({ title, captioned = true, onNearEnd, children }) => {
   const block = useRef<HTMLDivElement>(null);
   const grid = useRef<HTMLDivElement>(null);
   const gap = GRID_GAP;
-  // the room the grid has: wide, and tall under its title
-  const [space, setSpace] = useState<{ width: number; room: number } | null>(null);
-  const [fit, setFit] = useState<{ rows: number; pitch: number; total: number; spare: number } | null>(null);
+  const share = GRID_SHARE[useStore(pluginState)?.center?.cards ?? "medium"] ?? GRID_SHARE.medium;
+  const [layout, setLayout] = useState<GridLayout | null>(null);
   const [offset, setOffset] = useState(0);
-  const [named, setNamed] = useState("");
-  const fitNow = useRef(fit);
-  fitNow.current = fit;
+  // for the measuring, which outlives a render
+  const now = useRef({ layout, share, captioned });
+  now.current = { layout, share, captioned };
   const offsetNow = useRef(0);
   const nearEnd = useRef(onNearEnd);
   nearEnd.current = onNearEnd;
-  const shape = space ? gridShape(space.width, space.room, gap) : null;
+  const remeasure = useRef<(() => void) | null>(null);
 
   // each row's top in the grid (a transform doesn't move these)
   const rowTops = () =>
@@ -1089,22 +1049,28 @@ export const FittedGrid: FC<{
     const scroller = b && scrollParent(b);
     if (!b || !g || !scroller) return;
     const measure = () => {
-      // the title above the rows: its own height, not where the rows start (that includes the space that
-      // centres them, which depends on the shape: measured that way, the shape fed back on itself and
-      // flickered between two)
+      // the title's own height (not where the rows start: that moves with the space centring them)
       const header = b.firstElementChild as HTMLElement | null;
       const head = header ? header.offsetTop + header.offsetHeight : 0;
       const room = scroller.clientHeight - TAB_BAR - 8 - head - 16;
-      setSpace((was) =>
-        was && was.width === g.clientWidth && was.room === room ? was : { width: g.clientWidth, room },
-      );
-      const rows = rowTops();
+      const width = g.clientWidth;
+      if (room <= 0 || width <= 0) return;
+      const { layout: was, share: chosen, captioned: named } = now.current;
+      // a card's height past its cover as it really is (the name under it, which doesn't change with the
+      // cover's size), once the cards are drawn at this grid's size; till then, about two lines (none
+      // for tiles)
       const first = g.children[0] as HTMLElement | undefined;
-      if (!rows.length || !first) return setFit(null);
-      const pitch = rows.length > 1 ? rows[1] - rows[0] : first.offsetHeight + gap;
-      const fits = Math.max(1, Math.floor((room + gap) / pitch));
-      setFit({ rows: fits, pitch, total: rows.length, spare: Math.max(0, room + gap - fits * pitch) });
+      const caption = was && first ? Math.max(0, first.offsetHeight - was.size - 4) : named ? 46 : 0;
+      const shape = gridShape(width, room, caption, gap, chosen);
+      const next: GridLayout = {
+        ...shape,
+        total: rowTops().length,
+        spare: Math.max(0, room + gap - shape.rows * shape.pitch),
+      };
+      const same = was && (Object.keys(next) as (keyof GridLayout)[]).every((k) => Math.abs(next[k] - was[k]) < 1);
+      if (!same) setLayout(next);
     };
+    remeasure.current = measure;
     measure();
     const Observer: typeof ResizeObserver = (b.ownerDocument.defaultView as any)?.ResizeObserver ?? ResizeObserver;
     const watch = new Observer(measure);
@@ -1112,9 +1078,11 @@ export const FittedGrid: FC<{
     watch.observe(g);
     return () => watch.disconnect();
   }, []);
+  // the cover size chosen in Settings changed: a new shape
+  useEffect(() => remeasure.current?.(), [share]);
 
   const showRow = (row: number) => {
-    const f = fitNow.current;
+    const f = now.current.layout;
     if (!f || row < 0) return;
     let to = offsetNow.current;
     if (row < to) to = row;
@@ -1136,62 +1104,46 @@ export const FittedGrid: FC<{
       el.mcAlong = true;
       el.scrollIntoView = () => {};
     }
-    setNamed(el.closest<HTMLElement>("[data-name]")?.dataset.name ?? "");
     showRow(rowTops().indexOf(unit.offsetTop));
   };
-  const paged = !!fit && fit.total > fit.rows;
+  const paged = !!layout && layout.total > layout.rows;
   return (
     // not a slot (snapRows' rows of one height): it fits itself to the screen
     <div ref={block} className="mc-row-block" style={{ position: "relative", marginBottom: 28 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>{title}</div>
-        {named && (
-          // the cover in focus, named
-          <div
-            style={{
-              maxWidth: "55%",
-              fontSize: 14,
-              opacity: 0.8,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {named}
-          </div>
-        )}
-      </div>
+      <div>{title}</div>
       <div
         style={{
           position: "relative",
-          // the rows in the middle of the room; the next row a whole gap below, out of sight
-          marginTop: paged ? Math.floor(fit.spare / 2) : 0,
-          height: paged ? fit.rows * fit.pitch : undefined,
+          // the rows in the middle of the room under the title; the next row a whole gap below the
+          // last, out of sight
+          marginTop: paged ? Math.floor(layout.spare / 2) : 0,
+          height: paged ? layout.rows * layout.pitch : undefined,
           overflowY: paged ? "clip" : "visible",
           overflowX: "visible",
         }}
       >
-        <CardSizeOverride.Provider value={shape ? `${shape.size}px` : null}>
-          <CoverOnly.Provider value={true}>
-            <Focusable
-              ref={grid}
-              className="mc-grid mc-fit"
-              onFocus={onFocus}
-              style={{
-                position: "relative",
-                display: "grid",
-                gridTemplateColumns: shape ? `repeat(${shape.cols}, ${shape.size + 4}px)` : "none",
-                justifyContent: "center",
-                gap,
-                // room for a focused cover to grow, inside the clip
-                paddingTop: gap / 2,
-                transform: `translateY(${-offset * (fit?.pitch ?? 0)}px)`,
-                transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1)",
-              }}
-            >
-              {children}
-            </Focusable>
-          </CoverOnly.Provider>
+        <CardSizeOverride.Provider value={layout ? `${layout.size}px` : null}>
+          <Focusable
+            ref={grid}
+            className="mc-grid mc-fit"
+            onFocus={onFocus}
+            style={{
+              position: "relative",
+              display: "grid",
+              // till it's measured, the cover size chosen, as many as fit
+              gridTemplateColumns: layout
+                ? `repeat(${layout.cols}, ${layout.size + 4}px)`
+                : `repeat(auto-fill, calc(${CARD_SIZES.medium} + 4px))`,
+              justifyContent: "center",
+              gap,
+              // room for a focused card to grow, inside the clip
+              paddingTop: gap / 2,
+              transform: `translateY(${-offset * (layout?.pitch ?? 0)}px)`,
+              transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1)",
+            }}
+          >
+            {children}
+          </Focusable>
         </CardSizeOverride.Provider>
       </div>
     </div>
