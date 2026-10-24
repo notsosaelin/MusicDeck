@@ -29,13 +29,7 @@ from .base import MusicService, ServiceError, StreamSource
 
 ALBUM = "disc"
 COVER = "cover"
-UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-
-def _safe(name: str, fallback: str) -> str:
-    """A name fit for a file or folder on any file system (FAT32 sticks included)."""
-    cleaned = UNSAFE.sub("_", name).strip().rstrip(".")
-    return cleaned[:120] or fallback
+_safe = models.safe_name
 
 
 class AudioCdService(MusicService):

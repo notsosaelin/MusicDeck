@@ -3,6 +3,27 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.25.1
+
+- Devices come first on the media center's Home too, and Browse's Devices row shows them.
+- A device that was the live source before 0.25.0 hands over to Local files when MusicDeck starts.
+
+## 0.25.0
+
+- **Devices are part of Local files**: music players, phones, USB sticks and CDs now show in Local files,
+  in a Devices tab (and first on Home) while they're plugged in, instead of being sources of their own. Open
+  one to see its albums; its songs play, queue and go in playlists with the rest of your library. Local
+  files' search finds what's on them too, under "On <device>". Decky → MusicDeck lists them under Plugged
+  in, where a player or phone can be renamed.
+- **Copy music to a player, and back**: Y on an album, artist, playlist or song in Local files has "Copy
+  to <device>" for each player, phone or stick plugged in; on something of a device's, "Copy to this
+  Deck". Files are copied as they are, into Artist/Album folders (on a player, in its Music folder);
+  what's already there is left alone. Progress shows on Local files in Decky → MusicDeck, and a toast says
+  when it's done.
+- **Local files when there's none**: plugging in a player, phone or CD with no Local files source adds one
+  on ~/Music, so devices and CD rips have a library to go to.
+- Rip a CD from its card in Devices: its album page has Rip to Local files, as before.
+
 ## 0.24.1
 
 - **Plugged-in phones and players have readable names**: their serial number, URL escapes and underscores

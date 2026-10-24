@@ -62,7 +62,8 @@ export interface Session {
   from_device?: string | null;
 }
 
-export type CollectionKind = "album" | "artist" | "playlist" | "folder" | "list";
+/** device: a player, phone or stick plugged in, in Local files' Devices tab (services/shelf.py) */
+export type CollectionKind = "album" | "artist" | "playlist" | "folder" | "list" | "device";
 
 export interface Collection {
   id: string;
@@ -179,8 +180,6 @@ export interface ServiceInfo {
   type: string;
   name: string;
   config: Record<string, any>;
-  /** a plugged-in music player, stick ("usb") or phone ("mtp"): a source only while it's there */
-  device?: "usb" | "mtp" | "cd" | null;
   has_credentials: boolean;
   status: Record<string, any>;
   features: Feature[];
@@ -216,10 +215,19 @@ export interface CenterSettings {
   idle_off: 0 | 1 | 2 | 5 | 10;
 }
 
+/** A music player, stick ("usb"), phone ("mtp") or audio CD plugged in: shown in Local files, under Devices. */
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  kind: "usb" | "mtp" | "cd";
+  status: Record<string, any>;
+}
+
 export interface PluginState {
   /** MusicDeck's version (package.json) */
   version: string;
   services: ServiceInfo[];
+  devices: DeviceInfo[];
   active_service: string | null;
   qam_mode: QamMode;
   volume: number;
@@ -273,6 +281,12 @@ export const testService = callable<[id: string], Result<string>>("test_service"
 export const rescan = callable<[id: string], void>("rescan");
 /** A plugged-in device's name, kept for next time; "" goes back to the one it gives itself. */
 export const renameDevice = callable<[id: string, name: string], void>("rename_device");
+/** Copies a track, album, artist or playlist of Local files to a device (its id), or a device's to the Deck ("deck"). */
+export const copyTo = callable<[instanceId: string, kind: string, itemId: string, target: string], Result<string>>(
+  "copy_to",
+);
+/** Whether an id (a track's, an album's...) is of something on a plugged-in device (services/shelf.py). */
+export const onDevice = (id: string | null | undefined) => !!id && id.startsWith("dv~");
 export const getHome = callable<[id: string], Result<Section[]>>("home");
 /** Genres, moods and charts, for sources with feature "browse" */
 export const getBrowse = callable<[id: string], Result<Section[]>>("browse");

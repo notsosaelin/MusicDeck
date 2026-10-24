@@ -1763,32 +1763,107 @@ async def run():
               == "Sony Mobile Communications NW-A105"
               and devmod.phone_name("Nintendo_SNES_Mini_9F3A", {}) == "Nintendo SNES Mini",
               "a phone's name without its serial number, escapes or underscores")
+        # what's plugged in shows in Local files: a stick with an album of its own
+        stick_dir = tempfile.mkdtemp()
+        make_wav(os.path.join(stick_dir, "Music", "Band C", "Live", "01 opener.wav"), "Opener", "Band C", "Live", 1,
+                 art=True)
+        stick = {"id": "devtest00001", "name": "WALKMAN", "kind": "usb", "paths": [stick_dir]}
+        library = plugin.instances[sid]
         live_before = plugin.settings.get("active_service")
-        stick = {"id": "devtest00001", "name": "WALKMAN", "kind": "usb", "paths": [lib]}
         await plugin._devices_changed([stick])
+        on_stick = plugin.device_instances[stick["id"]]
+        await on_stick.scan_task
         state = await plugin.get_state()
-        row = next((s for s in state["services"] if s["id"] == stick["id"]), None)
-        check(row is not None and row["device"] == "usb" and row["type"] == "device"
-              and "tags" not in row["features"] and "artwork" not in row["features"]
-              and not plugin.settings.find_service(stick["id"]),
-              f"a plugged-in player is a source while it's there, read only, and not saved: {row}")
-        await plugin.set_active_service(stick["id"])
-        check(plugin.settings.get("active_service") == stick["id"], "it can be the live source")
+        check(all(s["id"] != stick["id"] for s in state["services"])
+              and [(d["id"], d["name"], d["kind"]) for d in state["devices"]] == [(stick["id"], "WALKMAN", "usb")]
+              and plugin.settings.get("active_service") == live_before and not plugin.settings.find_service(stick["id"]),
+              f"a plugged-in player isn't a source of its own, nor saved: it's listed as plugged in: {state['devices']}")
+        lib_row = next(s for s in state["services"] if s["id"] == sid)
+        check(any(t["id"] == "devices" and t["group"] == "files" for t in lib_row["tabs"]), "Local files has a Devices tab")
+        card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
+        check(card["kind"] == "device" and card["title"] == "WALKMAN" and card["subtitle"] == "USB · 1 song"
+              and card["id"] == f"dv~{stick['id']}~" and (card["art"] or "").startswith(f"dv~{stick['id']}~"),
+              f"with the player in it: {card}")
+        check((await plugin.home(sid))["data"][0]["title"] == "Devices", "and on Home")
+        dev_page = (await plugin.open_collection(sid, "device", card["id"]))["data"]
+        dev_album = dev_page["collections"][0]
+        check(dev_page["title"] == "WALKMAN" and dev_album["title"] == "Live" and dev_album["id"].startswith("dv~"),
+              f"opening it: its albums: {dev_page}")
+        opener = (await plugin.open_collection(sid, "album", dev_album["id"]))["data"]["tracks"][0]
+        check(opener["title"] == "Opener" and opener["id"].startswith(f"dv~{stick['id']}~")
+              and opener["album_id"] == dev_album["id"], f"its songs, as Local files': {opener}")
+        async with aiohttp.ClientSession() as http:
+            async with http.get(f"{base}/stream/{sid}/{opener['id']}?k={key}", headers={"Range": "bytes=0-3"}) as r:
+                check(r.status == 206 and await r.read() == b"RIFF", "they play through Local files")
+            async with http.get(f"{base}/art/{sid}/{opener['art']}?k={key}") as r:
+                check(r.status == 200, "with their covers")
+        found = (await plugin.search(sid, "opener"))["data"]
+        check([(e["title"], [x["title"] for x in e["tracks"]]) for e in found.get("extra") or []]
+              == [("On WALKMAN", ["Opener"])], f"search finds them, and says where: {found.get('extra')}")
+        await plugin.forget_search(sid, "opener")
+        check(not (await plugin.get_tags(sid, "album", dev_album["id"]))["ok"]
+              and not (await plugin.set_tags(sid, "track", opener["id"], {"title": "x"}))["ok"],
+              "a device's files aren't edited")
+        await plugin.star(sid, opener["id"], True, opener)
+        check(opener["id"].split("~")[2] in on_stick.favourites, "its songs can be favourites")
+
+        print("copying between the Deck and a device")
+        deck_album = next(k for k, v in library._albums().items() if v[0][1]["album"] == "Album One")
+        said = await plugin.copy_to(sid, "album", deck_album, stick["id"])
+        await library.copying
+        copied = os.path.join(stick_dir, "Music", "Artist A", "Album One")
+        check(said["ok"] and os.path.isdir(copied) and sorted(os.listdir(copied)) == ["01 first.wav", "02 second.wav"],
+              f"an album from the Deck into the player's Music folder, <artist>/<album>: {said}")
+        await on_stick.scan_task
+        check(len(on_stick.tracks) == 3, "and the player's library has it")
+        await plugin.copy_to(sid, "album", deck_album, stick["id"])
+        await library.copying
+        check(library.copy_progress["done"] == 2 and not library.copy_progress["error"]
+              and sorted(os.listdir(copied)) == ["01 first.wav", "02 second.wav"], "copying it again changes nothing")
+        check(not (await plugin.copy_to(sid, "album", dev_album["id"], stick["id"]))["ok"]
+              and not (await plugin.copy_to(sid, "album", deck_album, "deck"))["ok"]
+              and not (await plugin.copy_to(sid, "album", deck_album, "devnothere"))["ok"],
+              "not to where it is already, nor to a device that isn't there")
+        await plugin.copy_to(sid, "track", opener["id"], "deck")
+        await library.copying
+        landed = os.path.join(lib, "Band C", "Live", "01 opener.wav")
+        check(os.path.isfile(landed), "a player's song copied to the Deck's library")
+        await library.scan_task
+        shutil.rmtree(os.path.join(lib, "Band C"))
+        library.rescan()
+        await library.scan_task
+        shutil.rmtree(os.path.join(stick_dir, "Music", "Artist A"))
+
         await plugin.rename_device(stick["id"], "  My   Walkman ")
         await plugin._devices_changed([stick])
-        check(plugin.devices[stick["id"]]["name"] == "My Walkman", "a device can be renamed")
+        check(plugin.devices[stick["id"]]["name"] == "My Walkman"
+              and (await plugin.get_state())["devices"][0]["name"] == "My Walkman", "a device can be renamed")
+        check(plugin.device_instances[stick["id"]] is on_stick, "without reading it again")
         await plugin._devices_changed([])
         await plugin._devices_changed([stick])
-        check(plugin.devices[stick["id"]]["name"] == "My Walkman",
-              "and keeps the name the next time it's plugged in")
+        check(plugin.devices[stick["id"]]["name"] == "My Walkman", "and keeps the name the next time it's plugged in")
         await plugin.rename_device(stick["id"], "")
         check(plugin.devices[stick["id"]]["name"] == "WALKMAN", "an empty name goes back to its own")
-        await plugin.set_active_service(stick["id"])
         await plugin._devices_changed([])
         state = await plugin.get_state()
-        check(plugin.settings.get("active_service") == live_before and stick["id"] not in plugin.instances
-              and all(s["id"] != stick["id"] for s in state["services"]),
-              "unplugged: gone, and the source live before it is live again")
+        check(state["devices"] == [] and stick["id"] not in plugin.device_instances
+              and not any(t["id"] == "devices" for t in next(s for s in state["services"] if s["id"] == sid)["tabs"])
+              and not (await plugin.open_collection(sid, "album", dev_album["id"]))["ok"]
+              and plugin.settings.get("active_service") == live_before,
+              "unplugged: gone from Local files")
+
+        # plugged in with no Local files: one is added, on ~/Music
+        services = plugin.settings.data["services"]
+        plugin.settings.data["services"] = [s for s in services if s["type"] != "local"]
+        await plugin._devices_changed([stick])
+        added = [s for s in plugin.settings.services() if s["type"] == "local"]
+        check(len(added) == 1 and added[0]["config"]["paths"] == [os.path.join(tmp, "Music")]
+              and plugin.settings.get("active_service") == live_before,
+              f"a device plugged in with no Local files adds it, on ~/Music: {added}")
+        await plugin._devices_changed([])
+        await plugin.remove_service(added[0]["id"])
+        plugin.settings.data["services"] = services
+        plugin.settings.save()
 
         print("audio CDs")
         from musicdeck import cd as cdmod
@@ -1820,25 +1895,28 @@ async def run():
                  "disc": 1, "discs": 1, "tracks": [{"title": f"Song {i}", "artist": "AC/DC"} for i in range(1, 7)]}
         json.dump(named, open(os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, f"cd-{disc['disc_id']}.json"), "w"))
         await plugin._devices_changed([disc])
-        cd_source = plugin.instances[disc["id"]]
+        cd_source = plugin.device_instances[disc["id"]]
         cd_source.reader = type("FakeDrive", (), {"read": staticmethod(frames_of)})()
         state = await plugin.get_state()
-        row = next(s for s in state["services"] if s["id"] == disc["id"])
-        check(row["device"] == "cd" and row["type"] == "cd" and row["name"] == "Blue: Album? · AC/DC",
-              f"a CD is a source while it's in, named by MusicBrainz: {row}")
-        cd_home = (await plugin.home(disc["id"]))["data"]
-        cd_tracks = cd_home[0]["tracks"] if isinstance(cd_home, list) else cd_home["sections"][0]["tracks"]
+        check([(d["name"], d["kind"]) for d in state["devices"]] == [("Blue: Album? · AC/DC", "cd")],
+              f"a CD is in Local files while it's in, named by MusicBrainz: {state['devices']}")
+        card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
+        check(card["kind"] == "album" and card["title"] == "Blue: Album?" and card["subtitle"] == "Audio CD · 6 tracks",
+              f"its card is its album: {card}")
+        cd_page = (await plugin.open_collection(sid, "album", card["id"]))["data"]
+        cd_tracks = cd_page["tracks"]
         check([t["title"] for t in cd_tracks][:2] == ["Song 1", "Song 2"] and round(cd_tracks[0]["duration"]) == 203,
               f"its tracks, named and timed: {cd_tracks[:2]}")
         async with aiohttp.ClientSession() as http:
-            async with http.get(f"{base}/stream/{disc['id']}/t2?k={key}", headers={"Range": "bytes=44-2395"}) as r:
+            async with http.get(f"{base}/stream/{sid}/{cd_tracks[1]['id']}?k={key}", headers={"Range": "bytes=44-2395"}) as r:
                 body = await r.read()
                 check(r.status == 206 and r.headers["Content-Type"] == "audio/wav"
                       and r.headers["Content-Range"] == f"bytes 44-2395/{44 + (32314 - 15363) * cdmod.FRAME}"
                       and body == bytes([(15363 - 150) % 251]) * cdmod.FRAME,
                       "a track plays from the drive, seeking included")
+        check(not (await plugin.copy_to(sid, "album", card["id"], "deck"))["ok"], "a CD is ripped, not copied")
         cd_source.rip_to = lambda: ""
-        check((await plugin.open_collection(disc["id"], "album", "disc"))["data"]["action"] is None,
+        check((await plugin.open_collection(sid, "album", card["id"]))["data"]["action"] is None,
               "no ripping without a Local files folder to rip into")
         rips = tempfile.mkdtemp()
         cd_source.rip_to = lambda: rips
@@ -1846,9 +1924,9 @@ async def run():
         for t in cd_source.tracks:
             t["frames"] = 150  # two seconds each is plenty
         if shutil.which("ffmpeg"):
-            action = (await plugin.open_collection(disc["id"], "album", "disc"))["data"]["action"]
+            action = (await plugin.open_collection(sid, "album", card["id"]))["data"]["action"]
             check(action == {"label": "Rip to Local files", "call": "rip"}, f"the album offers ripping: {action}")
-            said = await plugin.collection_action(disc["id"], "album", "disc", "rip")
+            said = await plugin.collection_action(sid, "album", card["id"], "rip")
             await cd_source.rip_task
             folder = os.path.join(rips, "AC_DC", "Blue_ Album_")
             check(sorted(os.listdir(folder)) == ["01 Song 1.flac", "02 Song 2.flac"] and not cd_source.rip_progress["error"],
@@ -1860,8 +1938,10 @@ async def run():
                   f"as FLAC, tagged: {dict(ripped)}")
         else:
             print("  (no ffmpeg here: ripping not tried)")
+        check(plugin._rip_folder() == lib, "rips go to Local files' first folder")
         await plugin._devices_changed([])
-        check(disc["id"] not in plugin.instances, "the disc out: the source goes")
+        check(disc["id"] not in plugin.device_instances and (await plugin.get_state())["devices"] == [],
+              "the disc out: it goes")
 
         print("songs liked on the Deck")
         from musicdeck import models

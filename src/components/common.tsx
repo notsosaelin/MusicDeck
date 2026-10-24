@@ -12,7 +12,7 @@ import {
   PanelSectionRow,
 } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
-import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaSort, FaUser } from "react-icons/fa";
+import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaSort, FaUsb, FaUser } from "react-icons/fa";
 import { Collection, CollectionKind, Track } from "../api";
 import { mediaUrl } from "../store";
 
@@ -42,6 +42,7 @@ const KIND_ICONS: Record<CollectionKind, ReactNode> = {
   playlist: <FaListUl />,
   folder: <FaFolder />,
   list: <FaListUl />,
+  device: <FaUsb />,
 };
 
 export const Art: FC<{

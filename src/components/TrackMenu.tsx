@@ -21,6 +21,8 @@ import {
   getTags,
   setPlayed,
   star,
+  copyTo,
+  onDevice,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
 import { notify } from "../notify";
@@ -127,6 +129,41 @@ async function markPlayed(instanceId: string, track: Track, played: boolean) {
   invalidateBrowserCache();
   notify(played ? "Marked as played" : "Marked as unplayed", track.title, { instanceId, track });
 }
+
+/**
+ * Copying between the Deck and what's plugged in (Local files only, services/shelf.py): the Deck's
+ * music to each player, phone or stick; a device's to the Deck. A CD is ripped from its album page.
+ */
+function copyItems(instanceId: string, kind: string, id: string): ReactNode[] {
+  const state = pluginState.get();
+  if (state?.services.find((s) => s.id === instanceId)?.type !== "local") return [];
+  const copy = async (target: string) => {
+    const r = await copyTo(instanceId, kind, id, target);
+    notify(r.ok ? "Local files" : "Couldn't copy", r.ok ? r.data : r.error);
+  };
+  if (onDevice(id)) {
+    const device = state.devices.find((d) => id.startsWith(`dv~${d.id}~`));
+    return device && device.kind !== "cd"
+      ? [
+          <MenuItem key="copy-deck" onSelected={() => copy("deck")}>
+            Copy to this Deck
+          </MenuItem>,
+        ]
+      : [];
+  }
+  return state.devices
+    .filter((d) => d.kind !== "cd")
+    .map((d) => (
+      <MenuItem key={`copy-${d.id}`} onSelected={() => copy(d.id)}>
+        Copy to {d.name}
+      </MenuItem>
+    ));
+}
+
+/** Whether an album, artist or playlist can be copied somewhere (to a device, or from one to the Deck). */
+export const canCopy = (instanceId: string, c: Collection) =>
+  (c.kind === "album" || c.kind === "artist" || c.kind === "playlist") &&
+  copyItems(instanceId, c.kind, c.id).length > 0;
 
 /** Context about where the menu was opened, for page-specific items. */
 export interface MenuContext {
@@ -246,10 +283,12 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
         </MenuItem>
       )}
       <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist</MenuItem>
-      {hasFeature(instanceId, "tags") && (
+      {copyItems(instanceId, "track", track.id)}
+      {/* a device's files aren't the Deck's to change */}
+      {hasFeature(instanceId, "tags") && !onDevice(track.id) && (
         <MenuItem onSelected={() => editTags(instanceId, "track", track.id, track.title)}>Edit tags</MenuItem>
       )}
-      {hasFeature(instanceId, "tags") && (
+      {hasFeature(instanceId, "tags") && !onDevice(track.id) && (
         <MenuItem onSelected={() => saveTrackLyrics(instanceId, track.id, track.title)}>Save lyrics</MenuItem>
       )}
       {ctx.playlistId && (
@@ -411,7 +450,16 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
     return;
   }
   if (c.kind === "artist" && hasFeature(instanceId, "artwork")) {
-    showContextMenu(<Menu label={c.title}>{artistManageItems(instanceId, c)}</Menu>, target);
+    const copies = copyItems(instanceId, "artist", c.id);
+    const manage = onDevice(c.id) ? [] : artistManageItems(instanceId, c);
+    showContextMenu(
+      <Menu label={c.title}>
+        {copies}
+        {copies.length > 0 && manage.length > 0 && <MenuSeparator />}
+        {manage}
+      </Menu>,
+      target,
+    );
     return;
   }
   if (c.kind === "playlist" || c.kind === "album") {
@@ -422,13 +470,18 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
           {!hasFeature(instanceId, "playlists") && (
             <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
           )}
+          {copyItems(instanceId, c.kind, c.id)}
           {manage.length > 0 && <MenuSeparator />}
           {manage}
         </Menu>,
         target,
       );
     // a local album: its tags and picture too (whether it has a picture of its own decides "Use the files'")
-    if (c.kind === "album" && (hasFeature(instanceId, "tags") || hasFeature(instanceId, "artwork"))) {
+    if (
+      c.kind === "album" &&
+      !onDevice(c.id) &&
+      (hasFeature(instanceId, "tags") || hasFeature(instanceId, "artwork"))
+    ) {
       getTags(instanceId, "album", c.id).then((r) => show(albumManageItems(instanceId, c, r.ok ? r.data : null)));
     } else {
       show([]);

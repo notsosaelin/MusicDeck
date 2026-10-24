@@ -5,7 +5,7 @@ Track:      {"id", "title", "artist", "album", "duration", "art",
              "album_id", "artist_id", "starred", "gain", "live"?}
             gain: {"track", "album", "track_peak", "album_peak"} in dB / linear peak, or None
             live: present (True) only for endless streams such as radio stations: no length, no seeking
-Collection: {"id", "kind", "title", "subtitle", "art"}   kind: album | artist | playlist | folder
+Collection: {"id", "kind", "title", "subtitle", "art"}   kind: album | artist | playlist | folder | list | device
 Page:       {"title", "subtitle", "art", "collections": [Collection], "tracks": [Track],
              "extra": [{"title", "tracks": [Track]}], "action", "notice"}
             extra = more titled track lists (e.g. "Videos")
@@ -22,6 +22,7 @@ Section:    {"title", "items": [Collection], "tracks": [Track]}   a home row of 
 "art" is an opaque art id resolved by the service through the stream server (/art/...), or None.
 Ids are opaque strings owned by the service that produced them.
 """
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -116,6 +117,15 @@ def notice(text: str) -> dict[str, Any]:
 def is_categories(s: dict[str, Any]) -> bool:
     """A section of ways in ("All albums", genres), not music to pick from."""
     return bool(s["items"]) and not s.get("tracks") and all(c["kind"] in ("list", "folder") for c in s["items"])
+
+
+UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_name(name: str, fallback: str) -> str:
+    """A name fit for a file or folder on any file system (a FAT32 player or stick's too)."""
+    cleaned = UNSAFE_NAME.sub("_", name).strip().rstrip(".")
+    return cleaned[:120] or fallback
 
 
 def utc_date(seconds: Any) -> Optional[datetime]:

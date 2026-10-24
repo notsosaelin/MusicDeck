@@ -62,7 +62,7 @@ import {
   setStack,
 } from "../nav";
 import { notify } from "../notify";
-import { MenuContext, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
+import { MenuContext, canCopy, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
 import {
   Art,
   ButtonRow,
@@ -144,7 +144,8 @@ export const hasCollectionMenu = (instanceId: string, c: Collection) =>
   canSave(instanceId, c) ||
   (!!runningGame.get() && canPlayWithGame(c)) ||
   (c.kind === "album" && hasFeature(instanceId, "tags")) ||
-  (c.kind === "artist" && hasFeature(instanceId, "artwork"));
+  (c.kind === "artist" && hasFeature(instanceId, "artwork")) ||
+  canCopy(instanceId, c);
 
 /**
  * Plays an album or playlist straight from its row (X). Uses the page if it's been opened already;
@@ -237,6 +238,7 @@ export const KIND_TITLES: Record<CollectionKind, string> = {
   playlist: "Playlists",
   folder: "Folders",
   list: "Browse",
+  device: "Devices",
 };
 const KIND_ORDER: CollectionKind[] = ["artist", "album", "playlist", "folder", "list"];
 

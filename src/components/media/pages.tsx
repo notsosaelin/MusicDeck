@@ -37,6 +37,7 @@ import {
   FaTrophy,
   FaUser,
   FaUsers,
+  FaUsb,
 } from "react-icons/fa";
 import {
   CenterTabInfo,
@@ -217,6 +218,7 @@ const SECTION_ICONS: Record<string, ReactNode> = {
   years: <FaCalendarAlt />,
   composers: <FaFeatherAlt />,
   folders: <FaFolder />,
+  devices: <FaUsb />,
   charts: <FaChartLine />,
   moods: <FaSmile />,
   new: <FaStar />,

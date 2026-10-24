@@ -27,6 +27,7 @@ from musicdeck.services.base import LIKED_LIST, LocalLikes
 from musicdeck.devices import DeviceWatcher
 from musicdeck.services.audiocd import AudioCdService
 from musicdeck.services.device import DeviceService
+from musicdeck.services.shelf import LocalLibrary
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
 
@@ -102,10 +103,10 @@ class Plugin:
         self.output_watcher: Optional[OutputWatcher] = None
         # a Last.fm sign-in waiting for the user to approve it: {"key", "secret", "token"}
         self.lastfm_link: Optional[dict[str, str]] = None
-        # music players, sticks and phones plugged in now, each a source while it's there (not saved):
-        # {id: service}; and the source that was live before one was switched to, to go back to
+        # music players, sticks, phones and CDs plugged in now, shown in Local files while they're there
+        # (services/shelf.py), not saved: {id: what they are}, and each one's index {id: instance}
         self.devices: dict[str, dict[str, Any]] = {}
-        self.before_device: Optional[str] = None
+        self.device_instances: dict[str, MusicService] = {}
         self.device_watcher: Optional[DeviceWatcher] = None
 
     # --- lifecycle ---
@@ -143,6 +144,12 @@ class Plugin:
             await self.server.start()
             for service in self.settings.services():
                 await self._start_instance(service)
+            # live: a source that's gone (before 0.25, a device unplugged was a source of its own):
+            # Local files, else the first there is
+            if self.settings.get("active_service") and not self._known(self.settings.get("active_service")):
+                services = self.settings.services()
+                fallback = next((s for s in services if s["type"] == "local"), services[0] if services else None)
+                self.settings.set("active_service", fallback["id"] if fallback else None)
             decky.logger.info(f"MusicDeck started with {len(self.instances)} service(s)")
             self._sync_offline()  # finishes downloads an earlier session left
             self.output_watcher = OutputWatcher(self._output_changed, decky.logger)
@@ -161,9 +168,10 @@ class Plugin:
             await self.device_watcher.stop()
         await self.cast.disconnect()
         await self.offline.stop()
-        for instance in list(self.instances.values()):
+        for instance in list(self.instances.values()) + list(self.device_instances.values()):
             await instance.stop()
         self.instances.clear()
+        self.device_instances.clear()
         await self.server.stop()
         if self.http:
             await self.http.close()
@@ -181,8 +189,7 @@ class Plugin:
         old = self.instances.pop(service["id"], None)
         if old:
             await old.stop()
-        device = service.get("device")
-        cls = (AudioCdService if device == "cd" else DeviceService) if device else SERVICE_TYPES.get(service["type"])
+        cls = SERVICE_TYPES.get(service["type"])
         if cls is None:
             decky.logger.warning(f"Skipping service of unknown type {service['type']}")
             return
@@ -191,13 +198,60 @@ class Plugin:
         instance.save_config = lambda config, sid=service["id"]: self._persist_config(sid, config)
         # a short note for the user from the source (what new albums got), shown as a toast
         instance.announce = lambda text, sid=service["id"]: spawn(decky.emit("source_note", sid, text), "source note")
-        if isinstance(instance, AudioCdService):
-            instance.rip_to = self._rip_folder
+        if isinstance(instance, LocalLibrary):
+            instance.devices = self._shelf
         try:
             await instance.start()
         except Exception:
             decky.logger.exception(f"Failed to start service {service['id']}")
         self.instances[service["id"]] = instance
+
+    def _shelf(self) -> list[dict[str, Any]]:
+        """What's plugged in, for Local files to show: [{"id", "name", "kind", "instance"}]."""
+        shelf = []
+        for i, d in self.devices.items():
+            instance = self.device_instances.get(i)
+            if instance:
+                # a CD goes by its album's name once MusicBrainz says it
+                name = instance.name() if isinstance(instance, AudioCdService) else d["name"]
+                shelf.append({"id": i, "name": name, "kind": d["kind"], "instance": instance})
+        return shelf
+
+    def _libraries(self) -> list[LocalLibrary]:
+        return [i for i in self.instances.values() if isinstance(i, LocalLibrary)]
+
+    async def _start_device(self, device: dict[str, Any]) -> None:
+        """A device's index: Local files on its folders (DeviceService), or a CD (AudioCdService)."""
+        old = self.device_instances.pop(device["id"], None)
+        if old:
+            await old.stop()
+        cls = AudioCdService if device["kind"] == "cd" else DeviceService
+        instance = cls(device["id"], device["config"], decky.DECKY_PLUGIN_RUNTIME_DIR)
+        # its news (a CD named, a rip done) comes as Local files', with its name
+        def announce(text: str, name: str = device["name"]) -> None:
+            library = next(iter(self._libraries()), None)
+            if library:
+                spawn(decky.emit("source_note", library.instance_id, f"{name}: {text}"), "device note")
+        instance.announce = announce
+        if isinstance(instance, AudioCdService):
+            instance.rip_to = self._rip_folder
+        try:
+            await instance.start()
+        except Exception:
+            decky.logger.exception(f"Failed to read {device['name']}")
+        self.device_instances[device["id"]] = instance
+
+    async def _library_for_devices(self) -> None:
+        """A device plugged in with no Local files to show it in: Local files is added, on ~/Music (the
+        folder made if there's none), so what's plugged in, and CDs ripped, have a library to go to."""
+        if any(s["type"] == "local" for s in self.settings.services()):
+            return
+        music = os.path.join(decky.DECKY_USER_HOME, "Music")
+        os.makedirs(music, exist_ok=True)
+        added = await self.save_service({"type": "local", "name": "Local files", "config": {"paths": [music]}})
+        if added.get("ok") and not self.settings.get("active_service"):
+            self.settings.set("active_service", added["data"]["id"])
+        decky.logger.info(f"Added Local files on {music} for what's plugged in")
 
     def _persist_config(self, instance_id: str, config: dict[str, Any]) -> None:
         stored = self.settings.find_service(instance_id)
@@ -216,43 +270,47 @@ class Plugin:
         return ""
 
     def _known(self, instance_id: Any) -> Optional[dict[str, Any]]:
-        """A configured source, or a device plugged in now."""
+        """A configured source."""
         if not isinstance(instance_id, str):
             return None
-        return self.settings.find_service(instance_id) or self.devices.get(instance_id)
+        return self.settings.find_service(instance_id)
 
     async def _devices_changed(self, found: list[dict[str, Any]]) -> None:
-        """Devices plugged in become sources, unplugged ones stop being; the live one unplugged hands
-        back to the source that was live before."""
+        """Devices plugged in show in Local files (its Devices tab), each with an index of its own;
+        unplugged ones go."""
         now = {d["id"]: d for d in found}
         for device_id in [i for i in self.devices if i not in now]:
             gone = self.devices.pop(device_id)
             async with self.lifecycle:
-                instance = self.instances.pop(device_id, None)
+                instance = self.device_instances.pop(device_id, None)
                 if instance:
                     await instance.stop()
-            if self.settings.get("active_service") == device_id:
-                back = self.before_device if self._known(self.before_device) else None
-                self.settings.set("active_service", back or next((s["id"] for s in self.settings.services()), None))
             decky.logger.info(f"Unplugged: {gone['name']}")
+        if found:
+            await self._library_for_devices()
         names = self.settings.get("device_names") or {}
         for device in found:
-            own = device["name"]
-            device = {**device, "name": names.get(device["id"]) or own}
             if device["kind"] == "cd":
-                service = {"id": device["id"], "type": AudioCdService.type, "name": device["name"],
-                           "config": {k: device[k] for k in ("drive", "toc", "disc_id")}, "device": "cd"}
+                config = {k: device[k] for k in ("drive", "toc", "disc_id")}
             else:
-                service = {"id": device["id"], "type": DeviceService.type, "name": device["name"], "own_name": own,
-                           "config": {"paths": device["paths"], "kind": device["kind"]}, "device": device["kind"]}
-            if self.devices.get(device["id"]) != service:
-                new = device["id"] not in self.devices
-                self.devices[device["id"]] = service
-                await self._start_instance(service)
-                if new:
-                    decky.logger.info(f"Plugged in: {device['name']} ({device['kind']}, {len(device['paths'])} folders)")
-                    spawn(decky.emit("source_note", device["id"], "Plugged in: pick it in Decky → MusicDeck"),
-                          "device note")
+                config = {"paths": device["paths"], "kind": device["kind"]}
+            known = self.devices.get(device["id"])
+            entry = {"id": device["id"], "name": names.get(device["id"]) or device["name"], "own_name": device["name"],
+                     "kind": device["kind"], "config": config}
+            if known == entry:
+                continue
+            self.devices[device["id"]] = entry
+            # a name given or taken back isn't a new device: only what's on it is read again
+            if not known or known["config"] != config:
+                await self._start_device(entry)
+            if not known:
+                decky.logger.info(f"Plugged in: {entry['name']} ({device['kind']}, {len(device['paths'])} folders)")
+                library = next(iter(self._libraries()), None)
+                if library:
+                    spawn(decky.emit("source_note", library.instance_id,
+                                     f"{entry['name']} plugged in: it's in Local files, under Devices"), "device note")
+        for library in self._libraries():
+            library.forget_browse_info()
         await _announce_change()
 
     def _instance(self, instance_id: str) -> MusicService:
@@ -268,8 +326,7 @@ class Plugin:
         return {
             "id": service["id"],
             "type": service["type"],
-            # a CD goes by its album's name once MusicBrainz says it
-            "name": instance.name() if isinstance(instance, AudioCdService) else service["name"],
+            "name": service["name"],
             "config": {k: v for k, v in service["config"].items() if k not in SECRET_KEYS},
             "has_credentials": any(k in SECRET_KEYS for k in service["config"]),
             "features": sorted(instance.features) if instance else [],
@@ -282,8 +339,6 @@ class Plugin:
             # the track menu's words for a favourite (MusicService.LIKE_WORDS)
             "like_words": instance.LIKE_WORDS if instance else MusicService.LIKE_WORDS,
             "status": instance.status() if instance else {},
-            # a plugged-in device ("usb" or "mtp"), a source only while it's there
-            "device": service.get("device"),
         }
 
     def _tabs(self, instance_id: str, instance: MusicService) -> list[dict[str, Any]]:
@@ -302,8 +357,10 @@ class Plugin:
     async def get_state(self) -> dict[str, Any]:
         return {
             "version": version.current(),
-            "services": [self._public_service(s) for s in self.settings.services()]
-                        + [self._public_service(s) for s in self.devices.values()],
+            "services": [self._public_service(s) for s in self.settings.services()],
+            # what's plugged in (shown in Local files): {"id", "name", "kind" (usb, mtp, cd), "status"}
+            "devices": [{"id": d["id"], "name": d["name"], "kind": d["kind"], "status": d["instance"].status()}
+                        for d in self._shelf()],
             "active_service": self.settings.get("active_service"),
             "qam_mode": self.settings.get("qam_mode"),
             "volume": self.settings.get("volume"),
@@ -420,9 +477,6 @@ class Plugin:
     @_when_ready
     async def set_active_service(self, instance_id: str) -> None:
         if self._known(instance_id):
-            current = self.settings.get("active_service")
-            if instance_id in self.devices and current not in self.devices:
-                self.before_device = current
             self.settings.set("active_service", instance_id)
             await _announce_change()
 
@@ -441,6 +495,17 @@ class Plugin:
         device = self.devices[instance_id]
         device["name"] = name or device.get("own_name") or device["name"]
         await _announce_change()
+
+    @_when_ready
+    async def copy_to(self, instance_id: str, kind: str, item_id: str, target: str) -> dict[str, Any]:
+        """Copies a track, album, artist or playlist of Local files to a plugged-in device (its id), or
+        one of a device's to the Deck ("deck"); in the background, a toast when it's done."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not isinstance(instance, LocalLibrary) or not all(isinstance(x, str) for x in (kind, item_id, target)):
+                raise ServiceError("Only Local files copies to and from devices")
+            return await instance.copy_to(kind, item_id, target)
+        return await _result(work())
 
     @_when_ready
     async def test_service(self, instance_id: str) -> dict[str, Any]:
@@ -505,8 +570,10 @@ class Plugin:
                 now = instance.current(c) if instance else c
             if now:
                 recent.append(now)
-        return (([{"title": "Jump back in", "items": recent}] if recent else [])
-                + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections)
+        # what's plugged in (Local files' Devices) first: it's what was just plugged in to play
+        devices = [s for s in sections[:1] if isinstance(instance, LocalLibrary) and s["title"] == "Devices"]
+        return (devices + ([{"title": "Jump back in", "items": recent}] if recent else [])
+                + ([{"title": "Your playlists", "items": ours}] if ours else []) + sections[len(devices):])
 
     @_when_ready
     async def track_details(self, instance_id: str, track: dict[str, Any]) -> dict[str, Any]:

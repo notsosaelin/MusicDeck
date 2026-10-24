@@ -113,12 +113,27 @@ source (`MusicService.remove`).
   first, then the rest of the library, shuffled.
 - **Security**: `open("folder", path)` refuses paths outside the configured folders.
 
-## Plugged-in devices (`device.py`, `devices.py`)
+## Plugged-in devices and CDs, in Local files (`shelf.py`, `device.py`, `audiocd.py`, `devices.py`, `cd.py`)
 
-- **What**: an MP3 player, iPod (disk mode), USB stick or phone, played as a source while it's plugged in
-  (not saved; `Plugin.devices`). Read only: Local files' scanner on its folders without tag editing,
-  artwork or look-ups (`DeviceService`). Its id comes from the file system's UUID or the phone's MTP name,
-  so its index, favourites and playlists are there again next time.
+- **Where they show**: in Local files (`LocalLibrary`, `shelf.py`), not as sources of their own: a Devices
+  tab (group "files") and a Devices row first on Home, while anything is plugged in. Each device keeps its
+  own index, started by the plugin (`Plugin.device_instances`, not saved): a `DeviceService` (Local files'
+  scanner on its folders, read only) or an `AudioCdService`. Local files speaks for them: everything of a
+  device's goes out with ids, album and artist ids and art ids prefixed `dv~<device id>~` (`shelf.mark`),
+  and anything that comes back prefixed goes to that device (`open`, `stream`, `art`, `star`, `scrobble`,
+  `lyrics`, `details`, `radio`, `collection_action`). So the queue, playlists and the stream server only
+  ever see Local files: one source. A device's card is a `device` collection (its albums); a CD's is its
+  album. Search adds each device's matches as "On <device>". Tag edits, artwork and look-ups refuse
+  device ids (`READ_ONLY`).
+- **Ids**: from the file system's UUID or the phone's MTP name, so a device's index and favourites are
+  there again next time.
+- **No Local files**: the first device plugged in adds one on `~/Music` (`_library_for_devices`).
+- **Copying** (`copy_to`, `Plugin.copy_to`): a track, album, artist or Local files playlist from the Deck to
+  a player, phone or stick, or from one of them to the Deck, in the background, as the files are, into
+  `<artist>/<album>/` under the device's Music folder (made on a phone if it has none; a stick without one
+  gets them at its top) or Local files' first folder. A file of the same name and size there is left
+  alone. The index it went to is rescanned after. GVfs's MTP folders take plain writes. Progress in Local
+  files' `status()["copy"]`, a toast when done. A CD is ripped, not copied.
 - **USB storage**: SteamOS and Bazzite mount it under `/run/media/<user>/` themselves; `/proc/self/mounts`
   says what's mounted there from a `/dev/sd*` device (the SD card and internal drives aren't "plugged in").
 - **Phones (MTP)**: GVfs lists them (`gio mount -li`, with the session bus given explicitly: Decky's
@@ -128,25 +143,19 @@ source (`MusicService.remove`).
 - **Names**: USB storage by its file system's label; phones by what they say over USB (sysfs `manufacturer`
   and `product`, matched to GVfs's folder by the serial at its end), else GVfs's folder name, either way
   without serial numbers or `SN:` tags (`phone_name`, `tidy_name`). Some firmware says only a board's code
-  name ("TRINKET-IOT-IDP"): the user can rename a device (`rename_device`, kept in settings as
-  `device_names` by device id; an empty name goes back to its own).
-- **Unplugged**: its source goes; if it was live, the source live before it is live again.
-- Polled every 3 s (`DeviceWatcher`). Linux only.
-
-## Audio CDs (`audiocd.py`, `cd.py`)
-
-- **What**: an audio CD in a `/dev/sr*` drive, a source while it's in (`AudioCdService`, found by
-  `devices.audio_cds`). Read with Linux's CD-ROM ioctls (`cd.py`: drive and disc status, the table of
-  contents, `CDROMREADAUDIO` for raw frames), no program needed; the drive is the user's to read (uaccess).
-- **Names**: the MusicBrainz disc ID (`cd.disc_id`, enhanced CDs' data session left out) looks up the
-  release (`MusicBrainz.by_disc`), then its names for this disc and the Cover Art Archive's cover, kept as
-  `cd-<disc id>.json` and `.jpg` in the runtime folder. Unknown discs play as "Track n".
-- **Playing**: each track a WAV made on demand (`cd.TrackWav`), served by the stream server as a
-  `StreamSource(reader=...)` with byte ranges, so seeking works.
-- **Ripping**: the album page's "Rip to Local files" (`collection_action` "rip") writes
-  `<artist>/<album>/<nn> <title>.flac` into the first Local files source's first folder: raw audio piped
-  to ffmpeg's FLAC encoder, then tagged with mutagen (names, numbers, year, genres, MusicBrainz album id,
-  cover). Progress in `status()["rip"]`, a toast when done. Without ffmpeg or a Local files source, it says so.
+  name ("TRINKET-IOT-IDP"): the user can rename a device in Decky → MusicDeck, Plugged in
+  (`rename_device`, kept in settings as `device_names` by device id; an empty name goes back to its own).
+- **Audio CDs**: a disc in a `/dev/sr*` drive (`devices.audio_cds`), read with Linux's CD-ROM ioctls
+  (`cd.py`: drive and disc status, the table of contents, `CDROMREADAUDIO` for raw frames), no program
+  needed; the drive is the user's to read (uaccess). Named by its MusicBrainz disc ID (`cd.disc_id`,
+  enhanced CDs' data session left out; `MusicBrainz.by_disc`), with the Cover Art Archive's cover, kept as
+  `cd-<disc id>.json` and `.jpg` in the runtime folder; unknown discs play as "Track n". Each track is a
+  WAV made on demand (`cd.TrackWav`), served as a `StreamSource(reader=...)` with byte ranges, so seeking
+  works. Its album page's "Rip to Local files" (`collection_action` "rip") writes
+  `<artist>/<album>/<nn> <title>.flac` into Local files' first folder: raw audio piped to ffmpeg's FLAC
+  encoder, then tagged with mutagen (names, numbers, year, genres, MusicBrainz album id, cover). Progress
+  in `status()["rip"]`, a toast when done. Without ffmpeg or a Local files source, it says so.
+- **Unplugged**: it leaves Local files. Polled every 3 s (`DeviceWatcher`). Linux only.
 
 ## Steam soundtracks (`steam.py`, `src/steam.ts`)
 

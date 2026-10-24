@@ -58,6 +58,7 @@ import {
   removeDownloads,
   rescan,
   renameDevice,
+  DeviceInfo,
   retryDownloads,
   setGameMusic,
   lastfmUnlink,
@@ -136,22 +137,9 @@ const describeStatus = (s: ServiceInfo): string => {
             s.status.uploading ? `uploading ${s.status.uploading}` : "",
           )
         : s.status.error || "Connecting…";
-    case "cd": {
-      const n = s.status.tracks ?? 0;
-      const rip = s.status.rip;
-      return parts(
-        `CD · ${n} track${n === 1 ? "" : "s"}`,
-        rip?.running ? `ripping ${rip.done} of ${rip.total}` : rip?.error ? `ripping stopped: ${rip.error}` : "",
-      );
-    }
-    case "device": {
-      const n = s.status.tracks ?? 0;
-      return parts(
-        s.device === "mtp" ? "Phone" : "USB",
-        s.status.scanning ? `Reading… ${s.status.found} files` : `${n} track${n === 1 ? "" : "s"}`,
-      );
-    }
     case "local": {
+      const copy = s.status.copy;
+      if (copy?.running) return `Copying to ${copy.to}… ${copy.done} of ${copy.total}`;
       if (s.status.scanning) return `Scanning… ${s.status.found} files`;
       if (s.status.art?.running)
         return s.status.art.total
@@ -261,10 +249,10 @@ const DownloadRows: FC<{ status: DownloadStatus }> = ({ status }) => {
 };
 
 /** Naming a plugged-in device: phones and players can call themselves by a board's code name. */
-const RenameDeviceModal: FC<{ closeModal?: () => void; service: ServiceInfo }> = ({ closeModal, service }) => {
-  const [name, setName] = useState(service.name);
+const RenameDeviceModal: FC<{ closeModal?: () => void; device: DeviceInfo }> = ({ closeModal, device }) => {
+  const [name, setName] = useState(device.name);
   const save = async () => {
-    await renameDevice(service.id, name);
+    await renameDevice(device.id, name);
     await refreshState();
     closeModal?.();
   };
@@ -272,16 +260,60 @@ const RenameDeviceModal: FC<{ closeModal?: () => void; service: ServiceInfo }> =
     <ModalRoot closeModal={closeModal} onCancel={closeModal}>
       <DialogHeader>Rename</DialogHeader>
       <DialogBody>
-        <TextField value={name} placeholder={service.name} onChange={(e) => setName(e.target.value)} />
+        <TextField value={name} placeholder={device.name} onChange={(e) => setName(e.target.value)} />
       </DialogBody>
       <DialogActions primary="Save" onPrimary={save} primaryDisabled={!name.trim()} onCancel={closeModal} />
     </ModalRoot>
   );
 };
 
+/** What's on a device, or what's happening to a CD: "Phone · 412 songs", "Audio CD · ripping 3 of 11". */
+const describeDevice = (d: DeviceInfo): string => {
+  if (d.kind === "cd") {
+    const n = d.status.tracks ?? 0;
+    const rip = d.status.rip;
+    return [
+      `Audio CD · ${n} track${n === 1 ? "" : "s"}`,
+      rip?.running ? `ripping ${rip.done} of ${rip.total}` : rip?.error ? `ripping stopped: ${rip.error}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const n = d.status.tracks ?? 0;
+  return (
+    `${d.kind === "mtp" ? "Phone" : "USB"} · ` + (d.status.scanning ? "Reading…" : `${n} song${n === 1 ? "" : "s"}`)
+  );
+};
+
+/** A device plugged in: played and copied to in Local files (its Devices tab); here it can be renamed. */
+const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
+  const rename = () => showModal(<RenameDeviceModal device={device} />);
+  const openMenu = (e: any) =>
+    showContextMenu(
+      <Menu label={device.name}>
+        <MenuItem onSelected={rename}>Rename</MenuItem>
+      </Menu>,
+      e?.currentTarget ?? window,
+    );
+  const icon = device.kind === "mtp" ? <FaMobileAlt /> : device.kind === "cd" ? <FaCompactDisc /> : <FaUsb />;
+  return (
+    <PanelSectionRow>
+      <Field
+        focusable
+        highlightOnFocus={device.kind !== "cd"}
+        icon={icon}
+        label={device.name}
+        description={describeDevice(device)}
+        {...(device.kind !== "cd" && { onActivate: openMenu, onClick: openMenu, onOKActionDescription: "Options" })}
+      >
+        {device.kind !== "cd" && <FaEllipsisH style={{ opacity: 0.6 }} />}
+      </Field>
+    </PanelSectionRow>
+  );
+};
+
 const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }> = ({ service, typeName, active }) => {
   const edit = () => showModal(<ServiceModal type={service.type} typeName={typeName} existing={service} />);
-  const rename = () => showModal(<RenameDeviceModal service={service} />);
   const test = async () => {
     const r = await testService(service.id);
     notify(service.name, r.ok ? r.data : r.error);
@@ -323,10 +355,8 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
     showContextMenu(
       <Menu label={service.name}>
         {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
-        {/* a plugged-in device comes and goes by itself: nothing to edit or remove */}
-        {!service.device && <MenuItem onSelected={edit}>Edit</MenuItem>}
-        {(service.device === "usb" || service.device === "mtp") && <MenuItem onSelected={rename}>Rename</MenuItem>}
-        {service.device === "cd" ? null : service.type === "local" || service.type === "steam" || service.device ? (
+        <MenuItem onSelected={edit}>Edit</MenuItem>
+        {service.type === "local" || service.type === "steam" ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
             Rescan library
           </MenuItem>
@@ -344,12 +374,10 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
             Find missing lyrics
           </MenuItem>
         )}
-        {!service.device && <MenuSeparator />}
-        {!service.device && (
-          <MenuItem tone="destructive" onSelected={remove}>
-            Remove
-          </MenuItem>
-        )}
+        <MenuSeparator />
+        <MenuItem tone="destructive" onSelected={remove}>
+          Remove
+        </MenuItem>
       </Menu>,
       e?.currentTarget ?? window,
     );
@@ -359,19 +387,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
       <Field
         focusable
         highlightOnFocus
-        icon={
-          <span style={{ color: active ? ACCENT : undefined }}>
-            {service.device === "mtp" ? (
-              <FaMobileAlt />
-            ) : service.device === "cd" ? (
-              <FaCompactDisc />
-            ) : service.device ? (
-              <FaUsb />
-            ) : (
-              TYPE_ICONS[service.type]
-            )}
-          </span>
-        }
+        icon={<span style={{ color: active ? ACCENT : undefined }}>{TYPE_ICONS[service.type]}</span>}
         label={
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {service.name}
@@ -772,9 +788,7 @@ export const Settings: FC = () => {
   }, []);
 
   if (!state) return null;
-  const typeName = (type: string) =>
-    state.service_types.find((t) => t.type === type)?.display_name ??
-    (type === "device" ? "Plugged in" : type === "cd" ? "Audio CD" : type);
+  const typeName = (type: string) => state.service_types.find((t) => t.type === type)?.display_name ?? type;
 
   // sources and the kinds of source to add, A to Z
   const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
@@ -832,6 +846,14 @@ export const Settings: FC = () => {
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
+      {/* what's plugged in plays in Local files (its Devices tab): listed here to be named */}
+      {(state.devices ?? []).length > 0 && (
+        <PanelSection title="Plugged in">
+          {state.devices.map((d) => (
+            <DeviceRow key={d.id} device={d} />
+          ))}
+        </PanelSection>
+      )}
 
       <PlaybackSections state={state} />
 

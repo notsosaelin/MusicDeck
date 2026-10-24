@@ -76,13 +76,14 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Downloads:** download a MusicDeck playlist and it plays with no connection (and no data used), from
   your own servers, SoundCloud, YouTube, Bandcamp, podcasts and the Live Music Archive. Each song is kept
   once however many playlists hold it, and goes when the last one lets it go.
-- **Plug in a music player:** an MP3 player, an iPod in disk mode, a USB stick or a phone set to "File
-  transfer" shows up in Decky → MusicDeck as a source while it's plugged in, as on the Xbox: pick it to
-  browse and play what's on it. MusicDeck only reads it (no tag edits). Phones need a system with GVfs in
-  game mode (Bazzite has it); on others, USB storage only. Its menu has Rename, for players whose
-  firmware calls them by a code name; the name stays for next time.
-- **Audio CDs:** a CD in a drive plugged into the device is a source too, named by MusicBrainz, and its
-  album page can rip it to your Local files folder as tagged FLAC (with ffmpeg, which Bazzite has).
+- **Plug in a music player, phone or CD:** an MP3 player, an iPod in disk mode, a USB stick, a phone set
+  to "File transfer", or a CD in a disc drive shows up in Local files, in its Devices tab (and first on
+  Home), as on the Xbox: open it and play what's on it alongside your library. Y on an album, artist,
+  playlist or song copies it to a plugged-in player, or from one to the Deck (files as they are, into
+  Artist/Album). A CD is named by MusicBrainz, and its album page rips it to your Local files folder as
+  tagged FLAC (with ffmpeg, which Bazzite has). No Local files source yet? Plugging something in adds one on
+  ~/Music. Players whose firmware calls them by a code name can be renamed in Decky → MusicDeck, under
+  Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only.
 - **Likes:** **Y** on a song likes it in the source's own words: Save to Liked Songs on Spotify, Add to My
   Collection on TIDAL, Add to favourites on Qobuz and your servers. SoundCloud, YouTube Music, Bandcamp and the
   Live Music Archive keep likes on the Deck, listed under Liked songs (Browse, and the panel's Library).
@@ -242,6 +243,13 @@ for a detailed playback timeline in `musicdeck-debug.log`.
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, every entry point and its guard, audit findings, remaining risk |
 
 ## Roadmap
+
+Not planned yet:
+
+- **Syncing a stock iPod.** Apple's firmware only plays what its own database (iTunesDB) lists, not files
+  copied to it, and from the iPod Classic and 3rd-generation nano on that database must be signed. An iPod
+  running Rockbox, or used as a plain disk, works like any player today.
+- **Burning CDs.** Not investigated.
 
 Not possible:
 

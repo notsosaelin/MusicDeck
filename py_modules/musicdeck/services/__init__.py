@@ -11,7 +11,7 @@ from .base import MusicService, ServiceError, SignIn, StreamSource
 # (type, module, class, name shown in "Add a source", its group there: "yours" (files and your own
 # servers), "streaming" (services), "radio" (stations, podcasts, live recordings))
 CATALOGUE = [
-    ("local", "local", "LocalService", "Local files", "yours"),
+    ("local", "shelf", "LocalLibrary", "Local files", "yours"),
     ("steam", "steam", "SteamService", "Steam soundtracks", "yours"),
     ("subsonic", "subsonic", "SubsonicService", "Navidrome / Subsonic", "yours"),
     ("jellyfin", "jellyfin", "JellyfinService", "Jellyfin", "yours"),

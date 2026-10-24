@@ -1,6 +1,6 @@
 import { Focusable, Spinner, gamepadDialogClasses } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, createContext, useContext, useEffect, useRef, useState } from "react";
-import { FaCompactDisc, FaFolder, FaList, FaUser } from "react-icons/fa";
+import { FaCompactDisc, FaFolder, FaList, FaUsb, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
 import { mediaUrl, pluginState, useStore } from "../../store";
@@ -94,6 +94,7 @@ const KIND_ICON: Record<Collection["kind"], ReactNode> = {
   artist: <FaUser />,
   folder: <FaFolder />,
   list: <FaList />,
+  device: <FaUsb />,
 };
 
 /** A collection's picture (round for artists), or its kind's icon when it has none. */
