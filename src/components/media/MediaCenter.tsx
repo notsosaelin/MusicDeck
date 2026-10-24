@@ -1,16 +1,13 @@
 import { DropdownItem, Focusable, SliderField, Tabs, footerClasses } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import {
-  FaCompactDisc,
   FaHeart,
-  FaHome,
   FaMoon,
   FaPause,
   FaPlay,
   FaPlus,
   FaRandom,
   FaRegHeart,
-  FaSearch,
   FaStop,
   FaRedo,
   FaStepBackward,
@@ -53,7 +50,7 @@ import {
   useDetails,
 } from "./nowplaying";
 import { DEFAULT_CENTER, setCenter } from "./center";
-import { CENTER_CSS, Cover, Notice, PageButton, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
+import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
 import { playCollection, useResult } from "../Browser";
 import { useOnAir } from "../NowPlaying";
 import {
@@ -477,59 +474,63 @@ const SideSwitch: FC<{ kind: NowPlayingKind; upNext: number }> = ({ kind, upNext
   );
 };
 
-/** One of "Jump back in" on the empty Now Playing: its cover and name; A plays it straight away. */
-const RecentTile: FC<{ instanceId: string; art: string | null; title: string; size: number; onPlay: () => void }> = ({
-  instanceId,
-  art,
-  title,
-  size,
-  onPlay,
-}) => {
-  const [focused, setFocused] = useState(false);
-  return (
-    <Focusable
-      className="mc-card"
-      noFocusRing
-      onActivate={onPlay}
-      onClick={onPlay}
-      onOKActionDescription="Play"
-      onGamepadFocus={() => setFocused(true)}
-      onGamepadBlur={() => setFocused(false)}
-      style={{ width: size, flexShrink: 0 }}
-    >
-      <div
-        style={{
-          borderRadius: 6,
-          boxShadow: focused ? "0 0 0 3px #ffffff" : "none",
-          transform: focused ? "scale(1.04)" : "none",
-          transition: "transform 0.12s",
-        }}
-      >
-        <Cover instanceId={instanceId} c={{ art, kind: "album" }} size={size} />
-      </div>
-      <div
-        style={{
-          marginTop: 8,
-          fontSize: 14,
-          fontWeight: 600,
-          color: focused ? "#ffffff" : "#dcdedf",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {title}
-      </div>
-    </Focusable>
-  );
-};
+/**
+ * A turntable at rest, where the cover goes: a record with its grooves, the tone arm parked off it, and
+ * on the record's label the cover of what Play would start (Steam's blue without one).
+ */
+const RestingRecord: FC<{ cover?: string }> = ({ cover }) => (
+  <svg viewBox="0 0 100 100" style={{ width: "100%", height: "100%", display: "block" }}>
+    <defs>
+      <clipPath id="md-record-label">
+        <circle cx="44" cy="52" r="15" />
+      </clipPath>
+      <radialGradient id="md-record-shine" cx="0.35" cy="0.3" r="0.8">
+        <stop offset="0" stopColor="#2a3340" />
+        <stop offset="1" stopColor="#0a0d11" />
+      </radialGradient>
+    </defs>
+    <rect x="1" y="1" width="98" height="98" rx="5" fill="rgba(255, 255, 255, 0.045)" />
+    <circle cx="44" cy="52" r="41" fill="url(#md-record-shine)" stroke="rgba(255, 255, 255, 0.08)" strokeWidth="0.6" />
+    {[37, 33, 29, 25, 21].map((r) => (
+      <circle key={r} cx="44" cy="52" r={r} fill="none" stroke="rgba(255, 255, 255, 0.055)" strokeWidth="0.5" />
+    ))}
+    {cover ? (
+      <image
+        href={cover}
+        x="29"
+        y="37"
+        width="30"
+        height="30"
+        preserveAspectRatio="xMidYMid slice"
+        clipPath="url(#md-record-label)"
+      />
+    ) : (
+      <circle cx="44" cy="52" r="15" fill="#1a9fff" opacity="0.8" />
+    )}
+    <circle cx="44" cy="52" r="15" fill="none" stroke="rgba(0, 0, 0, 0.35)" strokeWidth="0.8" />
+    <circle cx="44" cy="52" r="1.6" fill="#0e141b" />
+    {/* the tone arm, parked beside the record */}
+    <circle cx="88" cy="14" r="5" fill="#2c3440" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="0.6" />
+    <circle cx="88" cy="14" r="1.8" fill="#4a5564" />
+    <path
+      d="M 88 14 L 91 64 L 87.5 74"
+      fill="none"
+      stroke="rgba(220, 222, 223, 0.55)"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <rect x="84.5" y="72" width="6" height="7" rx="1" fill="#4a5564" transform="rotate(20 87.5 75.5)" />
+  </svg>
+);
 
 /**
- * Now Playing with nothing playing, laid out as when something is: a cover's square (a record, quiet),
- * the title, the source; the ways to find something, and what was played lately to start again in one
- * press (the source's own "Jump back in").
+ * Now Playing with nothing playing: the player at rest, laid out as when something plays. A turntable
+ * where the cover goes, "Nothing playing" and the source, the visualizer's resting dots where the lyrics
+ * go, the seek bar empty and the controls dimmed, but Play, which starts what was played last on this
+ * source (its cover on the record's label), or opens Home when there's nothing to go back to.
  */
-const NothingPlaying: FC<{ room: number }> = ({ room }) => {
+const NothingPlaying: FC = () => {
   const state = useStore(pluginState);
   const preview = useStore(browsePreview).id;
   const instanceId = preview ?? state?.active_service ?? "";
@@ -538,73 +539,75 @@ const NothingPlaying: FC<{ room: number }> = ({ room }) => {
     instanceId ? getCenterTab(instanceId, "home") : Promise.resolve({ ok: false as const, error: "" }),
   );
   const jump = home?.ok ? home.data.find((s) => s.title === "Jump back in") : undefined;
-  const items: Collection[] = (jump?.items ?? []).slice(0, 6);
-  const stations: Track[] = (jump?.tracks ?? []).slice(0, 6);
-  const height = room || 380;
-  const square = Math.round(Math.min(height * 0.42, 240));
-  const tile = Math.round(Math.max(64, Math.min(height * 0.2, 110)));
+  const last: Collection | undefined = jump?.items[0];
+  const station: Track | undefined = last ? undefined : jump?.tracks?.[0];
+  const art = last?.art ?? station?.art;
+  const cover = art && instanceId ? mediaUrl("art", instanceId, art) : undefined;
+  const play = () => {
+    if (last) playCollection(instanceId, last);
+    else if (station) player.playList(instanceId, [station], 0);
+    else centerTab.set({ tab: "home" });
+  };
+  // Play takes the controller (Steam's own pick is the first thing, the volume slider)
+  const playBox = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => playBox.current?.querySelector<HTMLElement>("button, [tabindex]")?.focus(), 300);
+    return () => clearTimeout(timer);
+  }, []);
+  const dim = { opacity: 0.28, fontSize: 18, display: "flex", alignItems: "center" } as const;
+  const time = { fontSize: 13, opacity: 0.4, width: 44, flexShrink: 0 } as const;
   return (
-    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "3vh" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "3.5vw" }}>
-        <div
-          style={{
-            width: square,
-            height: square,
-            flexShrink: 0,
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02))",
-            boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
-          }}
-        >
-          <FaCompactDisc style={{ fontSize: square * 0.4, opacity: 0.16 }} />
+    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "2vh", height: "100%" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: "3.5vw" }}>
+        <div style={{ height: "100%", maxHeight: "40vw", aspectRatio: "1", flexShrink: 0 }}>
+          <RestingRecord cover={cover} />
         </div>
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 13, letterSpacing: 1.5, textTransform: "uppercase", opacity: 0.6 }}>Now playing</div>
-          <div style={{ fontSize: 26, fontWeight: 700, color: "#ffffff", lineHeight: 1.15 }}>Nothing playing</div>
-          {source && <div style={{ fontSize: 16, opacity: 0.75 }}>{source.name}</div>}
-          <Focusable flow-children="row" style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-            <PageButton primary label="Home" onClick={() => centerTab.set({ tab: "home" })}>
-              <FaHome /> Home
-            </PageButton>
-            <PageButton label="Browse" onClick={() => centerTab.set({ tab: BROWSE.id })}>
-              <FaCompactDisc /> Browse
-            </PageButton>
-            <PageButton label="Search" onClick={() => centerTab.set({ tab: SEARCH.id })}>
-              <FaSearch /> Search
-            </PageButton>
-          </Focusable>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5vh" }}>
+          <RowText size="large" title="Nothing playing" subtitle={source?.name ?? ""} />
+          <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center" }}>
+            <div style={{ width: "100%" }}>
+              <Visualizer height={120} />
+            </div>
+          </div>
         </div>
       </div>
-      {items.length + stations.length > 0 && (
-        <div>
-          <SectionTitle>Jump back in</SectionTitle>
-          <Focusable flow-children="row" style={{ display: "flex", gap: 16, overflow: "clip", padding: 4 }}>
-            {items.map((c) => (
-              <RecentTile
-                key={c.kind + c.id}
-                instanceId={instanceId}
-                art={c.art}
-                title={c.title}
-                size={tile}
-                onPlay={() => playCollection(instanceId, c)}
-              />
-            ))}
-            {stations.map((t) => (
-              <RecentTile
-                key={t.id}
-                instanceId={instanceId}
-                art={t.art}
-                title={t.title}
-                size={tile}
-                onPlay={() => player.playList(instanceId, [t], 0)}
-              />
-            ))}
-          </Focusable>
+      <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* the seek bar, empty */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, height: 40 }}>
+          <span style={{ ...time, textAlign: "right" }}>0:00</span>
+          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255, 255, 255, 0.12)" }} />
+          <span style={time}>0:00</span>
         </div>
-      )}
+        <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: "2vw" }}>
+          <Volume />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: 380 }}>
+            <span style={dim}>
+              <FaRandom />
+            </span>
+            <span style={{ ...dim, fontSize: 20 }}>
+              <FaStepBackward />
+            </span>
+            <span ref={playBox} style={{ display: "flex" }}>
+              <IconButton
+                look="round"
+                preferredFocus
+                label={last ? `Play ${last.title}` : station ? `Play ${station.title}` : "Home"}
+                onClick={play}
+                style={{ fontSize: 20 }}
+              >
+                <FaPlay style={{ marginLeft: 3 }} />
+              </IconButton>
+            </span>
+            <span style={{ ...dim, fontSize: 20 }}>
+              <FaStepForward />
+            </span>
+            <span style={dim}>
+              <FaRedo />
+            </span>
+          </div>
+          <div style={{ flex: 1 }} />
+        </Focusable>
+      </Focusable>
     </Focusable>
   );
 };
@@ -651,7 +654,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   return (
     <div ref={page} style={{ height: room || undefined, boxSizing: "border-box", padding: "1vh 2.8vw 1.5vh" }}>
       {!item ? (
-        <NothingPlaying room={room} />
+        <NothingPlaying />
       ) : (
         <Focusable
           // Y and R2 work without a hint: the moon and the Lyrics/Queue pills are on screen, and the

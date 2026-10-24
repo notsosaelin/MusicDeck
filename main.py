@@ -929,9 +929,10 @@ class Plugin:
                     return {"queue": [{"instanceId": active.instance_id, "track": t} for t in remote["tracks"]],
                             "index": remote["index"], "position": remote["position"],
                             "from_device": remote.get("changed_by")}
-        # only resume a queue from the source that's live now (no mixing sources)
-        if not local or not local["queue"] or any(item["instanceId"] != self.settings.get("active_service")
-                                                  for item in local["queue"]):
+        # resume a queue of one source that's still here (no mixing sources): the live one's, or another's
+        # played while looking at it in the media center (a restart mustn't lose what was playing)
+        sources = {item["instanceId"] for item in local["queue"]} if local else set()
+        if not local or not local["queue"] or len(sources) != 1 or next(iter(sources)) not in self.instances:
             return None
         return local
 

@@ -700,7 +700,15 @@ async def run():
         print("session follows the live source")
         await plugin.save_session({"queue": [{"instanceId": "some-other-source", "track": first}],
                                    "index": 0, "position": 0})
-        check(await plugin.load_session() is None, "a queue from another source isn't restored")
+        check(await plugin.load_session() is None, "a queue from a source that's gone isn't restored")
+        await plugin.save_session({"queue": [{"instanceId": sid, "track": first},
+                                             {"instanceId": "some-other-source", "track": lonely}],
+                                   "index": 0, "position": 0})
+        check(await plugin.load_session() is None, "nor one that mixes sources")
+        await plugin.save_session({"queue": [{"instanceId": sid, "track": first}], "index": 0, "position": 12})
+        restored = await plugin.load_session()
+        check(restored is not None and restored["position"] == 12,
+              "a queue of one source that's here comes back after a restart (a previewed source's too)")
 
         print("changes are announced")
         emitted.clear()

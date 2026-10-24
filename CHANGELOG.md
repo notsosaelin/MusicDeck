@@ -3,6 +3,14 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.21.2
+
+- **Now Playing at rest**: with nothing playing it's the player, idle: a turntable where the cover goes, with
+  the cover of what you played last on its label, the visualizer's resting dots, the seek bar empty and the
+  controls dimmed but Play, which starts that again.
+- **A queue survives a restart whichever source it's from**: music played from another source while looking
+  at it in the media center was dropped when MusicDeck restarted (only the live source's came back).
+
 ## 0.21.1
 
 - **Empty pages can be left**: B did nothing on an empty playlist (or any page with nothing on it, or one that
