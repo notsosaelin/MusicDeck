@@ -4,12 +4,13 @@
 # SteamOS, Bazzite, Armada, DroidDeck and other distros without depending on their libraries, and a
 # Windows x86_64 .exe (Windows on Arm runs it through its emulation).
 #
-# Needs: rustup with the targets below, cargo-zigbuild, and zig (on PATH, or `pip install ziglang`).
+# Needs: rustup with the targets below, cargo-zigbuild, and zig (on PATH, or ~/.local/zig, or `pip install ziglang`).
 #   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu
 #   cargo install --locked cargo-zigbuild
 # Works from Linux or WSL. Pass platforms to build only those: build_spotify_helper.sh linux-arm64
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="$HOME/.local/zig:$PATH"
 TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/musicdeck-build/spotify-helper}"
 declare -A TARGETS=(
   [linux-x86_64]=x86_64-unknown-linux-musl

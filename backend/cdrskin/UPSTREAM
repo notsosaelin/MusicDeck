@@ -5,5 +5,15 @@ cdrskin, the CD burner MusicDeck burns audio CDs with (musicdeck/burn.py), is li
   signed by Thomas Schmitt <scdbackup@gmx.net>, key 44BC 9FD0 D688 EB00 7C4D D029 E9CB DFC0 ABC0 A854
   (libburn-1.5.8.tar.gz.sig beside it)
 
-Licence: GPL-2.0-or-later (the tarball's COPYING). bin/<platform>/cdrskin is built from that tarball,
-unchanged, by scripts/build_cdrskin.sh (static, musl, with zig); its source is the tarball above.
+Licence: GPL-2.0-or-later (the tarball's COPYING, here cdrskin.COPYING). bin/<platform>/cdrskin is built
+from that tarball, unchanged, by scripts/build_cdrskin.sh (static, musl, with zig); its source is the
+tarball above.
+
+On Windows, cdrskin.exe is the same libburn built with libcdio as its way of talking to the drive:
+
+  libcdio 2.4.0, https://github.com/libcdio/libcdio/releases/download/2.4.0/libcdio-2.4.0.tar.bz2
+  SHA-256 8e6a305f81e45a78b41ce696d34497cc208d97075469d7304c11a6d44bf006ac
+
+libcdio is GPL-3.0-or-later (cdrskin.libcdio.COPYING), so cdrskin.exe as a whole is GPL-3.0-or-later. It
+is built by scripts/build_cdrskin_windows.sh (MSYS2's UCRT64 gcc, static) from both tarballs, unchanged,
+plus MusicDeck's backend/cdrskin/windows/ (the POSIX functions MinGW lacks); its source is those.

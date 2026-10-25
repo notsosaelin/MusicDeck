@@ -41,13 +41,16 @@ for platform_name, names in HELPERS.items():
             fix = ("bash scripts/build_spotify_helper.sh" if name.startswith("spotify")
                    else "bash scripts/build_hashab.sh" if name.startswith("hashab") else "python scripts/vendor.py")
             raise SystemExit(f"bin/{platform_name}/{name} missing; run `{fix}` first")
-# cdrskin (burning CDs, Linux): bundled when built, with where its source is (GPL-2.0+); without it, a
-# build burns no CDs unless the system has cdrskin
-for platform_name in ("linux-x86_64", "linux-arm64"):
-    if (ROOT / "bin" / platform_name / "cdrskin").exists():
+# cdrskin (burning CDs): bundled when built, with where its source is (GPL); without it, a build burns no
+# CDs unless the system has cdrskin
+CDRSKIN = {"linux-x86_64": ("cdrskin", "bash scripts/build_cdrskin.sh"),
+           "linux-arm64": ("cdrskin", "bash scripts/build_cdrskin.sh"),
+           "windows-x86_64": ("cdrskin.exe", "bash scripts/build_cdrskin_windows.sh, in MSYS2's UCRT64 shell")}
+for platform_name, (name, fix) in CDRSKIN.items():
+    if (ROOT / "bin" / platform_name / name).exists():
         shutil.copyfile(ROOT / "backend" / "cdrskin" / "UPSTREAM", ROOT / "bin" / platform_name / "cdrskin.UPSTREAM")
     else:
-        print(f"note: no bin/{platform_name}/cdrskin (bash scripts/build_cdrskin.sh): that build burns no CDs")
+        print(f"note: no bin/{platform_name}/{name} ({fix}): that build burns no CDs")
 
 OUT = ROOT / "out"
 OUT.mkdir(exist_ok=True)

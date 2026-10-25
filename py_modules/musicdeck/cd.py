@@ -47,8 +47,17 @@ CHUNK = 75
 WAV_HEADER = 44
 
 
+DRIVE_CDROM = 5  # GetDriveTypeW's answer for a CD/DVD drive
+
+
 def drives() -> list[str]:
-    """The CD/DVD drives there are: /dev/sr0, /dev/sr1..."""
+    """The CD/DVD drives there are: /dev/sr0, /dev/sr1... On Windows \\\\.\\D: and so on, the drive letters
+    Windows says are CD drives, named as libcdio (and so cdrskin) names them. Only burning uses those."""
+    if os.name == "nt":
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        mask = kernel32.GetLogicalDrives()
+        return [f"\\\\.\\{chr(65 + i)}:" for i in range(26)
+                if mask >> i & 1 and kernel32.GetDriveTypeW(f"{chr(65 + i)}:\\") == DRIVE_CDROM]
     return sorted(f"/dev/{n}" for n in os.listdir("/dev") if n.startswith("sr") and n[2:].isdigit()) \
         if os.path.isdir("/dev") else []
 

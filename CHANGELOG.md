@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.30.2
+
+- **Burn to CD on Windows**: the Windows zip has cdrskin too, the same libburn talking to the drive through
+  libcdio, so a CD drive plugged into a Windows PC burns as on the Deck (gapless, with CD-Text), and the PC
+  doesn't sleep meanwhile. Not tried with a real burner yet.
+
 ## 0.30.1
 
 - **Burn to CD works out of the box on Linux**: cdrskin now comes with MusicDeck as a static executable for

@@ -27,6 +27,9 @@ decky.pyi                  type stubs for Decky's `decky` module (from the plugi
 - For the Spotify helper: Rust (rustup), the `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`
   and `x86_64-pc-windows-gnu` targets, cargo-zigbuild
   and zig. Linux or WSL.
+- For hashab and cdrskin: zig (on PATH, or `~/.local/zig`), make. Linux or WSL.
+- For Windows' cdrskin: [MSYS2](https://www.msys2.org)'s UCRT64 shell, with
+  `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkgconf make`.
 
 ## Build
 
@@ -37,6 +40,7 @@ python scripts/vendor.py                # third-party Python into py_modules/, Q
 bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static musl for x86_64 and arm64 Linux, Windows .exe
 bash scripts/build_hashab.sh            # bin/<platform>/hashab (the iPod nano 6G/7G signature), checked against its test vectors
 bash scripts/build_cdrskin.sh           # bin/linux-*/cdrskin (burning CDs): libburn's release, checked by SHA-256, static musl
+bash scripts/build_cdrskin_windows.sh   # bin/windows-x86_64/cdrskin.exe: libburn on libcdio, static (MSYS2 UCRT64 shell)
 pnpm smoke                              # the built bundle loads, wires its player, unloads cleanly
 python scripts/package.py               # out/MusicDeck-<version>-<platform>.zip (linux-x86_64, linux-arm64,
                                         # windows-x86_64), each with its own helpers, and their .sha256
@@ -49,6 +53,11 @@ python scripts/package.py               # out/MusicDeck-<version>-<platform>.zip
   later versions break librespot's build script.
 - `build_cdrskin.sh` accepts `LIBBURN_TARBALL=/path/to/libburn-1.5.8.tar.gz` to reuse a downloaded
   archive; it checks the same pinned SHA-256 before building either Linux platform.
+- `build_cdrskin_windows.sh` builds the same libburn for Windows with libcdio 2.4.0 as its SCSI
+  transport (both tarballs SHA-256-pinned; `LIBBURN_TARBALL` and `LIBCDIO_TARBALL` reuse downloads).
+  libburn's source isn't changed: `backend/cdrskin/windows/compat.h` is force-included for the POSIX
+  functions MinGW lacks, and libcdio's three `mmc_*` functions that clash with libburn's are renamed in
+  its static library. It checks the .exe needs only Windows' DLLs and runs. No burner has tried it yet.
 
 ## Install on a device
 
@@ -255,6 +264,7 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
 3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py`.
-4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`
+4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`, with `bash scripts/build_cdrskin_windows.sh` run
+   in MSYS2's UCRT64 shell before `package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
 6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.

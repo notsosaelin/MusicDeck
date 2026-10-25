@@ -9,11 +9,15 @@ bundled as bin/<platform>/cdrskin, or the system's), as Brasero or K3b would.
 * Burned Session At Once (-sao): tracks one after another with no gaps added between them (a live
   album stays seamless), and CD-Text (the album's and each song's title and artist) from a Sony input
   sheet (input_sheet_v07t=), which CD players and cars show. Latin-1 only (CD-Text's 8859 code).
-* While burning, the Deck doesn't sleep (systemd-inhibit). Progress is cdrskin's own "Track 03: 12 of 45
-  MB written" lines.
+* While burning, the Deck doesn't sleep (systemd-inhibit; on Windows, SetThreadExecutionState). Progress is
+  cdrskin's own "Track 03: 12 of 45 MB written" lines.
 
-The drive is /dev/sr*, the user's through uaccess, as for reading CDs (cd.py). Linux only.
+The drive is /dev/sr*, the user's through uaccess, as for reading CDs (cd.py). On Windows it's \\\\.\\D: (a
+drive letter Windows says is a CD drive), and cdrskin is built on libcdio there (scripts/
+build_cdrskin_windows.sh), without its fifo (fs=0: it needs pipes Windows can't wait on).
 """
+import contextlib
+import ctypes
 import os
 import re
 import shutil
@@ -50,8 +54,8 @@ class Disc:
 
 
 def burner(runtime_dir: Optional[str] = None) -> Optional[str]:
-    """cdrskin: MusicDeck's own (bin/<platform>), else the system's; None off Linux or without one."""
-    if not native.platform_id().startswith("linux"):
+    """cdrskin: MusicDeck's own (bin/<platform>), else the system's; None on macOS or without one."""
+    if not native.platform_id().startswith(("linux", "windows")):
         return None
     return native.helper("cdrskin", runtime_dir) or shutil.which("cdrskin")
 
@@ -169,6 +173,30 @@ def _inhibited(command: list[str], why: str) -> list[str]:
             *command]
 
 
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+
+
+@contextlib.contextmanager
+def _awake():
+    """On Windows, the PC doesn't sleep meanwhile: SetThreadExecutionState holds for as long as the thread
+    that set it says so, which is the one burning."""
+    if not native.WINDOWS:
+        yield
+        return
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    try:
+        yield
+    finally:
+        kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+
+
+def _options(cdrskin: str, drive: str) -> list[str]:
+    """cdrskin and the options every run of it takes: the drive, no grace time; on Windows, no fifo."""
+    return [cdrskin, "-v", f"dev={drive}", "gracetime=0", *(["fs=0"] if native.WINDOWS else [])]
+
+
 def _run(command: list[str], on_line: Callable[[str], None]) -> tuple[int, str]:
     """Runs cdrskin, each output line (its progress lines end in \\r) to on_line; (exit code, last lines)."""
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **native.NO_WINDOW)
@@ -203,8 +231,8 @@ def _failure(output: str) -> str:
 
 def erase(cdrskin: str, drive: str) -> None:
     """Erases a CD-RW (blank=fast: its table of contents, a minute or so)."""
-    code, out = _run(_inhibited([cdrskin, "-v", f"dev={drive}", "gracetime=0", "blank=fast"], "Erasing a CD"),
-                     lambda line: None)
+    with _awake():
+        code, out = _run(_inhibited([*_options(cdrskin, drive), "blank=fast"], "Erasing a CD"), lambda line: None)
     if code != 0:
         raise BurnError(f"Couldn't erase the CD: {_failure(out)}")
 
@@ -212,7 +240,7 @@ def erase(cdrskin: str, drive: str) -> None:
 def burn(cdrskin: str, drive: str, wavs: list[str], sheet: Optional[str],
          progress: Callable[[int, int, int], None]) -> None:
     """Writes the WAVs as an audio CD (Session At Once, CD-Text from `sheet`), then ejects it."""
-    command = [cdrskin, "-v", f"dev={drive}", "gracetime=0", "-sao", "-eject"]
+    command = [*_options(cdrskin, drive), "-sao", "-eject"]
     if sheet:
         command.append(f"input_sheet_v07t={sheet}")
     command += ["-audio", *wavs]
@@ -221,6 +249,7 @@ def burn(cdrskin: str, drive: str, wavs: list[str], sheet: Optional[str],
         found = parse_progress(line)
         if found:
             progress(*found)
-    code, out = _run(_inhibited(command, "Burning a CD"), on_line)
+    with _awake():
+        code, out = _run(_inhibited(command, "Burning a CD"), on_line)
     if code != 0:
         raise BurnError(f"Burning stopped: {_failure(out)}")

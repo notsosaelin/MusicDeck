@@ -156,8 +156,31 @@ async def planned() -> None:
     await lib.stop()
 
 
+def platforms() -> None:
+    """cdrskin's options on Linux and on Windows (no fifo there); Windows' CD drives as libcdio names them."""
+    windows = burn.native.WINDOWS
+    try:
+        burn.native.WINDOWS = False
+        check(burn._options("cdrskin", "/dev/sr0") == ["cdrskin", "-v", "dev=/dev/sr0", "gracetime=0"],
+              "Linux options")
+        burn.native.WINDOWS = True
+        check(burn._options("cdrskin.exe", "\\\\.\\E:")[-2:] == ["gracetime=0", "fs=0"], "Windows: no fifo")
+    finally:
+        burn.native.WINDOWS = windows
+    with burn._awake():
+        pass  # sets and clears Windows' execution state; nothing elsewhere
+    if os.name == "nt":
+        found = cd.drives()
+        check(all(len(d) == 6 and d.startswith("\\\\.\\") and d.endswith(":") for d in found),
+              f"Windows drives named \\\\.\\X: ({found})")
+        cdrskin = burn.burner()
+        if cdrskin:  # built (scripts/build_cdrskin_windows.sh): a drive that isn't there is no disc, not a crash
+            check(burn.probe(cdrskin, "\\\\.\\Z:").status in ("unknown", "empty"), "no such drive")
+
+
 if __name__ == "__main__":
     reading()
     cdtext()
+    platforms()
     asyncio.run(planned())
     print("all burning checks passed")
