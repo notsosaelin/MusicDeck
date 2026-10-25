@@ -163,18 +163,26 @@ export const PlayerBar: FC = () => {
 
 export const SidePanel: FC = () => {
   const { open, full } = useStore(panel);
+  const lyrics = useLyrics(open === "lyrics" && !full);
   if (!open || full) return null;
   return (
     <aside className="md-panel">
       <div className="md-panel-head">
-        <span>{open === "queue" ? "Queue" : "Lyrics"}</span>
+        <span>{open === "queue" || lyrics === "none" ? "Queue" : "Lyrics"}</span>
         <button className="md-ctl" title="Close" aria-label="Close" onClick={() => showPane(open)}>
           ✕
         </button>
       </div>
-      <div className="md-panel-body">{open === "queue" ? <Queue /> : <LyricsPanel />}</div>
+      <div className="md-panel-body">{open === "queue" ? <Queue /> : <LyricsPanel lyrics={lyrics} />}</div>
     </aside>
   );
+};
+
+/** A queue row's cover; one that doesn't load leaves the blank square, not a broken image. */
+const QueueArt: FC<{ url: string }> = ({ url }) => {
+  const [failed, setFailed] = useState("");
+  if (!url || failed === url) return <div className="md-queue-art md-noart" />;
+  return <img className="md-queue-art" src={url} loading="lazy" draggable={false} onError={() => setFailed(url)} />;
 };
 
 /** Up next: what plays now, then the rest in the order it'll play; double-click to jump to one. */
@@ -191,7 +199,7 @@ export const Queue: FC<{ big?: boolean }> = ({ big }) => {
     return (
       <div key={`${i}-${t.id}`} className="md-queue-row" data-big={big ? "" : undefined} data-now={now ? "" : undefined}
            title="Double-click to play" onDoubleClick={() => player.jumpTo(i)}>
-        {art ? <img className="md-queue-art" src={art} loading="lazy" draggable={false} /> : <div className="md-queue-art md-noart" />}
+        <QueueArt url={art} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="md-td md-queue-title">{t.title}</div>
           <div className="md-td md-dim" style={{ fontSize: 12 }}>{t.artist}</div>
@@ -202,40 +210,49 @@ export const Queue: FC<{ big?: boolean }> = ({ big }) => {
   };
   return (
     <>
-      <div className="md-queue-heading">Now playing</div>
-      {state.index >= 0 ? row(state.index, true) : <div className="md-dim">Nothing</div>}
-      <div className="md-queue-heading md-queue-heading-row">
-        <span>Next up{next.length ? ` · ${next.length}` : ""}</span>
-        {state.index >= 0 && (
-          <button className="md-text-button" onClick={(e) => saveQueue(e.currentTarget)}>
-            Save as playlist
-          </button>
-        )}
-      </div>
-      {!next.length && <div className="md-dim" style={{ padding: "4px 8px" }}>Nothing after this song</div>}
+      {state.index >= 0 && (
+        <>
+          <div className="md-queue-heading md-queue-heading-row">
+            <span>Now playing</span>
+            <button className="md-text-button" onClick={(e) => saveQueue(e.currentTarget)}>
+              Save as playlist
+            </button>
+          </div>
+          {row(state.index, true)}
+        </>
+      )}
+      {!!next.length && <div className="md-queue-heading">Next up · {next.length}</div>}
       {next.slice(0, 200).map((i) => row(i))}
       {next.length > 200 && <div className="md-dim">and {next.length - 200} more</div>}
     </>
   );
 };
 
-export const LyricsPanel: FC<{ big?: boolean }> = ({ big }) => {
+export type FoundLyrics = Lyrics | null | "none";
+
+/** The playing song's lyrics, while `wanted`: null while they're looked for, "none" when it has none. */
+export const useLyrics = (wanted = true): FoundLyrics => {
   useStore(player.state);
-  const item = player.current;
-  const { current } = useStore(player.position);
-  const [lyrics, setLyrics] = useState<Lyrics | null | "none">(null);
+  const item = wanted ? player.current : undefined;
+  const [found, setFound] = useState<{ key: string; lyrics: FoundLyrics }>({ key: "", lyrics: null });
   const key = item ? `${item.instanceId}/${item.track.id}` : "";
   useEffect(() => {
-    setLyrics(null);
     if (!item) return;
     let live = true;
     getLyrics(item.instanceId, item.track)
-      .then((r) => live && setLyrics(r.ok && r.data ? r.data : "none"))
-      .catch(() => live && setLyrics("none"));
+      .then((r) => live && setFound({ key, lyrics: r.ok && r.data && r.data.lines.length ? r.data : "none" }))
+      .catch(() => live && setFound({ key, lyrics: "none" }));
     return () => {
       live = false;
     };
   }, [key]);
+  if (!item) return "none";
+  return found.key === key ? found.lyrics : null;
+};
+
+/** The words, the line being sung lit; a song without any shows what's up next in their place. */
+export const LyricsPanel: FC<{ big?: boolean; lyrics: FoundLyrics }> = ({ big, lyrics }) => {
+  const { current } = useStore(player.position);
   const box = useRef<HTMLDivElement>(null);
   const lines = lyrics && lyrics !== "none" ? lyrics.lines : [];
   let now = -1;
@@ -244,10 +261,8 @@ export const LyricsPanel: FC<{ big?: boolean }> = ({ big }) => {
   useEffect(() => {
     box.current?.querySelector(`[data-line="${now}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [now]);
-  const quiet = (text: string) => <div className={big ? "md-lyrics-empty" : "md-dim"}>{text}</div>;
-  if (!item) return quiet("Nothing playing");
-  if (lyrics === null) return quiet("Looking for lyrics…");
-  if (lyrics === "none" || !lines.length) return quiet("No lyrics for this song");
+  if (lyrics === "none") return <Queue big={big} />;
+  if (lyrics === null) return null;
   return (
     <div ref={box} data-synced={lyrics.synced ? "" : undefined}>
       {lines.map((l, i) => (
@@ -313,5 +328,4 @@ export const BAR_CSS = `
 /* lyrics without times: nothing to follow, all of them read alike */
 :not([data-synced]) > .md-lyric-big { color: rgba(255,255,255,0.85); }
 :not([data-synced]) > .md-lyric { color: #dcdedf; }
-.md-lyrics-empty { font-size: 22px; font-weight: 600; color: rgba(255,255,255,0.55); padding-top: 8px; }
 `;

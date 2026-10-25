@@ -521,7 +521,7 @@ const RestingRecord: FC<{ cover?: string }> = ({ cover }) => (
 
 /**
  * Now Playing with nothing playing: the player at rest, laid out as when something plays. A turntable
- * where the cover goes, "Nothing playing" and the source, the visualizer's resting dots where the lyrics
+ * where the cover goes, the source's name, the visualizer's resting dots where the lyrics
  * go, the seek bar empty and the controls dimmed, but Play, which starts what was played last on this
  * source (its cover on the record's label), or opens Home when there's nothing to go back to.
  */
@@ -559,7 +559,7 @@ const NothingPlaying: FC = () => {
           <RestingRecord cover={cover} />
         </div>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5vh" }}>
-          <RowText size="large" title="Nothing playing" subtitle={source?.name ?? ""} />
+          <RowText size="large" title={source?.name ?? ""} subtitle="" />
           <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center" }}>
             <div style={{ width: "100%" }}>
               <Visualizer height={120} />
@@ -633,13 +633,9 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
   const message = !item
     ? null
     : lyrics === undefined
-      ? book
-        ? "Looking for chapters…"
-        : null
+      ? null
       : lyrics === null
-        ? book
-          ? "No chapters in this part"
-          : null
+        ? null
         : "error" in lyrics
           ? book
             ? `Couldn't load chapters: ${lyrics.error}`

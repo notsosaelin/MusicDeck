@@ -7,6 +7,7 @@
 import { FC, useEffect, useState } from "react";
 import * as api from "../api";
 import { ListeningStats, StatsItem } from "../api";
+import { player } from "../player";
 import { mediaUrl, pluginState, useStore } from "../store";
 import { go } from "./data";
 import { ArtOrIcon } from "./library";
@@ -88,6 +89,14 @@ export const StatsPage: FC = () => {
   const [stats, setStats] = useState<ListeningStats | null>(null);
   const [error, setError] = useState("");
   const live = useStore(pluginState)?.active_service ?? "";
+  // a listen counts once a song's played past half: asked again as songs change, and every half minute while the
+  // page shows (it stays alive while Music is hidden or another tab's open, so opening it again isn't enough)
+  const playing = useStore(player.state).index;
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     let current = true;
     setError("");
@@ -98,7 +107,7 @@ export const StatsPage: FC = () => {
     return () => {
       current = false;
     };
-  }, [period]);
+  }, [period, playing, tick]);
   const s = stats?.period === period ? stats : null;
   return (
     <>
@@ -113,13 +122,7 @@ export const StatsPage: FC = () => {
         </div>
       </div>
       {error && <div className="md-dim">{error}</div>}
-      {!s && !error && <div className="md-dim">Adding it up…</div>}
-      {s && !s.plays && (
-        <div className="md-dim st-empty">
-          Nothing yet for this time. Every song you listen to past its first half (or four minutes), from any source, counts here.
-        </div>
-      )}
-      {s && !!s.plays && (
+      {s && (
         <>
           <div className="st-tiles">
             <Tile value={s.plays.toLocaleString()} label={s.plays === 1 ? "listen" : "listens"} />
@@ -128,41 +131,57 @@ export const StatsPage: FC = () => {
             <Tile value={s.artists_count.toLocaleString()} label={s.artists_count === 1 ? "artist" : "artists"} />
             <Tile value={`${s.streak}`} label={s.streak === 1 ? "day in a row" : "days in a row"} />
           </div>
-          <h2 className="md-heading">Top artists</h2>
-          <div className="md-grid">
-            {s.top_artists.slice(0, 6).map((a) => (
-              <Card key={a.name} item={a} kind="artist" live={live} />
-            ))}
-          </div>
-          <h2 className="md-heading">Top albums</h2>
-          <div className="md-grid">
-            {s.top_albums.slice(0, 6).map((a) => (
-              <Card key={`${a.name}-${a.artist}`} item={a} kind="album" live={live} />
-            ))}
-          </div>
-          <h2 className="md-heading">Top songs</h2>
-          <div className="st-songs">
-            {s.top_songs.map((t, i) => (
-              <div key={`${t.name}-${t.artist}`} className="st-song">
-                <span className="st-rank">{i + 1}</span>
-                <span className="st-song-art">
-                  <ArtOrIcon url={(t.art && t.src && mediaUrl("art", t.src, t.art)) || ""} size={40} />
-                </span>
-                <span className="st-song-name">
-                  <span>{t.name}</span>
-                  <span className="md-dim">{t.artist}</span>
-                </span>
-                <span className="md-dim">
-                  {t.plays} {t.plays === 1 ? "listen" : "listens"}
-                </span>
+          {!!s.top_artists.length && (
+            <>
+              <h2 className="md-heading">Top artists</h2>
+              <div className="md-grid">
+                {s.top_artists.slice(0, 6).map((a) => (
+                  <Card key={a.name} item={a} kind="artist" live={live} />
+                ))}
               </div>
-            ))}
-          </div>
-          <h2 className="md-heading">When you listen</h2>
-          <div className="st-charts">
-            <Bars title="By hour of the day" values={s.hours} labels={s.hours.map((_, h) => hourLabel(h))} every={6} />
-            <Bars title="By day of the week" values={s.weekdays} labels={DAYS.map((d) => d.slice(0, 3))} every={1} />
-          </div>
+            </>
+          )}
+          {!!s.top_albums.length && (
+            <>
+              <h2 className="md-heading">Top albums</h2>
+              <div className="md-grid">
+                {s.top_albums.slice(0, 6).map((a) => (
+                  <Card key={`${a.name}-${a.artist}`} item={a} kind="album" live={live} />
+                ))}
+              </div>
+            </>
+          )}
+          {!!s.top_songs.length && (
+            <>
+              <h2 className="md-heading">Top songs</h2>
+              <div className="st-songs">
+                {s.top_songs.map((t, i) => (
+                  <div key={`${t.name}-${t.artist}`} className="st-song">
+                    <span className="st-rank">{i + 1}</span>
+                    <span className="st-song-art">
+                      <ArtOrIcon url={(t.art && t.src && mediaUrl("art", t.src, t.art)) || ""} size={40} />
+                    </span>
+                    <span className="st-song-name">
+                      <span>{t.name}</span>
+                      <span className="md-dim">{t.artist}</span>
+                    </span>
+                    <span className="md-dim">
+                      {t.plays} {t.plays === 1 ? "listen" : "listens"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {!!s.plays && (
+            <>
+              <h2 className="md-heading">When you listen</h2>
+              <div className="st-charts">
+                <Bars title="By hour of the day" values={s.hours} labels={s.hours.map((_, h) => hourLabel(h))} every={6} />
+                <Bars title="By day of the week" values={s.weekdays} labels={DAYS.map((d) => d.slice(0, 3))} every={1} />
+              </div>
+            </>
+          )}
         </>
       )}
     </>
@@ -177,7 +196,6 @@ export const STATS_CSS = `
   font-size: 13px; cursor: pointer; }
 .st-periods button:hover { color: #fff; }
 .st-periods button[data-on] { background: #dcdedf; color: #10141a; font-weight: 600; }
-.st-empty { max-width: 520px; line-height: 1.6; }
 .st-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 8px; }
 .st-tile { padding: 16px 18px; border-radius: 6px; background: rgba(255,255,255,0.05); }
 .st-value { font-size: 32px; font-weight: 700; color: #fff; line-height: 1.1; font-variant-numeric: tabular-nums; }

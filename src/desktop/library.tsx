@@ -83,7 +83,8 @@ export const Sidebar: FC = () => {
         }}
       >
         <FaSearch style={{ opacity: 0.6 }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" spellCheck={false} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" spellCheck={false}
+               title={'Words, or fields: artist:nirvana year:>1990 rating:>=4 genre:jazz plays:0 format:flac ("quotes" keep words together)'} />
       </form>
       <select
         className="md-select"
@@ -300,7 +301,14 @@ export const Pages: FC = () => {
   const source = useLiveSource();
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => scroller.current?.scrollTo(0, 0), [place]);
-  if (!source) return <Notice text="Add a music source in Decky → MusicDeck to see your music here." />;
+  if (!source)
+    return (
+      <div className="md-page">
+        <button className="md-button md-wide" style={{ marginTop: 24 }} onClick={showSettings}>
+          Add a music source…
+        </button>
+      </div>
+    );
   const id = source.id;
   return (
     <div ref={scroller} className="md-page">
@@ -390,7 +398,7 @@ const DeviceBar: FC<{ collection: Collection }> = ({ collection }) => {
 const Notice: FC<{ text: string }> = ({ text }) => <div className="md-notice">{text}</div>;
 
 const Loading: FC<{ result: api.Result<unknown> | null }> = ({ result }) =>
-  result === null ? <Notice text="Loading…" /> : !result.ok ? <Notice text={result.error} /> : null;
+  result?.ok === false ? <Notice text={result.error} /> : null;
 
 const SectionsPage: FC<{ id: string; title: string; what: string; fetch: () => Promise<api.Result<Section[]>> }> = ({
   id,
@@ -434,12 +442,6 @@ const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
       <h1 className="md-title">“{query}”</h1>
       <Loading result={result} />
       {result?.ok && <PageBody id={id} page={result.data} from={{ id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null }} />}
-      {canLookUp(id) && !/\w+:/.test(query) && (
-        <div className="md-dim" style={{ marginTop: 24, fontSize: 13 }}>
-          Search by field too: <code>artist:nirvana</code> <code>year:&gt;1990</code> <code>rating:&gt;=4</code> <code>genre:jazz</code>{" "}
-          <code>plays:0</code> <code>format:flac</code>, with words in quotes kept together.
-        </div>
-      )}
     </>
   );
 };

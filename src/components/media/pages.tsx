@@ -488,7 +488,7 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }
   const sections = result.data.filter((s) => s.items.length || s.tracks?.length);
   const notes = result.data.filter((s) => s.notice);
   if (!sections.length)
-    return <Notice>{notes.length ? notes.map((s) => s.notice).join(" ") : "Nothing here yet"}</Notice>;
+    return notes.length ? <Notice>{notes.map((s) => s.notice).join(" ")}</Notice> : null;
   // a tab of several groups of rows names each group
   const headed = sections.filter((s) => s.display === "rows").length > 1;
   return (
@@ -1026,7 +1026,7 @@ const RecentSearches: FC<{ instanceId: string; onSearch: (q: string) => void }> 
       .catch(() => setSearches([]));
   }, [instanceId]);
   if (searches === null) return null;
-  if (!searches.length) return <Notice>Search this source for songs, albums and artists</Notice>;
+  if (!searches.length) return null;
   return (
     <>
       <SectionTitle>Recent searches</SectionTitle>

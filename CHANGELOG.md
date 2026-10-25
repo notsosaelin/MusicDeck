@@ -3,6 +3,19 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.36.2
+
+- **Your stats keep up**: the page refreshes as songs change, and every half minute, instead of only when it's
+  opened again (or Steam restarts).
+- **Less talk, less empty space**: no more "Nothing playing", "Play something", "Looking for lyrics…", "No lyrics for
+  this song", "Nothing after this song" or "Loading…". An idle player bar is just the controls; the lyrics pane of a
+  song that has none shows what's up next instead; Library tools shows only the problems there are, without
+  paragraphs under each; Your stats with nothing yet shows its zeros, not an explanation; the search tip is the
+  search box's tooltip; with no source at all, Music shows one button to add one. In Game Mode, the idle Now
+  playing and the Quick Access player say nothing either, and empty tabs stay empty.
+- Library tools no longer keeps showing an error from another source after switching to one it works for.
+- The desktop queue shows a blank square for a cover that won't load, not a broken image.
+
 ## 0.36.1
 
 - **The mini player takes over when Steam's window goes**: minimized, or closed to the tray (Steam and the music

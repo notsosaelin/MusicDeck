@@ -207,7 +207,7 @@ const CollectionList: FC<{
 const HomeView: FC<{ instanceId: string }> = ({ instanceId }) => {
   const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
   if (!result?.ok) return <Loading result={result} />;
-  if (!result.data.length) return <Message>Nothing here yet</Message>;
+  if (!result.data.length) return null;
   return (
     <>
       {result.data.map((s) => (

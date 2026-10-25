@@ -13,7 +13,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   art with a green Play), track lists with columns to sort, Ctrl/Shift to pick several, right-click for
   Steam's own menus, and a player along the bottom laid out as Spotify's is (the song, the controls and its
   place, then lyrics, queue, casting, volume; the equalizer and settings under **...**). Click the cover for a
-  big Now Playing: the cover over a blur of itself, beside its synced lyrics, what's up next, or alone, with
+  big Now Playing: the cover over a blur of itself, beside its synced lyrics (what's up next for a song without), what's up next, or alone, with
   a visualizer. Leave Music while it plays and a mini player window takes over: dragged anywhere, sized at
   will in three shapes it settles into so the cover always shows whole (a square the cover fills, the
   controls over it on hover; a card with the song below the cover; or a strip), with casting and its volume

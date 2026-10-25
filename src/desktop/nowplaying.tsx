@@ -9,7 +9,7 @@ import { FC, useEffect, useRef } from "react";
 import { FaChevronDown } from "react-icons/fa";
 import { player } from "../player";
 import { useStore } from "../store";
-import { LyricsPanel, Queue } from "./bar";
+import { LyricsPanel, Queue, useLyrics } from "./bar";
 import { Pane, go, panel, toggleFull } from "./data";
 import { ArtOrIcon } from "./library";
 import { Stars, coverUrl } from "./parts";
@@ -36,6 +36,7 @@ export const Backdrop: FC = () => {
 export const NowPlayingFull: FC = () => {
   useStore(player.state);
   const { pane } = useStore(panel);
+  const lyrics = useLyrics(pane === "lyrics");
   const item = player.current;
   const t = item?.track;
   const box = useRef<HTMLDivElement>(null);
@@ -83,7 +84,7 @@ export const NowPlayingFull: FC = () => {
           <div className="md-np-art">
             <ArtOrIcon url={coverUrl()} />
           </div>
-          <div className="md-np-title" title={t?.title}>{t?.title ?? "Nothing playing"}</div>
+          <div className="md-np-title" title={t?.title}>{t?.title}</div>
           <div className="md-np-sub">
             <span className={toArtist ? "md-link" : undefined} onClick={toArtist}>{t?.artist}</span>
             {t?.album && (
@@ -104,7 +105,7 @@ export const NowPlayingFull: FC = () => {
         </div>
         {pane !== "art" && (
           <div className="md-np-pane">
-            <div className="md-np-scroll">{pane === "queue" ? <Queue big /> : <LyricsPanel big />}</div>
+            <div className="md-np-scroll">{pane === "queue" ? <Queue big /> : <LyricsPanel big lyrics={lyrics} />}</div>
           </div>
         )}
       </div>

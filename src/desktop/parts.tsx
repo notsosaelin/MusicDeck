@@ -181,16 +181,14 @@ export const Titles: FC<{ size?: number; onTitle?: () => void; onArtist?: () => 
     <div style={{ minWidth: 0, flex: 1 }}>
       <div style={{ ...line, fontSize: size, color: "#fff" }}>
         <span className={onTitle && track ? "md-link" : undefined} onClick={track ? onTitle : undefined}>
-          {track?.title ?? "Nothing playing"}
+          {track?.title}
         </span>
       </div>
       <div style={{ ...line, fontSize: size - 2, color: "#8b929a", marginTop: 2 }}>
-        {track ? (
+        {track && (
           <span className={onArtist ? "md-link" : undefined} onClick={onArtist}>
             {track.artist}
           </span>
-        ) : (
-          "Play something from your music"
         )}
       </div>
     </div>

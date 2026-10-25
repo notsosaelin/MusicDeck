@@ -32,7 +32,7 @@ export interface HealthReport {
   loudness: { running: boolean; done: number; total: number; written: number };
 }
 
-/** A part of the page; `count` -1: a tool, not a problem (no count, always open). */
+/** A part of the page; `count` -1: a tool, not a problem (no count, always open). A problem with nothing to fix isn't shown. */
 const Section: FC<{ id: string; title: string; count: number; action?: ReactNode; note: string; children?: ReactNode }> = ({
   id,
   title,
@@ -40,7 +40,8 @@ const Section: FC<{ id: string; title: string; count: number; action?: ReactNode
   action,
   note,
   children,
-}) => (
+}) =>
+  count === 0 ? null : (
   <section className="tl-section" id={`tl-${id}`}>
     <div className="tl-section-head">
       <div>
@@ -48,7 +49,7 @@ const Section: FC<{ id: string; title: string; count: number; action?: ReactNode
           {title}
           {count >= 0 && <span className="tl-count" data-zero={count ? undefined : ""}>{count ? count.toLocaleString() : <FaCheck />}</span>}
         </h2>
-        {count >= 0 && <div className="md-dim tl-note">{count ? note : "Nothing to fix."}</div>}
+        {!!note && <div className="md-dim tl-note">{note}</div>}
       </div>
       {!!count && action}
     </div>
@@ -84,6 +85,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
       .catch((e) => setError(String(e)));
   useEffect(() => {
     setReport(null);
+    setError("");
     refresh();
   }, [id]);
   // while loudness is measured, its count and progress follow it (a light call, not the whole report)
@@ -120,19 +122,14 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
     <>
       <h1 className="md-title">Library tools</h1>
       {error && <div className="md-dim">{error}</div>}
-      {!r && !error && <div className="md-dim">Looking through the library…</div>}
       {r && (
         <>
-          <div className="md-dim" style={{ marginBottom: 18 }}>
-            {r.tracks.toLocaleString()} songs looked through.{" "}
-            {r.duplicate_count + r.split_count + r.no_art_count + r.untagged_count + r.missing_files === 0 ? "All tidy." : ""}
-          </div>
 
           <Section
             id="duplicates"
             title="Duplicates"
             count={r.duplicate_count}
-            note="The same song more than once. The best copy (lossless first, then the highest quality) is kept; the others go to Recently deleted, where they can be put back."
+            note="The best copy is kept; the rest go to Recently deleted."
             action={
               <button className="md-button md-wide" disabled={!!busy} onClick={() => removeCopies(r.duplicates)}>
                 {busy === "copies" ? "Removing…" : "Keep the best of each"}
@@ -164,7 +161,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
             id="split"
             title="Albums split in two"
             count={r.split_count}
-            note="One folder's songs with one album name, shown as several albums because their album artists differ. Give them one."
+            note="One album shown as several, its album artists differing."
           >
             {r.split.map((s) => (
               <SplitRow key={`${s.path}-${s.album}`} id={id} split={s} disabled={!!busy} onDone={() => run("split", async () => {})} />
@@ -175,7 +172,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
             id="art"
             title="Albums without a cover"
             count={r.no_art_count}
-            note="Nothing in the files or the folder. MusicDeck can look for each on the Cover Art Archive, Apple Music and Deezer."
+            note=""
             action={
               <button
                 className="md-button md-wide"
@@ -205,7 +202,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
             id="untagged"
             title="Songs missing details"
             count={r.untagged_count}
-            note="No artist, album or track number, so they sort and group badly. Click one to edit it, or open its album and use Look up details."
+            note=""
           >
             {r.untagged.slice(0, 60).map((s) => (
               <div key={s.id} className="tl-row tl-click" onClick={() => editTags(id, "track", s.id, s.title)}>
@@ -223,7 +220,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
             id="loudness"
             title="Songs without loudness info"
             count={r.loudness.running ? Math.max(r.no_gain, 1) : r.no_gain}
-            note="Volume levelling can't even them out. MusicDeck can measure each (with ffmpeg) and write ReplayGain tags into the files, as foobar2000 does."
+            note="No ReplayGain tags, so volume levelling can't even them out."
             action={
               <button
                 className="md-button md-wide"
@@ -251,12 +248,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
                 <button className="md-button md-wide" onClick={() => showOrganize(id, undefined, "Every song in the library")}>Organize files…</button>
               </div>
             }
-          >
-            <div className="md-dim tl-note">
-              Tag tools: tags from file names, capitalisation, track numbers, find and replace. Organize files: every song moved
-              into folders by its tags. Both show what they'd do first. (Right-click songs or an album for the same, for just those.)
-            </div>
-          </Section>
+          />
 
           <Section
             id="move"
@@ -279,19 +271,13 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
                 </button>
               </div>
             }
-          >
-            <div className="md-dim tl-note">
-              Import: the library file iTunes exports (File › Library › Export Library) or MusicBee writes (Preferences › Library ›
-              iTunes compatible XML). Play counts, ratings, loved songs and playlists come across for the songs that are here.
-              Export: your playlists as .m3u8 files any player opens. (A backup of everything MusicDeck keeps is in Settings.)
-            </div>
-          </Section>
+          />
 
           <Section
             id="missing"
             title="Files gone"
             count={r.missing_files}
-            note="In the library, but their files were moved or deleted outside MusicDeck. A rescan finds where things are now."
+            note=""
             action={
               <button className="md-button md-wide" disabled={!!busy} onClick={() => run("rescan", () => api.rescan(id))}>
                 Rescan

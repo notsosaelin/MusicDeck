@@ -86,7 +86,7 @@ function cardText(
   song: OnAir | null,
   castingTo: string | null,
 ): { title: string; subtitle: string[] } {
-  if (!item) return { title: "Nothing playing", subtitle: [] };
+  if (!item) return { title: "", subtitle: [] };
   const { title, artist, album } = item.track;
   const lines = song?.title
     ? { title: song.title, subtitle: [song.artist, title] }

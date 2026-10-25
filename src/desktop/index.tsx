@@ -502,6 +502,7 @@ class Desktop {
     reloadSmart: () => loadSmart(),
     showSettings: () => showSettings(),
     showTools: (source?: string) => go({ type: "tools", source }),
+    go: (place: Place) => go(place),
     tagTools: (source: string, ids: string[]) => showTagTools(source, ids, `${ids.length} songs`),
     organize: (source: string, ids?: string[]) => showOrganize(source, ids, ids ? `${ids.length} songs` : "Every song"),
     showEqualizer: () => showEqualizer(),

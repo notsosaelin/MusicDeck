@@ -8,7 +8,7 @@ import { NowPlaying } from "./NowPlaying";
 import { Queue, confirmClearQueue } from "./Queue";
 import { Visualizer } from "./media/nowplaying";
 import { ButtonRow, IconButton, watchSize } from "./common";
-import { FaCompactDisc, FaMusic, FaSearch } from "react-icons/fa";
+import { FaMusic, FaSearch } from "react-icons/fa";
 import { saveQueue } from "./TrackMenu";
 
 /** The second page's view: the song's lyrics or what's up next; kept while the panel is closed. */
@@ -158,19 +158,9 @@ export const PlayerPages: FC<{ head: ReactNode }> = ({ head }) => {
   );
 };
 
-/**
- * Now playing with nothing to play: a quiet note where the player would be, and the two ways to find
- * something, so the controller has somewhere to go.
- */
+/** Now playing with nothing to play: the two ways to find something, so the controller has somewhere to go. */
 const NothingPlaying: FC = () => (
   <PanelSection>
-    <PanelSectionRow>
-      <div style={{ textAlign: "center", padding: "0 0 16px" }}>
-        <FaCompactDisc style={{ fontSize: 34, opacity: 0.3 }} />
-        <div style={{ fontSize: 16, fontWeight: 600, marginTop: 12 }}>Nothing playing</div>
-        <div style={{ fontSize: 13, opacity: 0.55, marginTop: 4 }}>Pick something to listen to</div>
-      </div>
-    </PanelSectionRow>
     <ButtonRow>
       <IconButton label="Library" onClick={() => showTab("library")} style={{ height: 40, fontSize: 14 }}>
         <FaMusic /> Library
