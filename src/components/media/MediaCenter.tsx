@@ -1,5 +1,5 @@
 import { DropdownItem, Focusable, SliderField, Tabs, footerClasses } from "@decky/ui";
-import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
+import { FC, ReactNode, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   FaHeart,
   FaMoon,
@@ -930,10 +930,13 @@ const Browse: FC<{
         root ? (
           <CollectionPage instanceId={instanceId} stack={stack} collection={root} />
         ) : withHome ? (
-          <>
-            <TabPage instanceId={instanceId} tab="home" stack={stack} />
-            <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
-          </>
+          // its sections come in with its Home's rows, not before them (the controller lands on the first row)
+          <TabPage
+            instanceId={instanceId}
+            tab="home"
+            stack={stack}
+            after={<BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />}
+          />
         ) : devicesFrom ? (
           <>
             <DevicesShelf instanceId={devicesFrom} stack={stack} />
@@ -990,12 +993,51 @@ const browseOn = new Store<string>("library");
 
 // GamepadButton.TRIGGER_LEFT from @decky/ui (R2 is TRIGGER_RIGHT, above)
 const L2 = 7;
-/** How far down Browse (from its dots) the first row of cards starts: focus above this keeps Browse at its top */
-const NEAR_TOP = 150;
+/** How long the controller rests on a source's dot before its Browse loads */
+const SETTLE_MS = 300;
+/** How long after switching source the page is held at its top (the new one's rows and covers coming in) */
+const SETTLE_HOLD_MS = 900;
+
+/** No change of its size for this long: what's in it has settled */
+const SETTLED_MS = 160;
+/** Shown by now however it's doing (a slow source's rows come in where they are) */
+const SETTLED_MAX_MS = 1500;
+
+/** What's in it, hidden until it's settled (its rows loaded and laid out, no longer changing size), then faded in: it
+ *  arrives where it'll stay, never seen moving into place. */
+const Settled: FC<{ children: ReactNode }> = ({ children }) => {
+  const box = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const win = (el.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
+    let quiet = 0;
+    const show = () => setReady(true);
+    const changed = () => {
+      win.clearTimeout(quiet);
+      quiet = win.setTimeout(show, SETTLED_MS);
+    };
+    const observer = new win.ResizeObserver(changed);
+    observer.observe(el);
+    changed();
+    const latest = win.setTimeout(show, SETTLED_MAX_MS);
+    return () => {
+      observer.disconnect();
+      win.clearTimeout(quiet);
+      win.clearTimeout(latest);
+    };
+  }, []);
+  return (
+    <div ref={box} className="mc-browse-body" data-ready={ready ? "" : undefined}>
+      {children}
+    </div>
+  );
+};
 
 /**
  * Browse: dots along the top for where to look (Your library, then each source), half either side of the name of the
- * one showing; the controller landing on a dot shows it (no press needed), and L2/R2 step through them from
+ * one the controller is on; resting on a dot shows that source (no press needed), and L2/R2 step through them from
  * anywhere in Browse (unhinted). Under them, that one's whole Browse, each keeping its own pages (B goes back within
  * it). What's plugged in (phones, players, CDs) is a row of Your library.
  */
@@ -1005,46 +1047,62 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
   const services = librarySources(state?.services ?? []);
   const local = services.find((s) => s.type === "local");
   const places = [{ id: "library", name: "Your library" }, ...services.map((s) => ({ id: s.id, name: s.name }))];
-  const index = Math.max(0, places.findIndex((p) => p.id === chosen));
-  const at = places[index].id;
+  const at = places.some((p) => p.id === chosen) ? chosen : "library";
   const source = services.find((s) => s.id === at);
-  const step = (by: number) => browseOn.set(places[(index + by + places.length) % places.length].id);
+  // the dot the controller's on lights and names itself at once; what's under the dots follows when it rests there a
+  // moment, so passing along the dots doesn't load every source on the way
+  const [shown, setShown] = useState(at);
+  const settle = useRef(0);
+  useEffect(() => setShown(at), [at]);
+  useEffect(() => () => window.clearTimeout(settle.current), []);
+  const choose = (id: string) => {
+    setShown(id);
+    window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => browseOn.set(id), SETTLE_MS);
+  };
+  const step = (by: number) => {
+    const from = Math.max(0, places.findIndex((p) => p.id === shown));
+    choose(places[(from + by + places.length) % places.length].id);
+  };
   const dot = (p: { id: string; name: string }) => (
     <Focusable
       key={p.id}
-      className={p.id === at ? "mc-dot mc-on" : "mc-dot"}
+      className={p.id === shown ? "mc-dot mc-on" : "mc-dot"}
       noFocusRing
-      onGamepadFocus={() => browseOn.set(p.id)}
-      onClick={() => browseOn.set(p.id)}
+      onGamepadFocus={() => choose(p.id)}
+      onClick={() => choose(p.id)}
     >
       <span />
     </Focusable>
   );
   const half = Math.ceil(places.length / 2);
-  // the first row of cards, focused, scrolls the tab a little to line it up, which tucked the dots under the tab
-  // bar: near the top, the tab stays at the very top, so the dots always show
+  // switching source keeps the page still, as Now Playing's dots do: at the very top the moment it switches, and held
+  // there (a scroll undone before it's drawn) while the new source settles, so nothing left over from the last one
+  // (where the controller was, a row gliding into place) moves it
   const top = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scroller = top.current && scrollParent(top.current);
     if (!scroller) return;
-    // where the controller is, from the top of Browse (not the screen: the same however far it's scrolled)
-    const firstRow = () => {
-      const wrap = top.current;
-      const active = wrap?.ownerDocument.activeElement as HTMLElement | null;
-      if (!wrap || !active || !wrap.contains(active)) return false;
-      return active.getBoundingClientRect().top - wrap.getBoundingClientRect().top < NEAR_TOP;
-    };
+    scroller.scrollTop = 0;
     const hold = () => {
-      if (scroller.scrollTop > 0 && firstRow()) scroller.scrollTop = 0;
+      if (scroller.scrollTop !== 0) scroller.scrollTop = 0;
     };
-    const focused = () => window.setTimeout(hold, 50);
+    const release = () => scroller.removeEventListener("scroll", hold);
+    // the controller going on past the first row: the page is the user's again at once
+    const moved = (e: FocusEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && !el.closest(".mc-sources") && el.closest(".mc-row-block") !== scroller.querySelector(".mc-row-block")) release();
+    };
     scroller.addEventListener("scroll", hold);
-    top.current?.addEventListener("focusin", focused);
+    top.current?.addEventListener("focusin", moved);
+    const stop = window.setTimeout(release, SETTLE_HOLD_MS);
+    const wrap = top.current;
     return () => {
-      scroller.removeEventListener("scroll", hold);
-      top.current?.removeEventListener("focusin", focused);
+      window.clearTimeout(stop);
+      release();
+      wrap?.removeEventListener("focusin", moved);
     };
-  }, []);
+  }, [at]);
   return (
     <Focusable
       ref={top}
@@ -1057,14 +1115,16 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
         <div className="mc-sources-side" style={{ justifyContent: "flex-end" }}>
           {places.slice(0, half).map(dot)}
         </div>
-        <div className="mc-sources-name">{places[index].name}</div>
+        <div className="mc-sources-name">{places.find((p) => p.id === shown)?.name ?? ""}</div>
         <div className="mc-sources-side">{places.slice(half).map(dot)}</div>
       </Focusable>
-      {source ? (
-        <Browse key={at} instanceId={source.id} tab={BROWSE.id} sections={ownSections(source)} withHome />
-      ) : (
-        <Browse key="library" instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id} />
-      )}
+      <Settled key={at}>
+        {source ? (
+          <Browse instanceId={source.id} tab={BROWSE.id} sections={ownSections(source)} withHome />
+        ) : (
+          <Browse instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id} />
+        )}
+      </Settled>
     </Focusable>
   );
 };

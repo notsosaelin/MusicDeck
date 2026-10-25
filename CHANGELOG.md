@@ -3,6 +3,16 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.2
+
+- **Browse switches sources without a jump**: a source's Browse appears once its rows are loaded and in place, faded
+  in, instead of loading in front of you and settling; the page doesn't move when switching (nothing left over from
+  the source before scrolls it). The dots light and name themselves as the controller passes, and the source under
+  them follows when it rests on one.
+- A source's Browse starts on its first row: its sections come in with its Home's rows, not before them (Internet
+  radio's opened on Your music).
+- The media center's pages no longer nudge and glide back as covers load (the browser's scroll anchoring, off).
+
 ## 0.39.1
 
 - **Browse's sources are dots** (as Now Playing's are), half either side of the name of the one showing, tight under

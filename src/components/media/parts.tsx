@@ -37,6 +37,14 @@ export const CENTER_CSS =
 /* Browse's sources: dots either side of the showing one's name, tight under the tabs */
 .mc-sources { display: flex; align-items: center; gap: 14px; margin: 0 0 -8px; }
 .mc-sources-side { flex: 1; display: flex; align-items: center; min-width: 0; }
+/* a source's Browse coming in: faded in where it'll be, the page keeping its height meanwhile */
+/* a source's Browse coming in: hidden until its rows have settled where they'll be, then faded in; the page keeps
+   its height meanwhile */
+.mc-browse-body { min-height: 70vh; opacity: 0; }
+.mc-browse-body[data-ready] { opacity: 1; transition: opacity 0.2s ease; }
+/* the browser's scroll anchoring moved the page as rows and covers came in above where it was looking: off here, where
+   the page's own scrolling (snapRows) decides */
+.mc-center, .mc-center * { overflow-anchor: none; }
 .mc-sources-name { flex-shrink: 0; width: 220px; text-align: center; font-size: 14px; opacity: 0.6; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .mc-dot > span { display: block; width: 9px; height: 9px; border-radius: 5px; background: rgba(255, 255, 255, 0.28);
@@ -511,10 +519,17 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
       // nothing to press: the page's sentence, so B still goes back
       container.querySelector<HTMLElement>(".mc-notice");
     if (target) {
-      target.focus();
-      if (remembered) target.scrollIntoView?.({ block: "nearest" });
-      // the page's first thing: from the very top, so its heading shows too
-      else scrollParent(container)?.scrollTo?.({ top: 0 });
+      // no scroll of the browser's own on the way (it showed as a jump, the page then gliding back)
+      target.focus({ preventScroll: true });
+      // a card remembered from before: in view (the page's first row: the very top, as snapRows has it)
+      const scroller = scrollParent(container);
+      const firstRow = !!scroller && scroller.querySelector(".mc-row-block") === target.closest(".mc-row-block");
+      if (remembered && !firstRow) target.scrollIntoView?.({ block: "nearest" });
+      else {
+        // the page's first thing: from the very top, so its heading shows too (set, not scrollTo: that's Steam's
+        // position restore, which snapRows turns off while the controller is in the page)
+        if (scroller) scroller.scrollTop = 0;
+      }
       window.clearInterval(timer);
     }
   }, 100);
@@ -877,6 +892,8 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR } = {}
     const box = block.getBoundingClientRect();
     const top = scroller.scrollTop + box.top - view.top;
     const max = scroller.scrollHeight - scroller.clientHeight;
+    // the page's first row: the very top, so what's above it (a heading, Browse's source dots) shows with it
+    if (!nearest && scroller.querySelector(".mc-row-block") === block) return 0;
     if (!nearest) return Math.max(0, Math.min(top - under - 8, max));
     const at = glide && glide.scroller === scroller ? glide.to : scroller.scrollTop;
     const room = scroller.clientHeight - under - 8 - 24;

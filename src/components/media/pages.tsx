@@ -503,7 +503,14 @@ const BrowseRow: FC<{
   );
 };
 
-export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }> = ({ instanceId, tab, stack }) => {
+/** `after`: shown under the tab's sections once they're in (a source's Browse past its Home), so nothing below
+ *  them arrives first and takes the controller. */
+export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack; after?: ReactNode }> = ({
+  instanceId,
+  tab,
+  stack,
+  after,
+}) => {
   useStore(runningGame); // cards get a menu (play with the game) while one runs
   // the one library's Home and Your music ("library:..."), else the source's own tab
   const ours = tab.startsWith("library:") ? tab.slice(8) : null;
@@ -515,7 +522,8 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }
   const services = useStore(pluginState)?.services ?? [];
   const [only, setOnly] = useState("");
   const [sort, setSort] = useState<LibrarySort>("title");
-  if (!result?.ok) return <Loading result={result} />;
+  if (!result) return null;
+  if (!result.ok) return after ? <>{after}</> : <Loading result={result} />;
   // the one library's Your music: one source's or every one's, in the order chosen
   const merged = !!ours && ours !== "home";
   const sources = merged ? sourcesIn(result.data, services) : [];
@@ -566,7 +574,12 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }
   );
   const notes = result.data.filter((s) => s.notice);
   if (!sections.length)
-    return notes.length ? <Notice>{notes.map((s) => s.notice).join(" ")}</Notice> : home || null;
+    return (
+      <>
+        {notes.length ? <Notice>{notes.map((s) => s.notice).join(" ")}</Notice> : home || null}
+        {after}
+      </>
+    );
   // a tab of several groups of rows names each group
   const headed = sections.filter((s) => s.display === "rows").length > 1;
   return (
@@ -575,6 +588,7 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }
       {sections.map((s) => (
         <SectionView key={s.title} instanceId={instanceId} stack={stack} section={s} headed={headed} />
       ))}
+      {after}
     </>
   );
 };
