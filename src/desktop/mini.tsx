@@ -2,15 +2,18 @@
  * The mini player: what's playing in a small window of its own, dragged anywhere, in one of three shapes the
  * window snaps to (miniShape) so the cover always shows whole, as Spotify's mini player has them:
  *   square  the cover fills it; the song and a thin progress bar over its foot; under the mouse, the controls in
- *           the middle, the window's buttons and volume along the top, and the bar with its times
+ *           the middle, volume and casting along the top, and the bar with its times
  *   card    the cover on top; below it the song (and volume), the progress bar with its times, the controls
- *   strip   the cover at the left, the song over its progress bar, the controls, volume and "..." at the right
- * Volume is a button that opens a slider (the wheel over it, or anywhere over the player, also sets it).
+ *   strip   the cover at the left, the song over its progress bar, the controls, casting and volume at the right
+ * Volume is a button that opens a slider (the wheel over it, or anywhere over the player, also sets it). The
+ * window's own options (Open Music, keep on top, close) are on right-click, nothing over the cover for them.
  */
-import { FC, ReactNode, useEffect, useRef, useState } from "react";
-import { FaEllipsisH, FaExternalLinkAlt, FaRandom, FaRedo, FaThumbtack, FaTimes, FaVolumeDown, FaVolumeMute, FaVolumeUp } from "react-icons/fa";
+import { FC, useEffect, useRef, useState } from "react";
+import { FaBroadcastTower, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp } from "react-icons/fa";
+import { CastDevice, Result } from "../api";
+import { canCast, castChoices, chooseCast, prepareCastMenu, thisDevice } from "../components/CastMenu";
 import { player } from "../player";
-import { useStore } from "../store";
+import { pluginState, useStore } from "../store";
 import { setVolume } from "./bar";
 import { Button, Controls, Cover, Seek, Slider, Titles } from "./parts";
 
@@ -20,6 +23,10 @@ const CARD_BELOW = 168;
 /** a strip is at most this tall */
 const STRIP_MAX = 140;
 export const MINI_SMALLEST = { width: 240, height: 84 };
+/** where the progress bar's times sit: their centres this far in from its ends (MINI_CSS: 30 px, centred) */
+const TIME_CENTRE = 15;
+/** the card's side padding (MINI_CSS .mm-below) */
+const CARD_PAD = 16;
 
 const modeFor = (w: number, h: number): MiniMode => (h <= STRIP_MAX || w >= h * 2 ? "strip" : h > w * 1.12 ? "card" : "square");
 
@@ -92,10 +99,17 @@ const Volume: FC<{ below?: boolean; open: boolean; onOpen: (open: boolean) => vo
 
 /** Shuffle, previous, play, next, repeat, the play button larger: each in a slot as wide as the play button's,
  *  so their centres are evenly spaced whatever each icon's size. */
-const Transport: FC<{ play: number; ends: boolean; gap: number }> = ({ play, ends, gap }) => {
+const Transport: FC<{ play: number; ends: boolean; gap: number; span?: number }> = ({ play, ends, gap, span }) => {
   const state = useStore(player.state);
+  const n = ends ? 5 : 3;
+  // spanning the progress bar (span: its width): the outer controls centred under its times, the rest evenly
+  // between, so the two rows line up
+  const slot = span ? (span - 2 * TIME_CENTRE) / (n - 1) : play + gap;
+  const style = span
+    ? { gridTemplateColumns: `repeat(${n}, ${slot}px)`, marginLeft: TIME_CENTRE - slot / 2, marginRight: TIME_CENTRE - slot / 2 }
+    : { gridTemplateColumns: `repeat(${n}, ${slot}px)` };
   return (
-    <div className="mm-transport" style={{ gridTemplateColumns: `repeat(${ends ? 5 : 3}, ${play + gap}px)` }}>
+    <div className="mm-transport" style={style}>
       {ends && (
         <Button label={state.shuffle ? "Shuffle: on" : "Shuffle"} on={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
           <FaRandom />
@@ -112,6 +126,30 @@ const Transport: FC<{ play: number; ends: boolean; gap: number }> = ({ play, end
   );
 };
 
+/** Play on a speaker or TV: the main player's devices, listed in the mini player's own window (Steam's menus open
+ *  in the main window). */
+const Cast: FC<{ onList: (at: [number, number], list: Result<CastDevice[]> | null) => void }> = ({ onList }) => {
+  const state = useStore(player.state);
+  if (!canCast(player.current?.instanceId ?? pluginState.get()?.active_service ?? "")) return null;
+  return (
+    <button
+      className="md-ctl"
+      data-on={state.castingTo ? "" : undefined}
+      title={state.castingTo ? `Playing on ${state.castingTo.name}` : "Play on a speaker or TV"}
+      aria-label="Play on"
+      onMouseEnter={() => prepareCastMenu()}
+      onClick={async (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const at: [number, number] = [r.left, r.bottom + 4];
+        onList(at, null); // "Looking..." at once
+        onList(at, await castChoices());
+      }}
+    >
+      <FaBroadcastTower />
+    </button>
+  );
+};
+
 export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTop: boolean; onPin: () => void }> = ({
   onClose,
   onOpenMusic,
@@ -121,6 +159,9 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<[number, number]>([300, 300]);
   const [menu, setMenu] = useState<[number, number] | null>(null);
+  // the cast list: where, and the devices (null while they're looked for)
+  const [devices, setDevices] = useState<{ at: [number, number]; list: Result<CastDevice[]> | null } | null>(null);
+  const castingTo = useStore(player.state).castingTo;
   const [volume, setVolumeOpen] = useState(false);
   // the strip's volume, open in place of its controls: closed by a press outside both
   const stripEnd = useRef<HTMLDivElement>(null);
@@ -157,20 +198,9 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
     setMenu(null);
     act();
   };
+  const showDevices = (at: [number, number], list: Result<CastDevice[]> | null) =>
+    setDevices({ at: [Math.max(4, Math.min(at[0], w - 204)), Math.max(4, Math.min(at[1], h - 150))], list });
   const openMenu = (x: number, y: number) => setMenu([Math.max(4, Math.min(x, w - 184)), Math.max(4, Math.min(y, h - 118))]);
-  const tools: ReactNode = (
-    <>
-      <Button label="Open Music" onClick={onOpenMusic}>
-        <FaExternalLinkAlt />
-      </Button>
-      <Button label={onTop ? "Stop keeping on top" : "Keep on top"} on={onTop} onClick={onPin}>
-        <FaThumbtack />
-      </Button>
-      <Button label="Close" onClick={onClose}>
-        <FaTimes />
-      </Button>
-    </>
-  );
   // the play button and the room for shuffle and repeat, by the space there is
   const play = mode === "strip" ? 36 : Math.round(Math.min(56, Math.max(42, w * 0.15)));
   const stripRoom = w - h;
@@ -184,7 +214,11 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
         e.preventDefault();
         openMenu(e.clientX, e.clientY);
       }}
-      onPointerDown={(e) => menu && !(e.target as Element).closest(".mm-menu") && setMenu(null)}
+      onPointerDown={(e) => {
+        if ((e.target as Element).closest(".mm-menu, button[aria-label='Play on']")) return;
+        setMenu(null);
+        setDevices(null);
+      }}
       onWheel={(e) => nudgeVolume(e.deltaY)}
     >
       <div className="mm-art" onDoubleClick={onOpenMusic} title="Double-click: open Music · right-click: options">
@@ -197,7 +231,7 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
           <div className="mm-top">
             <Volume below open={volume} onOpen={setVolumeOpen} />
             <div style={{ flex: 1 }} />
-            {tools}
+            <Cast onList={showDevices} />
           </div>
           <div className="mm-middle">
             <Transport play={play} ends={w >= 260} gap={Math.round(w / 28)} />
@@ -215,13 +249,13 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
         <div className="mm-below">
           <div className="mm-row">
             <Titles size={15} />
+            <Cast onList={showDevices} />
             <Volume open={volume} onOpen={setVolumeOpen} />
           </div>
           <div className="mm-bar">
             <Seek />
           </div>
-          <Transport play={play} ends={w >= 250} gap={Math.round(w / 28)} />
-          <div className="mm-card-tools">{tools}</div>
+          <Transport play={play} ends={w >= 250} gap={0} span={w - 2 * CARD_PAD} />
         </div>
       )}
 
@@ -242,17 +276,25 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
             <Transport play={play} ends={stripRoom >= 470} gap={4} />
           )}
           <div ref={stripEnd} className="mm-strip-end">
+            <Cast onList={showDevices} />
             <Volume open={volume} onOpen={setVolumeOpen} inPlace />
-            <button className="md-ctl" title="Options" aria-label="Options" onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              openMenu(r.right - 184, r.bottom);
-            }}>
-              <FaEllipsisH />
-            </button>
           </div>
         </>
       )}
 
+      {devices && (
+        <div className="mm-menu" style={{ left: devices.at[0], top: devices.at[1], maxHeight: h - devices.at[1] - 4, overflowY: "auto" }}>
+          <div onClick={() => { setDevices(null); chooseCast(null); }}>{castingTo ? "" : "✓ "}{thisDevice()}</div>
+          {!devices.list && <div className="mm-menu-note">Looking for speakers and TVs…</div>}
+          {devices.list?.ok && devices.list.data.map((d) => (
+            <div key={d.id} onClick={() => { setDevices(null); chooseCast(d); }}>
+              {castingTo?.name === d.name ? "✓ " : ""}{d.name}
+            </div>
+          ))}
+          {devices.list?.ok && !devices.list.data.length && <div className="mm-menu-note">No speakers or TVs found</div>}
+          {devices.list && !devices.list.ok && <div className="mm-menu-note">{devices.list.error}</div>}
+        </div>
+      )}
       {menu && (
         <div className="mm-menu" style={{ left: menu[0], top: menu[1] }}>
           <div onClick={pick(onOpenMusic)}>Open Music</div>
@@ -272,7 +314,7 @@ export const MINI_CSS = `
 .mm-transport { display: grid; justify-items: center; align-items: center; justify-content: center; }
 /* the progress bar: inset, rounded, its times either side (from Seek), as a bar and never an edge */
 .mm-bar .md-seekrow { gap: 8px; font-size: 11px; color: rgba(255,255,255,0.7); }
-.mm-bar .md-seekrow > span { min-width: 30px; }
+.mm-bar .md-seekrow > span { min-width: 30px; width: 30px; text-align: center !important; }
 
 /* square: the cover is the window */
 .mm[data-mode="square"] .mm-art { position: absolute; inset: 0; }
@@ -295,11 +337,8 @@ export const MINI_CSS = `
 /* card: the cover on top, the rest below it */
 .mm[data-mode="card"] { display: flex; flex-direction: column; }
 .mm[data-mode="card"] .mm-art { width: 100%; aspect-ratio: 1; flex-shrink: 0; }
-.mm-below { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 12px 16px 14px; }
+.mm-below { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 12px 16px 14px; min-width: 0; }
 .mm-row { display: flex; align-items: center; gap: 8px; }
-.mm-card-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
-.mm-card-tools .md-ctl { width: 30px; height: 30px; font-size: 13px; background: rgba(0,0,0,0.45); }
-.mm:hover .mm-card-tools { opacity: 1; }
 
 /* strip: cover, the song over its bar, the controls, volume and options */
 .mm[data-mode="strip"] { display: flex; align-items: center; gap: 14px; padding-right: 8px; }
@@ -328,4 +367,5 @@ export const MINI_CSS = `
   box-shadow: 0 6px 18px rgba(0,0,0,0.6); font-size: 13px; }
 .mm-menu div { padding: 8px 14px; cursor: default; white-space: nowrap; }
 .mm-menu div:hover { background: #dcdedf; color: #171d25; }
+.mm-menu .mm-menu-note, .mm-menu .mm-menu-note:hover { color: #8b929a; background: none; cursor: default; }
 `;

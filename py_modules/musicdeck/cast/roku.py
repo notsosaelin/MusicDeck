@@ -19,7 +19,7 @@ from urllib.parse import urlencode, urlparse
 import aiohttp
 
 from . import netif
-from .upnp import SSDP, UpnpError, _xml
+from .upnp import SSDP, UpnpError, _xml, read_all
 
 PLAY_ON_ROKU = "15985"
 POLL_EVERY = 1.0
@@ -64,7 +64,7 @@ async def describe(session: aiohttp.ClientSession, host: str, base: str) -> Opti
         async with session.get(base + "query/device-info", timeout=aiohttp.ClientTimeout(total=3)) as response:
             if response.status != 200:
                 return None
-            root = _xml(await response.content.read(64 * 1024))
+            root = _xml(await read_all(response, 64 * 1024))
     except (aiohttp.ClientError, asyncio.TimeoutError, UpnpError):
         return None
     fields = {e.tag: e.text.strip() for e in root.iter()}
@@ -185,7 +185,7 @@ class Roku:
         try:
             async with self.session.get(self.device["base"] + "query/media-player",
                                         timeout=aiohttp.ClientTimeout(total=3)) as response:
-                body = await response.content.read(64 * 1024)
+                body = await read_all(response, 64 * 1024)
                 status = response.status
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             raise RokuError(f"The Roku didn't answer ({e.__class__.__name__})")
@@ -204,7 +204,7 @@ class Roku:
         try:
             async with self.session.post(self.device["base"] + path, data=b"",
                                          timeout=aiohttp.ClientTimeout(total=5)) as response:
-                body = await response.content.read(4096)
+                body = await read_all(response, 4096)
                 status = response.status
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             raise RokuError(f"The Roku didn't answer ({e.__class__.__name__})")

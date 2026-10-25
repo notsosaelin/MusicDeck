@@ -445,15 +445,14 @@ const nextSide = (kind: NowPlayingKind) => {
 // GamepadButton.TRIGGER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
 const R2 = 8;
 
-/** The panels beside the title (Lyrics, Queue; On air, Station...) as dots, the chosen one a white pill and its
- *  name beside them; the focused one lights up. R2 goes round them, or pressing one. */
+/** The panels beside the title (Lyrics, Queue; On air, Station...) as dots, the chosen one a white pill; the focused
+ *  one lights up, its name in the footer's hint. R2 goes round them, or pressing one. */
 const SideSwitch: FC<{ kind: NowPlayingKind; upNext: number }> = ({ kind, upNext }) => {
   const side = sideOf(kind, useStore(nowPlayingSide));
   const pick = (id: string) => nowPlayingSide.update({ [kind]: id });
   const name = (id: string, label: string) => (id === "queue" && upNext ? `${label} · ${upNext}` : label);
   return (
     <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-      <span style={{ fontSize: 13, fontWeight: 600, color: "#dcdedf", marginRight: 6 }}>{name(side.id, side.label)}</span>
       {PANELS[kind].map(({ id, label }) => (
         <Focusable
           key={id}

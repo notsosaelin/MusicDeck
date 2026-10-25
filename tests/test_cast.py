@@ -349,10 +349,7 @@ class FakeRoku:
 
     async def start(self):
         app = web.Application()
-        app.router.add_get("/query/device-info", lambda r: web.Response(
-            text="<device-info><serial-number>X123</serial-number><model-name>Roku Express</model-name>"
-                 "<user-device-name>Den &amp; Hall</user-device-name><is-tv>false</is-tv></device-info>",
-            content_type="text/xml"))
+        app.router.add_get("/query/device-info", self.device_info)
         app.router.add_get("/query/media-player", self.player)
         app.router.add_post("/{path:.*}", self.post)
         self.runner = web.AppRunner(app)
@@ -360,6 +357,16 @@ class FakeRoku:
         site = web.TCPSite(self.runner, "127.0.0.1", 0)
         await site.start()
         self.port = site._server.sockets[0].getsockname()[1]
+
+    async def device_info(self, request):
+        # in two pieces, a moment apart, as real Rokus' replies reach the Deck: read to the end, not just the first
+        response = web.StreamResponse(headers={"Content-Type": "text/xml"})
+        await response.prepare(request)
+        await response.write(b"<device-info><serial-number>X123</serial-number><model-name>Roku Express</model-name>")
+        await asyncio.sleep(0.2)
+        await response.write(b"<user-device-name>Den &amp; Hall</user-device-name><is-tv>false</is-tv></device-info>")
+        await response.write_eof()
+        return response
 
     async def player(self, request):
         if self.limited:

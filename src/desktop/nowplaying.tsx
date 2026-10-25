@@ -67,9 +67,8 @@ export const NowPlayingFull: FC = () => {
         <button className="md-np-hide" title="Leave Now Playing (Esc)" onClick={() => toggleFull(false)}>
           <FaChevronDown /> <span>Hide</span>
         </button>
-        {/* dots, the chosen one a white pill, its name beside them */}
+        {/* dots, the chosen one a white pill; their names on hover */}
         <div className="md-dots" role="tablist">
-          <span className="md-dots-label">{PANES.find(([id]) => id === pane)?.[1]}</span>
           {PANES.map(([id, label]) => (
             <button key={id} className="md-dot" role="tab" title={label} aria-label={label} aria-selected={pane === id}
                     data-on={pane === id ? "" : undefined} onClick={() => panel.set({ ...panel.get(), pane: id })}>
@@ -116,8 +115,7 @@ export const NOW_PLAYING_CSS = `
 .md-np-hide { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px 0 10px; border: none; border-radius: 16px;
   background: rgba(0,0,0,0.25); color: #dcdedf; font: inherit; font-size: 13px; cursor: pointer; }
 .md-np-hide:hover { background: rgba(0,0,0,0.45); color: #fff; }
-.md-dots { display: flex; align-items: center; height: 32px; padding: 0 10px 0 14px; border-radius: 16px; background: rgba(0,0,0,0.25); }
-.md-dots-label { font-size: 13px; color: #dcdedf; margin-right: 8px; }
+.md-dots { display: flex; align-items: center; height: 32px; padding: 0 8px; border-radius: 16px; background: rgba(0,0,0,0.25); }
 .md-dot { display: flex; align-items: center; height: 32px; padding: 0 4px; border: none; background: none; cursor: pointer; }
 .md-dot > span { display: block; width: 9px; height: 9px; border-radius: 5px; background: rgba(255,255,255,0.28);
   transition: width 0.22s ease, background 0.15s, transform 0.15s; }

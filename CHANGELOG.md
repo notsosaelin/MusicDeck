@@ -3,6 +3,20 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.35.1
+
+- **Rokus found on Linux** (the Deck) too: their answers reach Linux in pieces, and MusicDeck read only the first
+  piece, so every Roku looked broken and was left out. Replies are read to the end now; the same fix covers
+  speakers' and TVs' replies over UPnP, and the router's for Soulseek's port.
+- **The mini player**:
+  - Its window buttons over the cover are gone: right-click has them (Open Music, keep on top, close).
+  - Casting from the mini player: the same speakers and TVs as the main player, listed in the mini player's
+    window.
+  - In the card (the tall shape), the controls span the progress bar, shuffle and repeat right under its times.
+- Big Now Playing's dots have no name beside them any more (it said "Lyrics" for songs without any); each says
+  what it is on hover, and in Game Mode in the footer.
+- Casting's list says "This PC" on Windows rather than "This Deck".
+
 ## 0.35.0
 
 - **The mini player, redone properly**:

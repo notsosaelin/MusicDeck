@@ -62,6 +62,18 @@ class Element:
             yield from child.iter()
 
 
+async def read_all(response: aiohttp.ClientResponse, limit: int) -> bytes:
+    """A reply's body to its end, but no more than limit + 1 bytes (so too large can be told apart).
+    content.read(n) would hand back only what has arrived so far: a reply that comes in several pieces (as
+    they do on the Deck) would be cut short and read as broken."""
+    data = bytearray()
+    async for chunk in response.content.iter_chunked(16 * 1024):
+        data += chunk
+        if len(data) > limit:
+            break
+    return bytes(data[: limit + 1])
+
+
 def _xml(text: bytes) -> Element:
     if len(text) > MAX_XML:
         raise UpnpError("The device's reply was too large")
@@ -117,7 +129,7 @@ async def describe(session: aiohttp.ClientSession, location: str, answered_from:
         return None
     try:
         async with session.get(location, timeout=aiohttp.ClientTimeout(total=4)) as response:
-            root = _xml(await response.content.read(MAX_XML + 1))
+            root = _xml(await read_all(response, MAX_XML))
     except (aiohttp.ClientError, asyncio.TimeoutError, UpnpError):
         return None
     device = next((e for e in root.iter() if _local(e.tag) == "device"), None)
@@ -360,7 +372,7 @@ class Renderer:
         try:
             async with self.session.post(url, data=envelope.encode(), headers=headers,
                                          timeout=aiohttp.ClientTimeout(total=5)) as response:
-                text = await response.content.read(MAX_XML + 1)
+                text = await read_all(response, MAX_XML)
                 status = response.status
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             raise UpnpError(f"The device didn't answer ({e.__class__.__name__})")

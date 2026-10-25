@@ -34,7 +34,15 @@ export function prepareCastMenu() {
   if (!found || Date.now() - found.at > FRESH_MS) void search();
 }
 
-const choose = async (device: CastDevice | null) => {
+/** What "here" is called: this Deck (or handheld), or this PC on Windows. */
+export const thisDevice = () => (pluginState.get()?.platform?.startsWith("windows") ? "This PC" : "This Deck");
+
+/** The devices to offer: the ones found lately, or once a search for them finishes. */
+export const castChoices = (): Promise<Result<CastDevice[]>> =>
+  found && Date.now() - found.at <= FRESH_MS ? Promise.resolve(found.result) : search();
+
+/** Plays on `device`, or back here (null); a failure is said. */
+export const chooseCast = async (device: CastDevice | null) => {
   if (!device) return player.stopCasting();
   const error = await player.castTo(device);
   if (error) notify(`Couldn't play on ${device.name}`, error, player.current);
@@ -50,10 +58,10 @@ const CastMenu: FC<{ result: Result<CastDevice[]> }> = ({ result }) => {
   const mark = (on: boolean) => (on ? "✓ " : "");
   return (
     <Menu label="Play on">
-      <MenuItem onSelected={() => choose(null)}>{mark(!castingTo)}This Deck</MenuItem>
+      <MenuItem onSelected={() => chooseCast(null)}>{mark(!castingTo)}{thisDevice()}</MenuItem>
       {result.ok &&
         result.data.map((d) => (
-          <MenuItem key={d.id} onSelected={() => choose(d)}>
+          <MenuItem key={d.id} onSelected={() => chooseCast(d)}>
             {mark(castingTo?.name === d.name)}
             {d.name}
           </MenuItem>
@@ -66,6 +74,5 @@ const CastMenu: FC<{ result: Result<CastDevice[]> }> = ({ result }) => {
 
 /** Opens Play on: at once with the devices found lately, or once a search for them finishes. */
 export async function showCastMenu(parent?: EventTarget | null) {
-  const result = found && Date.now() - found.at <= FRESH_MS ? found.result : await search();
-  showContextMenu(<CastMenu result={result} />, parent ?? window);
+  showContextMenu(<CastMenu result={await castChoices()} />, parent ?? window);
 }

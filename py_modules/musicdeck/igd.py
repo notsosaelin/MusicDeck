@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
-from .cast.upnp import SSDP, UpnpError, _local, _Searcher, _xml
+from .cast.upnp import SSDP, UpnpError, _local, _Searcher, _xml, read_all
 
 IGD = "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
 SERVICES = ("urn:schemas-upnp-org:service:WANIPConnection:1", "urn:schemas-upnp-org:service:WANIPConnection:2",
@@ -61,7 +61,7 @@ class PortMapping:
                 continue
             try:
                 async with self.session.get(location, timeout=aiohttp.ClientTimeout(total=4)) as resp:
-                    root = _xml(await resp.content.read(MAX_DESCRIPTION + 1))
+                    root = _xml(await read_all(resp, MAX_DESCRIPTION))
             except (aiohttp.ClientError, asyncio.TimeoutError, UpnpError):
                 continue
             for service in root.iter():

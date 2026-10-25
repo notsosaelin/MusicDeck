@@ -16,8 +16,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   big Now Playing: the cover over a blur of itself, beside its synced lyrics, what's up next, or alone, with
   a visualizer. Leave Music while it plays and a mini player window takes over: dragged anywhere, sized at
   will in three shapes it settles into so the cover always shows whole (a square the cover fills, the
-  controls over it on hover; a card with the song below the cover; or a strip), with its volume a click
-  away, kept on top if you like (right-click it, or "..." in the strip), and opened by hand from the player too. Dialogs resize like any window. Also on the
+  controls over it on hover; a card with the song below the cover; or a strip), with casting and its volume
+  a click away, its window's options (Open Music, keep on top, close) on right-click, and opened by hand from
+  the player too. Dialogs resize like any window. Also on the
   desktop: smart playlists (Local files' songs picked by rules, as iTunes's are), Get Info for several songs
   at once, dragging songs onto a playlist or a device in the sidebar (and music files from your desktop into
   Local files), a device's capacity at a glance, keyboard shortcuts, media keys and the system's media
