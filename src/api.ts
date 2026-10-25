@@ -564,7 +564,7 @@ export interface CastDevice {
   id: string;
   name: string;
   model: string;
-  kind: "chromecast" | "upnp";
+  kind: "chromecast" | "upnp" | "roku";
 }
 
 export interface CastSession {

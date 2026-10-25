@@ -15,8 +15,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   place, then lyrics, queue, casting, volume; the equalizer and settings under **...**). Click the cover for a
   big Now Playing: the cover over a blur of itself, beside its synced lyrics, what's up next, or alone, with
   a visualizer. Leave Music while it plays and a mini player window takes over: dragged anywhere, sized at
-  will (the cover filling it, with the controls on hover; or a strip of cover, names and controls), kept on
-  top if you like, and opened by hand from the player too. Dialogs resize like any window. Also on the
+  will in three shapes it settles into so the cover always shows whole (a square the cover fills, the
+  controls over it on hover; a card with the song below the cover; or a strip), with its volume a click
+  away, kept on top if you like (right-click it, or "..." in the strip), and opened by hand from the player too. Dialogs resize like any window. Also on the
   desktop: smart playlists (Local files' songs picked by rules, as iTunes's are), Get Info for several songs
   at once, dragging songs onto a playlist or a device in the sidebar (and music files from your desktop into
   Local files), a device's capacity at a glance, keyboard shortcuts, media keys and the system's media
@@ -77,8 +78,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
   Live Music Archive its setlist and recording notes.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
-- **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, plus UPnP/DLNA
-  devices (Sonos, AV receivers, smart TVs). The speaker fetches the music itself; the queue, play reports and
+- **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, UPnP/DLNA
+  devices (Sonos, AV receivers, smart TVs, an Xbox's Media Player) and Rokus. The speaker fetches the music itself; the queue, play reports and
   controls stay on the Deck.
 - **Jump back in:** each source's home starts with the albums and playlists you played last, and an empty
   search shows your recent searches.
@@ -224,8 +225,12 @@ volume slider then sets the device's volume and shows its name. The equalizer, v
 crossfade only apply on the Deck. Spotify can't be cast from MusicDeck (use Spotify Connect); TVs and
 receivers get CD quality from Qobuz, and AAC rather than Opus from YouTube. UPnP renderers can't play
 HLS streams (some radio stations, SoundCloud, TIDAL). Renderers get the title, artist, album and cover
-with each song (DIDL-Lite with DLNA profiles), as Windows Media Player on an Xbox expects. On desktop
-Steam, the cast button is in the player along the bottom.
+with each song (DIDL-Lite with DLNA profiles); an Xbox's Media Player plays but doesn't show them yet.
+Rokus play through Roku's own player, with the title, artist and cover on screen, but can't jump within a
+song or have their volume set from MusicDeck; a Roku has to allow it first (on the Roku: Settings > System >
+Advanced system settings > Control by mobile apps > Network access: Default or Permissive). Devices are
+looked for on every network the computer is on (a PC's WSL, Hyper-V or VPN adapters hid them before). On
+desktop Steam, the cast button is in the player along the bottom.
 
 **Game music:** with a game running, open an album or playlist in MusicDeck and press the gamepad button
 next to Play (or choose "Play when … starts" from a row's options). From then on it plays whenever that

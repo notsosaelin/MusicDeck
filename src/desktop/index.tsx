@@ -14,13 +14,14 @@ import { followDialogs } from "./dialog";
 import { installDesktopLookup } from "./identify";
 import { catchDrops, loadSmart } from "./manage";
 import { SoundtrackButton, TabMenu, currentRoute, shortcuts, showEqualizer, showSettings } from "./polish";
-import { BASE_CSS, MiniPlayer, MusicView } from "./views";
+import { BASE_CSS, MusicView } from "./views";
+import { MINI_SMALLEST, MiniPlayer, miniShape } from "./mini";
 import { Root, TopNav, UI_MODE_DESKTOP, contentBounds, createRoot, findTopNav, fontFaces, mainWindow, pageBackground } from "./steamui";
 
 /** how often the main window and its navigation are looked for (Steam draws them after it starts) */
 const CHECK_MS = 1500;
 /** its first size (the art, as Spotify's mini player opens), and the smallest: a strip of cover, names and controls */
-const MINI = { width: 300, height: 300, minWidth: 220, minHeight: 72 };
+const MINI = { width: 300, height: 300, minWidth: MINI_SMALLEST.width, minHeight: MINI_SMALLEST.height };
 const MINI_PLACE = "musicdeck:mini-player";
 const MINI_PIN = "musicdeck:mini-player-on-top";
 // Steam's popup creation flags (EPopupCreationFlags, read from its own code): its main window's 274 is
@@ -107,7 +108,13 @@ class MiniWindow {
     let resized = 0;
     win.addEventListener("resize", () => {
       win.clearTimeout(resized);
-      resized = win.setTimeout(() => this.remember(win), 400);
+      resized = win.setTimeout(() => {
+        // let go at a size that would crop the cover: it settles on the nearest whole one (miniShape)
+        const [w, h] = miniShape(win.innerWidth, win.innerHeight);
+        if (Math.abs(w - win.innerWidth) > 2 || Math.abs(h - win.innerHeight) > 2)
+          (win as any).SteamClient?.Window?.ResizeTo(w, h, true);
+        else this.remember(win);
+      }, 500);
     });
     // closed some other way (the taskbar, Alt+F4): the user's choice too
     win.addEventListener("beforeunload", () => {

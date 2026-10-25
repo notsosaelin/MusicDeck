@@ -29,6 +29,7 @@ import {
   onDevice,
   burnPlan,
   burnCd,
+  openCollection,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
 import { notify } from "../notify";
@@ -64,21 +65,22 @@ export async function toggleStar(instanceId: string, track: Track) {
   notify(starred ? words.added : words.removed, track.title, { instanceId, track });
 }
 
-/** A new playlist with the track in it: on the source when it keeps playlists, else MusicDeck's own. */
-function newPlaylist(item: Item, server: boolean) {
+/** A new playlist with the tracks in it: on the source when it keeps playlists, else MusicDeck's own. */
+function newPlaylist(instanceId: string, tracks: Track[], what: string, server: boolean) {
+  const item = { instanceId, track: tracks[0] };
   showModal(
     <NameModal
       title="New playlist"
       action="Create"
       onSubmit={async (name) => {
         if (server) {
-          const made = await createServicePlaylist(item.instanceId, name, [item.track.id]);
+          const made = await createServicePlaylist(instanceId, name, tracks.map((t) => t.id));
           if (!made.ok) return notify("Couldn't make the playlist", made.error, item);
         } else {
-          await createPlaylist(item.instanceId, name, [item.track]);
+          await createPlaylist(instanceId, name, tracks);
         }
         invalidateBrowserCache();
-        notify(`Added to ${name}`, item.track.title, item);
+        notify(`Added to ${name}`, what, item);
       }}
     />,
   );
@@ -88,36 +90,43 @@ function newPlaylist(item: Item, server: boolean) {
  * Sources with server-side playlists (Navidrome) add there; everything else uses MusicDeck's own
  * playlists, kept on the device.
  */
-export async function showPlaylistPicker(item: Item, parent: EventTarget) {
-  const server = hasFeature(item.instanceId, "playlists");
+export function showPlaylistPicker(item: Item, parent: EventTarget) {
+  return pickPlaylistFor(item.instanceId, [item.track], item.track.title, parent);
+}
+
+/** The playlist picker for several tracks at once (an album's, a playlist's); `what` names them in the toast. */
+export async function pickPlaylistFor(instanceId: string, tracks: Track[], what: string, parent: EventTarget) {
+  if (!tracks.length) return;
+  const item = { instanceId, track: tracks[0] };
+  const server = hasFeature(instanceId, "playlists");
   let playlists: Collection[];
   if (server) {
-    const r = await getUserPlaylists(item.instanceId);
+    const r = await getUserPlaylists(instanceId);
     if (!r.ok) {
       notify("Couldn't load playlists", r.error, item);
       return;
     }
     playlists = r.data;
   } else {
-    playlists = await localPlaylists(item.instanceId);
+    playlists = await localPlaylists(instanceId);
   }
   showContextMenu(
     <Menu label="Add to playlist">
-      <MenuItem onSelected={() => newPlaylist(item, server)}>New playlist</MenuItem>
+      <MenuItem onSelected={() => newPlaylist(instanceId, tracks, what, server)}>New playlist</MenuItem>
       {playlists.length > 0 && <MenuSeparator />}
       {playlists.map((p) => (
         <MenuItem
           key={p.id}
           onSelected={async () => {
             if (server) {
-              const res = await addToPlaylist(item.instanceId, p.id, [item.track.id]);
+              const res = await addToPlaylist(instanceId, p.id, tracks.map((t) => t.id));
               if (!res.ok) return notify("Couldn't add to playlist", res.error, item);
             } else {
-              const added = await playlistAdd(p.id, [item.track]);
-              if (!added) return notify(`Already in ${p.title}`, item.track.title, item);
+              const added = await playlistAdd(p.id, tracks);
+              if (!added) return notify(`Already in ${p.title}`, what, item);
             }
             invalidateBrowserCache();
-            notify(`Added to ${p.title}`, item.track.title, item);
+            notify(`Added to ${p.title}`, what, item);
           }}
         >
           {p.title}
@@ -126,6 +135,39 @@ export async function showPlaylistPicker(item: Item, parent: EventTarget) {
     </Menu>,
     parent,
   );
+}
+
+/** What anything you can play (an album, a playlist) offers whatever the source: its songs after this one, at
+ *  the end of the queue, or into a playlist. They're fetched when chosen. */
+function playItems(instanceId: string, c: Collection, target: EventTarget) {
+  const tracks = async () => {
+    const r = await openCollection(instanceId, c.kind, c.id);
+    if (!r.ok) notify("Couldn't open it", r.error);
+    return r.ok ? r.data.tracks : [];
+  };
+  return [
+    <MenuItem key="next" onSelected={async () => {
+      const t = await tracks();
+      if (t.length) {
+        player.enqueue(instanceId, t, true);
+        notify("Playing next", c.title);
+      }
+    }}>
+      Play next
+    </MenuItem>,
+    <MenuItem key="queue" onSelected={async () => {
+      const t = await tracks();
+      if (t.length) {
+        player.enqueue(instanceId, t);
+        notify("Added to queue", c.title);
+      }
+    }}>
+      Add to queue
+    </MenuItem>,
+    <MenuItem key="playlist" onSelected={async () => pickPlaylistFor(instanceId, await tracks(), c.title, target)}>
+      Add to playlist
+    </MenuItem>,
+  ];
 }
 
 /** Episodes and books: "Played" shows in their second line (see podcasts.py), and lists refresh. */
@@ -556,6 +598,8 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
   if (isLocalPlaylist(c.id)) {
     showContextMenu(
       <Menu label={c.title}>
+        {playItems(instanceId, c, target)}
+        <MenuSeparator />
         {gameMusicItem(instanceId, c)}
         <MenuItem
           onSelected={() =>
@@ -631,15 +675,20 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
     return;
   }
   if (c.kind === "playlist" || c.kind === "album") {
-    const show = (manage: ReactNode[]) =>
+    const show = (manage: ReactNode[]) => {
+      // the rest, each only where it applies; a separator only between what's there
+      const more = [
+        gameMusicItem(instanceId, c),
+        !hasFeature(instanceId, "playlists") && (
+          <MenuItem key="save" onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
+        ),
+        ...[copyItems(instanceId, c.kind, c.id), burnItems(instanceId, c.kind, c.id)].flat(),
+      ].filter(Boolean);
       showContextMenu(
         <Menu label={c.title}>
-          {gameMusicItem(instanceId, c)}
-          {!hasFeature(instanceId, "playlists") && (
-            <MenuItem onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
-          )}
-          {copyItems(instanceId, c.kind, c.id)}
-          {burnItems(instanceId, c.kind, c.id)}
+          {playItems(instanceId, c, target)}
+          {more.length > 0 && <MenuSeparator />}
+          {more}
           {manage.length > 0 && <MenuSeparator />}
           {manage}
           {canDelete(instanceId, c) && <MenuSeparator />}
@@ -647,6 +696,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
         </Menu>,
         target,
       );
+    };
     // a local album: its tags and picture too (whether it has a picture of its own decides "Use the files'")
     if (
       c.kind === "album" &&

@@ -67,11 +67,13 @@ export const NowPlayingFull: FC = () => {
         <button className="md-np-hide" title="Leave Now Playing (Esc)" onClick={() => toggleFull(false)}>
           <FaChevronDown /> <span>Hide</span>
         </button>
-        <div className="md-np-tabs" role="tablist">
+        {/* dots, the chosen one a white pill, its name beside them */}
+        <div className="md-dots" role="tablist">
+          <span className="md-dots-label">{PANES.find(([id]) => id === pane)?.[1]}</span>
           {PANES.map(([id, label]) => (
-            <button key={id} role="tab" aria-selected={pane === id} data-on={pane === id ? "" : undefined}
-                    onClick={() => panel.set({ ...panel.get(), pane: id })}>
-              {label}
+            <button key={id} className="md-dot" role="tab" title={label} aria-label={label} aria-selected={pane === id}
+                    data-on={pane === id ? "" : undefined} onClick={() => panel.set({ ...panel.get(), pane: id })}>
+              <span />
             </button>
           ))}
         </div>
@@ -114,11 +116,14 @@ export const NOW_PLAYING_CSS = `
 .md-np-hide { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px 0 10px; border: none; border-radius: 16px;
   background: rgba(0,0,0,0.25); color: #dcdedf; font: inherit; font-size: 13px; cursor: pointer; }
 .md-np-hide:hover { background: rgba(0,0,0,0.45); color: #fff; }
-.md-np-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 18px; background: rgba(0,0,0,0.3); }
-.md-np-tabs button { border: none; background: none; color: #b8bcbf; height: 30px; padding: 0 16px; border-radius: 15px;
-  font: inherit; font-size: 13px; cursor: pointer; }
-.md-np-tabs button:hover { color: #fff; }
-.md-np-tabs button[data-on] { background: #fff; color: #10141a; font-weight: 600; }
+.md-dots { display: flex; align-items: center; height: 32px; padding: 0 10px 0 14px; border-radius: 16px; background: rgba(0,0,0,0.25); }
+.md-dots-label { font-size: 13px; color: #dcdedf; margin-right: 8px; }
+.md-dot { display: flex; align-items: center; height: 32px; padding: 0 4px; border: none; background: none; cursor: pointer; }
+.md-dot > span { display: block; width: 9px; height: 9px; border-radius: 5px; background: rgba(255,255,255,0.28);
+  transition: width 0.22s ease, background 0.15s, transform 0.15s; }
+.md-dot:hover > span, .md-dot:focus-visible > span { background: rgba(255,255,255,0.65); transform: scale(1.15); }
+.md-dot[data-on] > span { width: 26px; background: #fff; transform: none; }
+.md-dot:focus { outline: none; }
 .md-np-body { flex: 1; min-height: 0; display: flex; gap: clamp(32px, 5vw, 80px); padding: 20px clamp(28px, 5vw, 80px) 28px;
   box-sizing: border-box; container-type: size; }
 .md-np[data-pane="art"] .md-np-body { justify-content: center; }
@@ -136,7 +141,8 @@ export const NOW_PLAYING_CSS = `
 .md-np-dot { flex-shrink: 0; }
 .md-np-vis { margin-top: 18px; opacity: 0.8; height: 28px; }
 .md-np-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; max-width: 760px; }
-.md-np-scroll { flex: 1; overflow-y: auto; padding: 8px 16px 0 0; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent;
-  mask-image: linear-gradient(to bottom, #000 0, #000 88%, transparent 100%); }
+/* a short fade at the foot only, and room after the last line to scroll it clear of the fade */
+.md-np-scroll { flex: 1; overflow-y: auto; padding: 8px 16px 48px 0; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent;
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 32px), transparent 100%); }
 @container (max-height: 520px) { .md-np-vis { display: none; } .md-np-title { margin-top: 14px; } }
 `;

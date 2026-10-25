@@ -19,7 +19,8 @@ let volumeSave = 0;
 /** the volume before muting, for unmuting */
 let unmuted = 1;
 
-const setVolume = (v: number) => {
+/** the player's volume, kept in the settings once it stops changing */
+export const setVolume = (v: number) => {
   player.setVolume(v);
   window.clearTimeout(volumeSave);
   volumeSave = window.setTimeout(() => setSetting("volume", v).catch(() => {}), 1000);

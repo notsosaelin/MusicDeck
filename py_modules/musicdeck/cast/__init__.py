@@ -6,8 +6,9 @@ audio element is swapped for one that forwards to this module (src/cast.ts). The
 each track itself from the stream server's home-network site (StreamServer.open_lan), so the
 Deck only relays bytes, and its EQ, levelling and crossfade don't apply.
 
-Two kinds of device: Google Cast (castv2.py; Chromecast, Google/Nest speakers, TVs and soundbars
-with Cast) and UPnP/DLNA renderers (upnp.py; Sonos, AV receivers, smart TVs). Both report
+Three kinds of device: Google Cast (castv2.py; Chromecast, Google/Nest speakers, TVs and soundbars
+with Cast), UPnP/DLNA renderers (upnp.py; Sonos, AV receivers, smart TVs, an Xbox's Media Player) and
+Rokus (roku.py; Roku players and Roku TVs, through Play on Roku). All report
 {"state": "playing"|"paused"|"buffering"|"idle", "position", "duration"?, "ended"?, "error"?},
 passed on to the frontend as "cast_status" events; {"gone": reason} means the session ended
 without the user ending it (the device went away, or something else started playing on it).
@@ -19,15 +20,18 @@ import aiohttp
 
 from .. import debuglog
 from ..services import MusicService, ServiceError
-from . import mdns, upnp
+from . import mdns, roku, upnp
 from .castv2 import CastError, Chromecast
+from .roku import Roku, RokuError
 from .upnp import Renderer, UpnpError
 
 GOOGLECAST = "_googlecast._tcp.local"
 SEARCH_SECONDS = 2.5
 CONTROLS = {"play", "pause", "seek", "stop", "volume"}
 
-Device = Union[Chromecast, Renderer]
+Device = Union[Chromecast, Renderer, Roku]
+# kinds that fetch a plain file (no HLS) in a format they list: given the compatible stream
+PLAIN = {"upnp", "roku"}
 
 
 class CastManager:
@@ -49,8 +53,8 @@ class CastManager:
 
     async def search(self) -> list[dict]:
         """Devices on the network, by name: [{"id", "name", "model", "kind"}]."""
-        casts, renderers = await asyncio.gather(mdns.browse(GOOGLECAST, SEARCH_SECONDS),
-                                                upnp.search(SEARCH_SECONDS), return_exceptions=True)
+        casts, renderers, rokus = await asyncio.gather(mdns.browse(GOOGLECAST, SEARCH_SECONDS), upnp.search(SEARCH_SECONDS),
+                                                       roku.search(SEARCH_SECONDS), return_exceptions=True)
         found: dict[str, dict] = {}
         for entry in casts if isinstance(casts, list) else []:
             txt = entry.get("txt") or {}
@@ -66,7 +70,14 @@ class CastManager:
                 # a device that does both is better driven over Cast
                 if device and device["host"] not in cast_hosts:
                     found[device["id"]] = {**device, "kind": "upnp"}
-        for error in (casts, renderers):
+        if isinstance(rokus, dict):
+            # a Roku TV with Cast or DLNA too is better driven over those (volume, seeking)
+            taken = {d["host"] for d in found.values()}
+            described_rokus = await asyncio.gather(*(roku.describe(self.http, host, base) for host, base in rokus.items()))
+            for device in described_rokus:
+                if device and device["host"] not in taken:
+                    found[device["id"]] = {**device, "kind": "roku"}
+        for error in (casts, renderers, rokus):
             if isinstance(error, BaseException):
                 debuglog.debug("cast", "search failed", error=repr(error))
         if self.info:
@@ -90,13 +101,15 @@ class CastManager:
             on_gone = lambda reason: mine[0] is self.device and self._gone(reason)  # noqa: E731
             if info["kind"] == "chromecast":
                 device: Device = Chromecast(info["host"], info["port"], on_status, on_gone)
+            elif info["kind"] == "roku":
+                device = Roku(info, self.http, on_status, on_gone)
             else:
                 device = Renderer(info, self.http, on_status, on_gone)
             mine.append(device)
             try:
                 await device.connect()
                 await self.server.open_lan(info["host"])
-            except (CastError, UpnpError, OSError) as e:
+            except (CastError, UpnpError, RokuError, OSError) as e:
                 await device.close(stop_player=False)
                 await self.server.close_lan()
                 raise ServiceError(str(e) or "Couldn't connect to the device")
@@ -126,8 +139,8 @@ class CastManager:
             raise ServiceError("Bad track")
         async with self.lock:
             device = self._connected()
-            link = await self.server.cast_link(instance_id, track_id, art, compatible=device.kind == "upnp")
-            if link["hls"] and device.kind == "upnp":
+            link = await self.server.cast_link(instance_id, track_id, art, compatible=device.kind in PLAIN)
+            if link["hls"] and device.kind in PLAIN:
                 raise ServiceError("This device can't play this kind of stream")
             meta = {"title": _text(track.get("title")), "artist": _text(track.get("artist")),
                     "album": _text(track.get("album")), "art": link["art"], "segments": link["segments"],
@@ -136,7 +149,7 @@ class CastManager:
             try:
                 await device.load(link["url"], link["type"], meta, float(start or 0), bool(autoplay),
                                   bool(track.get("live")))
-            except (CastError, UpnpError) as e:
+            except (CastError, UpnpError, RokuError) as e:
                 raise ServiceError(str(e))
 
     async def control(self, action: str, value: Optional[float] = None) -> None:
@@ -154,7 +167,7 @@ class CastManager:
                     await device.set_volume(float(value))  # type: ignore[arg-type]
                 else:
                     await getattr(device, action)()
-            except (CastError, UpnpError) as e:
+            except (CastError, UpnpError, RokuError) as e:
                 raise ServiceError(str(e))
 
     def _connected(self) -> Device:

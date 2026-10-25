@@ -32,6 +32,13 @@ export const CENTER_CSS =
 .mc-pill { outline: none; transition: background 0.12s; }
 .mc-pill.gpfocus:not(.mc-on), .mc-pill:hover:not(.mc-on) { background: rgba(255, 255, 255, 0.24) !important; }
 .mc-pill.gpfocus.mc-on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+/* the panel switch beside the title: dull dots, the chosen one a white pill; the focused one lights up */
+.mc-dot { display: flex; align-items: center; height: 28px; padding: 0 4px; outline: none; }
+.mc-dot > span { display: block; width: 9px; height: 9px; border-radius: 5px; background: rgba(255, 255, 255, 0.28);
+  transition: width 0.22s ease, background 0.15s, transform 0.15s; }
+.mc-dot.gpfocus > span, .mc-dot:hover > span { background: rgba(255, 255, 255, 0.7); transform: scale(1.25); }
+.mc-dot.mc-on > span { width: 26px; background: #fff; transform: none; }
+.mc-dot.gpfocus.mc-on > span { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
 /* a line of text to rest on while reading (show notes, a station's details): barely marked */
 .mc-line { border-radius: 4px; outline: none; scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
 .mc-line.gpfocus { background: rgba(255, 255, 255, 0.06); }

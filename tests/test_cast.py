@@ -22,7 +22,7 @@ import logging  # noqa: E402
 import aiohttp  # noqa: E402
 from aiohttp import web  # noqa: E402
 
-from musicdeck.cast import CastManager, castv2, mdns, upnp  # noqa: E402
+from musicdeck.cast import CastManager, castv2, mdns, netif, roku, upnp  # noqa: E402
 from musicdeck.server import StreamServer, _b64  # noqa: E402
 from musicdeck.services import MusicService, ServiceError, StreamSource  # noqa: E402
 
@@ -71,6 +71,41 @@ def mdns_tests():
         check(True, "a name that points at itself is refused")
     check(mdns.parse(struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + service + b"\0\x0c\0\x01") == [],
           "queries (others browsing) are ignored")
+
+
+async def netif_tests():
+    """Discovery goes out of every network the computer is on (a PC's default multicast interface is often a
+    virtual adapter: WSL, Hyper-V, a VPN), and every answer lands in the one protocol."""
+    print("netif")
+    addresses = netif.local_addresses()
+    check(all(not a.startswith(("127.", "169.254.")) for a in addresses),
+          f"loopback and link-local addresses aren't sent from: {addresses}")
+
+    class Answers(asyncio.DatagramProtocol):
+        def __init__(self):
+            self.got = []
+
+        def datagram_received(self, data, addr):
+            self.got.append(data)
+
+    loop = asyncio.get_running_loop()
+    echo_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    echo_sock.bind(("127.0.0.1", 0))
+
+    class Echo(asyncio.DatagramProtocol):
+        def connection_made(self, transport):
+            self.transport = transport
+
+        def datagram_received(self, data, addr):
+            self.transport.sendto(b"answer:" + data, addr)
+
+    echo, _ = await loop.create_datagram_endpoint(Echo, sock=echo_sock)
+    try:
+        shared = await netif.send_everywhere(Answers, b"hello", echo_sock.getsockname(), times=2, seconds=0.4, ttl=1)
+    finally:
+        echo.close()
+    check(isinstance(shared, Answers) and b"answer:hello" in shared.got,
+          f"answers to the query come back to the one protocol: {shared.got}")
 
 
 # --- a fake Chromecast ---
@@ -303,6 +338,99 @@ async def upnp_tests(http):
 
 # --- the stream server's home-network site, and the manager ---
 
+# --- a fake Roku (External Control Protocol) ---
+
+class FakeRoku:
+    def __init__(self, limited=False):
+        self.limited = limited
+        self.posts: list[str] = []
+        self.state = "close"
+        self.plugin = ""
+
+    async def start(self):
+        app = web.Application()
+        app.router.add_get("/query/device-info", lambda r: web.Response(
+            text="<device-info><serial-number>X123</serial-number><model-name>Roku Express</model-name>"
+                 "<user-device-name>Den &amp; Hall</user-device-name><is-tv>false</is-tv></device-info>",
+            content_type="text/xml"))
+        app.router.add_get("/query/media-player", self.player)
+        app.router.add_post("/{path:.*}", self.post)
+        self.runner = web.AppRunner(app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await site.start()
+        self.port = site._server.sockets[0].getsockname()[1]
+
+    async def player(self, request):
+        if self.limited:
+            return web.Response(status=403, text="ECP command not allowed in Limited mode.")
+        plugin = f'<plugin id="{self.plugin}" name="x"/>' if self.plugin else ""
+        return web.Response(text=f'<player error="false" state="{self.state}">{plugin}'
+                                 f"<position>65000 ms</position><duration>200000 ms</duration></player>",
+                            content_type="text/xml")
+
+    async def post(self, request):
+        if self.limited:
+            return web.Response(status=403, text="ECP command not allowed in Limited mode.")
+        self.posts.append(request.path_qs)
+        if request.path.startswith("/launch/15985"):
+            self.state, self.plugin = "play", "15985"
+        elif request.path == "/keypress/Play":
+            self.state = "pause" if self.state == "play" else "play"
+        return web.Response(text="")
+
+
+async def roku_tests(http):
+    print("roku")
+    fake = FakeRoku()
+    await fake.start()
+    base = f"http://127.0.0.1:{fake.port}/"
+    device = await roku.describe(http, "127.0.0.1", base)
+    check(device and device["id"] == "roku:X123" and device["name"] == "Den & Hall" and device["model"] == "Roku Express",
+          f"a Roku's device info gives its name and model: {device}")
+    check(await roku.describe(http, "10.9.9.9", base) is None, "device info not on the Roku that answered is ignored")
+    statuses = []
+    gone = []
+    r = roku.Roku(device, http, statuses.append, gone.append)
+    await r.connect()
+    await r.load("http://deck:1/c/x?k=1&b=2", "audio/flac", {"title": "Song & Co", "artist": "A", "album": "B",
+                                                              "art": "http://deck:1/art/1"}, 0, True, False)
+    launch = next(p for p in fake.posts if p.startswith("/launch/15985"))
+    from urllib.parse import parse_qs, urlparse as up
+    q = {k: v[0] for k, v in parse_qs(up(launch).query).items()}
+    check(q.get("t") == "a" and q.get("u") == "http://deck:1/c/x?k=1&b=2" and q.get("songFormat") == "flac"
+          and q.get("songName") == "Song & Co" and q.get("artistName") == "A" and q.get("albumArtUrl") == "http://deck:1/art/1",
+          f"a track goes to Play on Roku with its address, format, title, artist and cover: {q}")
+    await r.pause()
+    check(fake.posts[-1] == "/keypress/Play" and fake.state == "pause", "pause presses Play while it plays")
+    presses = len(fake.posts)
+    await r.pause()
+    check(len(fake.posts) == presses, "pausing what's already paused presses nothing (Play is a toggle)")
+    await r.play()
+    check(fake.state == "play", "play presses Play while it's paused")
+    check(await until(lambda: statuses and statuses[-1].get("position") == 65 and statuses[-1].get("duration") == 200),
+          f"its position and length are reported: {statuses[-1:]}")
+    try:
+        await r.load("http://deck:1/c/y", "audio/ogg", {"title": "x"}, 0, True, False)
+        check(False, "a format Play on Roku doesn't take is refused")
+    except roku.RokuError:
+        check(True, "a format Play on Roku doesn't take is refused")
+    fake.plugin = "12"
+    check(await until(lambda: gone), "another app taking over the Roku ends the session")
+    await r.close(stop_player=False)
+    await fake.runner.cleanup()
+
+    limited = FakeRoku(limited=True)
+    await limited.start()
+    lr = roku.Roku({**device, "base": f"http://127.0.0.1:{limited.port}/"}, http, lambda s: None, lambda g: None)
+    try:
+        await lr.connect()
+        check(False, "a Roku in Limited mode is an error")
+    except roku.RokuError as e:
+        check("Control by mobile apps" in str(e), f"a Roku in Limited mode says which setting to change: {e}")
+    await limited.runner.cleanup()
+
+
 class FakeSource(MusicService):
     type = "fake"
     display_name = "Fake"
@@ -517,6 +645,7 @@ def decky_python_tests():
 async def run():
     decky_python_tests()
     mdns_tests()
+    await netif_tests()
     await castv2_tests()
     tmp = tempfile.mkdtemp(prefix="musicdeck-cast-")
     path = os.path.join(tmp, "a.wav")
@@ -527,6 +656,7 @@ async def run():
         w.writeframes(b"\0\0" * 800)
     async with aiohttp.ClientSession() as http:
         await upnp_tests(http)
+        await roku_tests(http)
         await lan_tests(http, path)
         await manager_tests(http, path)
     print("all cast checks passed")

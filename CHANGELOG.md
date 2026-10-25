@@ -3,6 +3,34 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.35.0
+
+- **The mini player, redone properly**:
+  - Its window settles into one of three shapes when you let go of its edge, so the cover always shows whole:
+    a square the cover fills, a card with the song below the cover, or a strip.
+  - A real progress bar, inset and rounded with the times either side (a thin line across the cover at rest
+    in the square), instead of a line stuck to the window's edge.
+  - The controls evenly spaced (each in a slot of one width), with shuffle and repeat either side of play.
+  - Volume is a button that opens its slider (with mute and the percentage); in a strip the slider takes the
+    controls' place for a moment rather than covering anything. The wheel over the player still sets it.
+  - The window's options (Open Music, keep on top, close) on right-click, and under "..." in the strip, where
+    on hover they covered the controls.
+- **Casting from Windows finds devices**: discovery now asks on every network the PC is on. Before, the
+  question went out of one adapter of Windows' choosing, often WSL's, Hyper-V's or a VPN's, and nothing
+  answered.
+- **Rokus**: Roku players and Roku TVs show up to cast to, and play through Roku's own player with the song's
+  title, artist and cover on screen. A Roku has to allow it first; one that doesn't says where to change it
+  (Settings > System > Advanced system settings > Control by mobile apps). They can't jump within a song or
+  have their volume set from here.
+- **Albums' and playlists' "..." menu** was empty for some sources (a small blue square): it always offers
+  Play next, Add to queue and Add to playlist now, in desktop Steam and in Game Mode.
+- **Big Now Playing**: the last lines of the lyrics and the queue scroll clear of the fade at the bottom. Lyrics,
+  Up next and Art are dots now, the chosen one a white pill with its name beside it; the same in Game Mode's
+  media center (R2 still goes round them).
+- Known: an Xbox's Media Player plays what's cast but still shows no title or cover. It ignores the standard
+  track details MusicDeck sends (it never even fetches the cover); finding what it reads needs a test watched
+  on the TV.
+
 ## 0.34.0
 
 Desktop Steam, from a round of use of 0.33.0:

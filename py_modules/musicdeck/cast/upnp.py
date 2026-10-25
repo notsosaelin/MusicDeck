@@ -16,6 +16,8 @@ from xml.sax.saxutils import escape
 
 import aiohttp
 
+from . import netif
+
 SSDP = ("239.255.255.250", 1900)
 RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 AV_TRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
@@ -44,8 +46,9 @@ def _local(tag: str) -> str:
 class Element:
     """The little of ElementTree used here (Decky's Python has expat, but not xml.etree)."""
 
-    def __init__(self, tag: str):
+    def __init__(self, tag: str, attrs: Optional[dict] = None):
         self.tag, self.text, self.children = tag, "", []
+        self.attrs: dict = attrs or {}
 
     def __iter__(self):
         return iter(self.children)
@@ -67,8 +70,8 @@ def _xml(text: bytes) -> Element:
     parser = expat.ParserCreate(namespace_separator="}")
     stack: list[Element] = [Element("")]
 
-    def start(tag, _attrs):
-        element = Element("{" + tag if "}" in tag else tag)
+    def start(tag, attrs):
+        element = Element("{" + tag if "}" in tag else tag, attrs)
         stack[-1].children.append(element)
         stack.append(element)
 
@@ -99,20 +102,11 @@ class _Searcher(asyncio.DatagramProtocol):
 
 
 async def search(seconds: float = 2.0) -> dict[str, str]:
-    """Description URLs of renderers that answered, with the address each answer came from."""
-    loop = asyncio.get_running_loop()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-    sock.bind(("0.0.0.0", 0))
-    transport, searcher = await loop.create_datagram_endpoint(_Searcher, sock=sock)
+    """Description URLs of renderers that answered, with the address each answer came from (asked on every
+    network the computer is on: netif)."""
     message = (f'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\n'
                f"MX: {max(int(seconds) - 1, 1)}\r\nST: {RENDERER}\r\n\r\n").encode()
-    try:
-        for _ in range(2):
-            transport.sendto(message, SSDP)
-            await asyncio.sleep(seconds / 2)
-    finally:
-        transport.close()
+    searcher = await netif.send_everywhere(_Searcher, message, SSDP, times=2, seconds=seconds, ttl=2)
     return searcher.locations
 
 

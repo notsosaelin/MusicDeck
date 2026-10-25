@@ -9,6 +9,8 @@ import socket
 import struct
 from typing import Optional
 
+from . import netif
+
 MDNS = ("224.0.0.251", 5353)
 PTR, TXT, A, SRV = 12, 16, 1, 33
 QU = 0x8000  # "unicast response, please"
@@ -99,17 +101,7 @@ class _Collector(asyncio.DatagramProtocol):
 async def browse(service: str, seconds: float = 2.0) -> list[dict]:
     """Instances of `service` (e.g. "_googlecast._tcp.local") as
     {"name", "host", "port", "txt"}; asks three times over `seconds`, since replies get lost."""
-    loop = asyncio.get_running_loop()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
-    sock.bind(("0.0.0.0", 0))
-    transport, collector = await loop.create_datagram_endpoint(_Collector, sock=sock)
-    try:
-        for _ in range(3):
-            transport.sendto(query(service), MDNS)
-            await asyncio.sleep(seconds / 3)
-    finally:
-        transport.close()
+    collector = await netif.send_everywhere(_Collector, query(service), MDNS, times=3, seconds=seconds, ttl=255)
     return _instances(collector.records, service)
 
 
