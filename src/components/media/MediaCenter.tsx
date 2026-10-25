@@ -51,7 +51,7 @@ import {
   useDetails,
 } from "./nowplaying";
 import { DEFAULT_CENTER, setCenter } from "./center";
-import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
+import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, scrollParent, snapRows } from "./parts";
 import { librarySources } from "../../library";
 import { playCollection, useResult } from "../Browser";
 import { useOnAir } from "../NowPlaying";
@@ -67,6 +67,7 @@ import {
   allKey,
   centerNav,
   centerStack,
+  DevicesShelf,
   focusKeyFor,
   popCenter,
   viewsOf,
@@ -893,7 +894,9 @@ const Browse: FC<{
   withHome?: boolean;
   /** a device plugged in: its page is where Browse starts */
   root?: Collection;
-}> = ({ instanceId, tab, sections, withHome, root }) => {
+  /** Your library: what's plugged in, a row above the rest (its pages are Local files') */
+  devicesFrom?: string;
+}> = ({ instanceId, tab, sections, withHome, root, devicesFrom }) => {
   const stack = centerStack(instanceId, tab);
   const views = viewsOf(useStore(centerNav), stack);
   const view = views[views.length - 1];
@@ -908,7 +911,11 @@ const Browse: FC<{
           : view.type === "all"
             ? allKey(view.title)
             : "home";
-  useEffect(() => focusInto(box.current, focusKeyFor(stack, views.length - 1)), [viewKey, views.length]);
+  useEffect(() => {
+    // walking along Browse's source dots swaps what's under them: the controller stays on the dots
+    if ((box.current?.ownerDocument.activeElement as HTMLElement | null)?.closest?.(".mc-sources")) return;
+    return focusInto(box.current, focusKeyFor(stack, views.length - 1));
+  }, [viewKey, views.length]);
   useEffect(() => snapRows(box.current), []);
   return (
     // B goes back a page here, inside the tab: Steam's Tabs would otherwise take it first (to move
@@ -925,6 +932,11 @@ const Browse: FC<{
         ) : withHome ? (
           <>
             <TabPage instanceId={instanceId} tab="home" stack={stack} />
+            <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
+          </>
+        ) : devicesFrom ? (
+          <>
+            <DevicesShelf instanceId={devicesFrom} stack={stack} />
             <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
           </>
         ) : tab === BROWSE.id && sections.length !== 1 ? (
@@ -973,58 +985,87 @@ const librarySections = (): CenterTabInfo[] =>
 const ownSections = (source: ServiceInfo): CenterTabInfo[] =>
   source.tabs.filter((t) => ![PLAYING.id, "home", SEARCH.id, SETTINGS.id].includes(t.id));
 
-/** What Browse shows: "library" (every source's), a source's id, or "device:<id>" (a phone, a player, a CD). */
+/** What Browse shows: "library" (every source's, and what's plugged in) or a source's id. */
 const browseOn = new Store<string>("library");
 
+// GamepadButton.TRIGGER_LEFT from @decky/ui (R2 is TRIGGER_RIGHT, above)
+const L2 = 7;
+/** How far down Browse (from its dots) the first row of cards starts: focus above this keeps Browse at its top */
+const NEAR_TOP = 150;
+
 /**
- * Browse: a row of where to look along the top (Your library, each source, each device plugged in) and that one's
- * whole Browse under it, each keeping its own pages (B goes back within it).
+ * Browse: dots along the top for where to look (Your library, then each source), half either side of the name of the
+ * one showing; the controller landing on a dot shows it (no press needed), and L2/R2 step through them from
+ * anywhere in Browse (unhinted). Under them, that one's whole Browse, each keeping its own pages (B goes back within
+ * it). What's plugged in (phones, players, CDs) is a row of Your library.
  */
 const BrowseBySource: FC<{ live: string }> = ({ live }) => {
   const chosen = useStore(browseOn);
   const state = useStore(pluginState);
   const services = librarySources(state?.services ?? []);
   const local = services.find((s) => s.type === "local");
-  const devices = local ? (state?.devices ?? []) : [];
-  const places = [
-    { id: "library", name: "Your library" },
-    ...services.map((s) => ({ id: s.id, name: s.name })),
-    ...devices.map((d) => ({ id: `device:${d.id}`, name: d.name })),
-  ];
-  const at = places.some((p) => p.id === chosen) ? chosen : "library";
+  const places = [{ id: "library", name: "Your library" }, ...services.map((s) => ({ id: s.id, name: s.name }))];
+  const index = Math.max(0, places.findIndex((p) => p.id === chosen));
+  const at = places[index].id;
   const source = services.find((s) => s.id === at);
-  const device = devices.find((d) => `device:${d.id}` === at);
+  const step = (by: number) => browseOn.set(places[(index + by + places.length) % places.length].id);
+  const dot = (p: { id: string; name: string }) => (
+    <Focusable
+      key={p.id}
+      className={p.id === at ? "mc-dot mc-on" : "mc-dot"}
+      noFocusRing
+      onGamepadFocus={() => browseOn.set(p.id)}
+      onClick={() => browseOn.set(p.id)}
+    >
+      <span />
+    </Focusable>
+  );
+  const half = Math.ceil(places.length / 2);
+  // the first row of cards, focused, scrolls the tab a little to line it up, which tucked the dots under the tab
+  // bar: near the top, the tab stays at the very top, so the dots always show
+  const top = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const scroller = top.current && scrollParent(top.current);
+    if (!scroller) return;
+    // where the controller is, from the top of Browse (not the screen: the same however far it's scrolled)
+    const firstRow = () => {
+      const wrap = top.current;
+      const active = wrap?.ownerDocument.activeElement as HTMLElement | null;
+      if (!wrap || !active || !wrap.contains(active)) return false;
+      return active.getBoundingClientRect().top - wrap.getBoundingClientRect().top < NEAR_TOP;
+    };
+    const hold = () => {
+      if (scroller.scrollTop > 0 && firstRow()) scroller.scrollTop = 0;
+    };
+    const focused = () => window.setTimeout(hold, 50);
+    scroller.addEventListener("scroll", hold);
+    top.current?.addEventListener("focusin", focused);
+    return () => {
+      scroller.removeEventListener("scroll", hold);
+      top.current?.removeEventListener("focusin", focused);
+    };
+  }, []);
   return (
-    <>
-      <Focusable flow-children="row" className="mc-places">
-        {places.map((p) => (
-          <Focusable
-            key={p.id}
-            className="mc-row mc-place"
-            noFocusRing
-            data-on={p.id === at ? "" : undefined}
-            onActivate={() => browseOn.set(p.id)}
-            onClick={() => browseOn.set(p.id)}
-            onOKActionDescription="Show"
-          >
-            {p.name}
-          </Focusable>
-        ))}
+    <Focusable
+      ref={top}
+      onButtonDown={(e: any) => {
+        const button = e?.detail?.button;
+        if (button === L2 || button === R2) step(button === R2 ? 1 : -1);
+      }}
+    >
+      <Focusable flow-children="row" className="mc-sources">
+        <div className="mc-sources-side" style={{ justifyContent: "flex-end" }}>
+          {places.slice(0, half).map(dot)}
+        </div>
+        <div className="mc-sources-name">{places[index].name}</div>
+        <div className="mc-sources-side">{places.slice(half).map(dot)}</div>
       </Focusable>
-      {device && local ? (
-        <Browse
-          key={at}
-          instanceId={local.id}
-          tab={at}
-          sections={[]}
-          root={{ id: `dv~${device.id}~`, kind: "device", title: device.name, subtitle: "", art: null }}
-        />
-      ) : source ? (
+      {source ? (
         <Browse key={at} instanceId={source.id} tab={BROWSE.id} sections={ownSections(source)} withHome />
       ) : (
-        <Browse key="library" instanceId={live} tab={BROWSE.id} sections={librarySections()} />
+        <Browse key="library" instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id} />
       )}
-    </>
+    </Focusable>
   );
 };
 

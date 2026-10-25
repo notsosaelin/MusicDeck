@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.1
+
+- **Browse's sources are dots** (as Now Playing's are), half either side of the name of the one showing, tight under
+  the tabs: the controller landing on a dot shows that source, no press needed (L2 and R2 step through them too).
+  The first row of cards no longer scrolls the dots up under the tab bar.
+- **Your library has a Devices row**: every phone, player, stick or CD plugged in, a card each.
+
 ## 0.39.0
 
 - **Playing on your other device works like a speaker**: pick your PC (or Deck) in Play on and it plays there while
@@ -11,7 +18,7 @@ What changed in each version, newest first. Every build put on a device has its 
   straight back, from where it had got to. The other device counts no listens of its own for it (this one does).
 - **Browse by source** (media center): a row along the top of Browse picks where to look: **Your library** (every
   source's playlists, albums, artists and songs), any one source (its Home, then everything it has: its library,
-  genres, charts, folders...), or a phone, player or CD plugged in.
+  genres, charts, folders...).
 
 ## 0.38.0
 

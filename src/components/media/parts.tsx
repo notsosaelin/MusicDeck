@@ -20,13 +20,6 @@ export const CENTER_CSS =
 .mc-card.gpfocus, .mc-card:hover { transform: scale(1.06); }
 .mc-card.gpfocus .mc-art, .mc-card:hover .mc-art { box-shadow: 0 0 0 3px #ffffff, 0 10px 28px rgba(0, 0, 0, 0.6); }
 .mc-row { border-radius: 4px; outline: none; }
-/* Browse's row of where to look: pills on one line, scrolled along as the controller moves */
-.mc-places { display: flex; gap: 8px; margin-bottom: 22px; overflow-x: auto; scrollbar-width: none; padding: 3px; }
-.mc-places::-webkit-scrollbar { display: none; }
-.mc-place { flex-shrink: 0; white-space: nowrap; height: 36px; line-height: 36px; padding: 0 16px; border-radius: 18px;
-  font-size: 15px; background: rgba(255, 255, 255, 0.08); color: #dcdedf; }
-.mc-place[data-on] { background: #dcdedf; color: #0e141b; font-weight: 600; }
-.mc-place.mc-row { border-radius: 18px; }
 .mc-row.gpfocus, .mc-row:hover { background: rgba(255, 255, 255, 0.12); }
 .mc-row.gpfocus { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .mc-shelf::-webkit-scrollbar { display: none; }
@@ -41,6 +34,11 @@ export const CENTER_CSS =
 .mc-pill.gpfocus.mc-on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
 /* the panel switch beside the title: dull dots, the chosen one a white pill; the focused one lights up */
 .mc-dot { display: flex; align-items: center; height: 28px; padding: 0 4px; outline: none; }
+/* Browse's sources: dots either side of the showing one's name, tight under the tabs */
+.mc-sources { display: flex; align-items: center; gap: 14px; margin: 0 0 -8px; }
+.mc-sources-side { flex: 1; display: flex; align-items: center; min-width: 0; }
+.mc-sources-name { flex-shrink: 0; width: 220px; text-align: center; font-size: 14px; opacity: 0.6; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 .mc-dot > span { display: block; width: 9px; height: 9px; border-radius: 5px; background: rgba(255, 255, 255, 0.28);
   transition: width 0.22s ease, background 0.15s, transform 0.15s; }
 .mc-dot.gpfocus > span, .mc-dot:hover > span { background: rgba(255, 255, 255, 0.7); transform: scale(1.25); }
@@ -524,7 +522,7 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
 }
 
 /** The nearest ancestor of `el` that scrolls (in the media center, the tab's contents). */
-function scrollParent(el: HTMLElement): HTMLElement | null {
+export function scrollParent(el: HTMLElement): HTMLElement | null {
   let node = el.parentElement;
   while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) node = node.parentElement;
   return node;

@@ -580,6 +580,27 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }
 };
 
 /** What the user's other devices were playing: a card each, played here from where it was (the other stops). */
+const DEVICE_KINDS: Record<string, string> = { mtp: "Phone", ios: "iPhone", disc: "Disc", usb: "USB", cd: "CD" };
+
+/** Browse's Your library: what's plugged in (phones, players, sticks, CDs), a card each; each opens its page. */
+export const DevicesShelf: FC<{ instanceId: string; stack: CenterStack }> = ({ instanceId, stack }) => {
+  const devices = useStore(pluginState)?.devices ?? [];
+  if (!devices.length) return null;
+  return (
+    <Shelf title="Devices">
+      {devices.map((d) =>
+        collectionCard(instanceId, stack, {
+          id: `dv~${d.id}~`,
+          kind: "device",
+          title: d.name,
+          subtitle: d.kind === "ipod" ? d.status?.model || "iPod" : (DEVICE_KINDS[d.kind] ?? "USB"),
+          art: null,
+        }),
+      )}
+    </Shelf>
+  );
+};
+
 const ContinueShelf: FC = () => {
   const sessions = useOtherSessions();
   if (!sessions.length) return null;
