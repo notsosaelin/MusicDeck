@@ -3,6 +3,16 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.0
+
+- **Playing on your other device works like a speaker**: pick your PC (or Deck) in Play on and it plays there while
+  this one stays in charge, showing the song and its time as they go there (to the second), its play, pause, skip
+  and seek doing it there, and the next song following on. **This Deck** (or **This PC**) in the same menu brings it
+  straight back, from where it had got to. The other device counts no listens of its own for it (this one does).
+- **Browse by source** (media center): a row along the top of Browse picks where to look: **Your library** (every
+  source's playlists, albums, artists and songs), any one source (its Home, then everything it has: its library,
+  genres, charts, folders...), or a phone, player or CD plugged in.
+
 ## 0.38.0
 
 - **Your devices**: MusicDeck on your PC and your Deck (or any two Steams on your home network) pair once and then

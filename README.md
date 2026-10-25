@@ -11,7 +11,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Your devices:** MusicDeck on your PC and your Deck, paired once (Settings → Your devices: a code shows on both,
   accept it on the other), keep up with each other: each one's listening counts in the other's stats, and **Continue
   listening** on Home picks up what the other was playing, from where it was (the other stops), and **Play on**
-  (the cast button) lists the other devices that are on, to send the music there (This Deck brings it back). Songs from a
+  (the cast button) lists the other devices that are on: the music plays there as on a speaker, this one showing
+  where it's got to and controlling it, and This Deck brings it back. Songs from a
   streaming service play from the same service here; songs from Local files stream from the device they're on. On
   Windows, Settings first offers **Let your devices reach this PC** (Windows' firewall asks for an administrator's yes).
 - **One library:** every source's music together, as Steam's library is every game whatever store it came from.

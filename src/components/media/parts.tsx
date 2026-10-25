@@ -20,6 +20,13 @@ export const CENTER_CSS =
 .mc-card.gpfocus, .mc-card:hover { transform: scale(1.06); }
 .mc-card.gpfocus .mc-art, .mc-card:hover .mc-art { box-shadow: 0 0 0 3px #ffffff, 0 10px 28px rgba(0, 0, 0, 0.6); }
 .mc-row { border-radius: 4px; outline: none; }
+/* Browse's row of where to look: pills on one line, scrolled along as the controller moves */
+.mc-places { display: flex; gap: 8px; margin-bottom: 22px; overflow-x: auto; scrollbar-width: none; padding: 3px; }
+.mc-places::-webkit-scrollbar { display: none; }
+.mc-place { flex-shrink: 0; white-space: nowrap; height: 36px; line-height: 36px; padding: 0 16px; border-radius: 18px;
+  font-size: 15px; background: rgba(255, 255, 255, 0.08); color: #dcdedf; }
+.mc-place[data-on] { background: #dcdedf; color: #0e141b; font-weight: 600; }
+.mc-place.mc-row { border-radius: 18px; }
 .mc-row.gpfocus, .mc-row:hover { background: rgba(255, 255, 255, 0.12); }
 .mc-row.gpfocus { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .mc-shelf::-webkit-scrollbar { display: none; }

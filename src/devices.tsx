@@ -1,7 +1,7 @@
 import { addEventListener, removeEventListener } from "@decky/api";
 import { ButtonItem, ConfirmModal, Field, PanelSectionRow, showModal } from "@decky/ui";
 import { FC, useEffect, useState } from "react";
-import { Devices, OtherSession, Session, allowFirewall, answerPairing, devices, otherSessions, pairDevice, takeOver, unpairDevice } from "./api";
+import { Devices, OtherSession, Track, reportRenderStatus, allowFirewall, answerPairing, devices, otherSessions, pairDevice, takeOver, unpairDevice } from "./api";
 import { notify } from "./notify";
 import { player } from "./player";
 
@@ -34,16 +34,61 @@ export function watchDevices(): () => void {
   addEventListener("peer_paired", paired);
   addEventListener("peer_pair_failed", failed);
   addEventListener("peer_took_over", tookOver);
-  // another device's Play on chose this one: its music plays on here
-  const handed = (p: { name: string; session: Session }) => player.takeOver(p.session);
-  addEventListener("peer_play", handed);
+  addEventListener("peer_cast", playedOn);
   return () => {
     removeEventListener("peer_pair_request", asked);
     removeEventListener("peer_paired", paired);
     removeEventListener("peer_pair_failed", failed);
     removeEventListener("peer_took_over", tookOver);
-    removeEventListener("peer_play", handed);
+    removeEventListener("peer_cast", playedOn);
+    stopReporting();
   };
+}
+
+// --- another device playing on this one, as on a speaker (its cast/peer.py; peers.py and main.py here) ---
+
+let reporting = 0;
+const stopReporting = () => {
+  window.clearInterval(reporting);
+  reporting = 0;
+};
+
+/** Where this device has got to with what the other gave it, once a second: the other shows it as it goes. */
+function report() {
+  const { playing, loading, volume } = player.state.get();
+  const { current, duration } = player.position.get();
+  const state = player.renderEnded ? "idle" : loading ? "buffering" : playing ? "playing" : "paused";
+  reportRenderStatus({ state, position: current, duration, ended: player.renderEnded, volume }).catch(() => {});
+}
+
+type CastHere =
+  | { action: "start"; name: string }
+  | { action: "load"; name: string; item: { instanceId: string; track: Track }; start: number; autoplay: boolean }
+  | { action: "control"; control: "play" | "pause" | "seek" | "stop" | "volume"; value: number | null }
+  | { action: "end"; stop: boolean };
+
+function playedOn(e: CastHere) {
+  if (e.action === "start") {
+    player.renderFor = e.name;
+    stopReporting();
+    reporting = window.setInterval(report, 1000);
+  } else if (e.action === "load") {
+    player.renderFor = e.name;
+    player.renderEnded = false;
+    player.clear();
+    player.restore({ queue: [e.item], index: 0, position: e.start }, e.autoplay);
+  } else if (e.action === "control") {
+    const { playing } = player.state.get();
+    if (e.control === "play" && !playing) player.toggle();
+    else if ((e.control === "pause" || e.control === "stop") && playing) player.toggle();
+    else if (e.control === "seek" && e.value !== null) player.seek(e.value);
+    else if (e.control === "volume" && e.value !== null) player.setVolume(e.value);
+    report();
+  } else if (e.action === "end") {
+    if (e.stop && player.state.get().playing) player.toggle();
+    player.renderFor = null;
+    stopReporting();
+  }
 }
 
 /** The paired devices and the ones nearby, looked at again every few seconds while shown. */

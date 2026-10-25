@@ -7,7 +7,7 @@
 import { Menu, MenuItem, showContextMenu } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
 import { FaBroadcastTower, FaCompress, FaEllipsisH, FaExpand, FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp, FaWindowRestore } from "react-icons/fa";
-import { canCast, handedTo, playingOn, prepareCastMenu, showCastMenu } from "../components/CastMenu";
+import { canCast, playingOn, prepareCastMenu, showCastMenu } from "../components/CastMenu";
 import { Lyrics, getLyrics, setSetting } from "../api";
 import { SHUFFLE_MODES, SHUFFLE_NOTES, updatePlayback } from "../components/Settings";
 import { saveQueue } from "../components/TrackMenu";
@@ -81,7 +81,6 @@ const showMore = (target: EventTarget) =>
 
 export const PlayerBar: FC = () => {
   const state = useStore(player.state);
-  useStore(handedTo);
   const view = useStore(panel);
   const item = player.current;
   const t = item?.track;

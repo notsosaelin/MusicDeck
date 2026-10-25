@@ -1,19 +1,12 @@
 import { Menu, MenuItem, showContextMenu } from "@decky/ui";
 import { FC } from "react";
-import { CastDevice, Result, castDevices, sendToDevice, takeOver } from "../api";
+import { CastDevice, Result, castDevices } from "../api";
 import { notify } from "../notify";
 import { player } from "../player";
-import { Store, pluginState } from "../store";
+import { pluginState } from "../store";
 
-/** Another of the user's devices the music was handed to (Play on), while it plays there: "This Deck" brings it
- *  back. Forgotten once something plays here again. */
-export const handedTo = new Store<CastDevice | null>(null);
-player.state.subscribe(() => {
-  if (handedTo.get() && player.state.get().playing) handedTo.set(null);
-});
-
-/** Where the music plays when not here: a speaker or TV it's cast to, or another device it was handed to. */
-export const playingOn = (): string | null => player.state.get().castingTo?.name ?? handedTo.get()?.name ?? null;
+/** Where the music plays when not here: a speaker, a TV, or another of the user's devices. */
+export const playingOn = (): string | null => player.state.get().castingTo?.name ?? null;
 
 /** Tracks from this source can play on speakers and TVs (all but Spotify). */
 export const canCast = (instanceId: string) => !!pluginState.get()?.services.find((s) => s.id === instanceId)?.castable;
@@ -53,36 +46,10 @@ export const castChoices = (): Promise<Result<CastDevice[]>> =>
 
 /** Plays on `device`, or back here (null); a failure is said. */
 export const chooseCast = async (device: CastDevice | null) => {
-  if (!device) return handedTo.get() ? bringBack() : player.stopCasting();
-  if (device.kind === "musicdeck") return playOnDevice(device);
+  if (!device) return player.stopCasting();
   const error = await player.castTo(device);
   if (error) notify(`Couldn't play on ${device.name}`, error, player.current);
 };
-
-/** Another of the user's devices: the queue goes there and plays on from here; here it stops. */
-async function playOnDevice(device: CastDevice) {
-  const { queue, index } = player.state.get();
-  if (index < 0 || !queue.length) return;
-  const r = await sendToDevice(device.id.replace(/^musicdeck:/, ""), {
-    queue,
-    index,
-    position: player.position.get().current,
-    playing: true,
-  }).catch((e) => ({ ok: false as const, error: String(e) }));
-  if (!r.ok) return notify(`Couldn't play on ${device.name}`, r.error, player.current);
-  if (player.state.get().playing) player.toggle();
-  handedTo.set(device);
-}
-
-/** The music handed to another device, back here: it plays on here from where it is there, and stops there. */
-async function bringBack() {
-  const device = handedTo.get();
-  if (!device) return;
-  const r = await takeOver(device.id.replace(/^musicdeck:/, "")).catch((e) => ({ ok: false as const, error: String(e) }));
-  if (!r.ok) return notify(`Couldn't bring it back from ${device.name}`, r.error, player.current);
-  handedTo.set(null);
-  player.takeOver(r.data);
-}
 
 /**
  * "Play on": this Deck, or the speakers and TVs found. Built once, from devices already found: a

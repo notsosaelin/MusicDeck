@@ -52,6 +52,7 @@ import {
 } from "./nowplaying";
 import { DEFAULT_CENTER, setCenter } from "./center";
 import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRows } from "./parts";
+import { librarySources } from "../../library";
 import { playCollection, useResult } from "../Browser";
 import { useOnAir } from "../NowPlaying";
 import {
@@ -884,7 +885,15 @@ const NowPlayingBar: FC = () => {
  * One browsing tab (one of the source's own, or Search): its history's latest view, with the controller
  * put back where it belongs.
  */
-const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }> = ({ instanceId, tab, sections }) => {
+const Browse: FC<{
+  instanceId: string;
+  tab: string;
+  sections: CenterTabInfo[];
+  /** a source's Browse: its Home's rows first */
+  withHome?: boolean;
+  /** a device plugged in: its page is where Browse starts */
+  root?: Collection;
+}> = ({ instanceId, tab, sections, withHome, root }) => {
   const stack = centerStack(instanceId, tab);
   const views = viewsOf(useStore(centerNav), stack);
   const view = views[views.length - 1];
@@ -911,7 +920,14 @@ const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }>
       }}
     >
       {view.type === "home" ? (
-        tab === BROWSE.id && sections.length !== 1 ? (
+        root ? (
+          <CollectionPage instanceId={instanceId} stack={stack} collection={root} />
+        ) : withHome ? (
+          <>
+            <TabPage instanceId={instanceId} tab="home" stack={stack} />
+            <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
+          </>
+        ) : tab === BROWSE.id && sections.length !== 1 ? (
           <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
         ) : (
           // Browse with one section is that section; Home is the one library's, every source's
@@ -949,17 +965,68 @@ const BROWSE: CenterTabInfo = { id: "browse", title: "Browse" };
 const SEARCH: CenterTabInfo = { id: "search", title: "Search" };
 const SETTINGS: CenterTabInfo = { id: "settings", title: "Settings" };
 
-/** The one library's tabs a source's own go into (py_modules/musicdeck/library.py's MERGED). */
-const MERGED_TABS = ["playlists", "musicdeck-playlists", "albums", "soundtracks", "artists", "composers", "songs", "liked"];
+/** Browse's "Your library": the one library's Your music (every source's playlists, albums, artists, songs). */
+const librarySections = (): CenterTabInfo[] =>
+  (pluginState.get()?.library_tabs ?? []).map((t): CenterTabInfo => ({ id: `library:${t.id}`, title: t.title, group: "yours" }));
 
-/** Browse: the one library's Your music (every source's playlists, albums, artists, songs: "library:..."), then the
- *  source's own sections past its Home (genres, charts... see MusicService.center_tabs). */
-const browseSections = (source: ServiceInfo | undefined): CenterTabInfo[] => [
-  ...(pluginState.get()?.library_tabs ?? []).map((t): CenterTabInfo => ({ id: `library:${t.id}`, title: t.title, group: "yours" })),
-  ...(source?.tabs ?? []).filter(
-    (t) => ![PLAYING.id, "home", SEARCH.id, SETTINGS.id].includes(t.id) && !((t.group ?? "yours") === "yours" && MERGED_TABS.includes(t.id)),
-  ),
-];
+/** A source's whole Browse past its Home: every section it has (its library, genres, charts...). */
+const ownSections = (source: ServiceInfo): CenterTabInfo[] =>
+  source.tabs.filter((t) => ![PLAYING.id, "home", SEARCH.id, SETTINGS.id].includes(t.id));
+
+/** What Browse shows: "library" (every source's), a source's id, or "device:<id>" (a phone, a player, a CD). */
+const browseOn = new Store<string>("library");
+
+/**
+ * Browse: a row of where to look along the top (Your library, each source, each device plugged in) and that one's
+ * whole Browse under it, each keeping its own pages (B goes back within it).
+ */
+const BrowseBySource: FC<{ live: string }> = ({ live }) => {
+  const chosen = useStore(browseOn);
+  const state = useStore(pluginState);
+  const services = librarySources(state?.services ?? []);
+  const local = services.find((s) => s.type === "local");
+  const devices = local ? (state?.devices ?? []) : [];
+  const places = [
+    { id: "library", name: "Your library" },
+    ...services.map((s) => ({ id: s.id, name: s.name })),
+    ...devices.map((d) => ({ id: `device:${d.id}`, name: d.name })),
+  ];
+  const at = places.some((p) => p.id === chosen) ? chosen : "library";
+  const source = services.find((s) => s.id === at);
+  const device = devices.find((d) => `device:${d.id}` === at);
+  return (
+    <>
+      <Focusable flow-children="row" className="mc-places">
+        {places.map((p) => (
+          <Focusable
+            key={p.id}
+            className="mc-row mc-place"
+            noFocusRing
+            data-on={p.id === at ? "" : undefined}
+            onActivate={() => browseOn.set(p.id)}
+            onClick={() => browseOn.set(p.id)}
+            onOKActionDescription="Show"
+          >
+            {p.name}
+          </Focusable>
+        ))}
+      </Focusable>
+      {device && local ? (
+        <Browse
+          key={at}
+          instanceId={local.id}
+          tab={at}
+          sections={[]}
+          root={{ id: `dv~${device.id}~`, kind: "device", title: device.name, subtitle: "", art: null }}
+        />
+      ) : source ? (
+        <Browse key={at} instanceId={source.id} tab={BROWSE.id} sections={ownSections(source)} withHome />
+      ) : (
+        <Browse key="library" instanceId={live} tab={BROWSE.id} sections={librarySections()} />
+      )}
+    </>
+  );
+};
 
 /**
  * Always the same five, whatever the source: Now Playing, its Home, Browse (its other sections), Search,
@@ -968,7 +1035,7 @@ const browseSections = (source: ServiceInfo | undefined): CenterTabInfo[] => [
 function centerTabs(source: ServiceInfo | undefined): CenterTabInfo[] {
   if (!source) return [PLAYING, SETTINGS];
   const home = source.tabs.find((t) => t.id === "home");
-  return [PLAYING, ...(home ? [home] : []), ...(browseSections(source).length ? [BROWSE] : []), SEARCH, SETTINGS];
+  return [PLAYING, ...(home ? [home] : []), BROWSE, SEARCH, SETTINGS];
 }
 
 // GamepadButton.SELECT from @decky/ui (an ambient enum, which isolated builds can't import)
@@ -1135,13 +1202,12 @@ export const MediaCenter: FC = () => {
     ) : id === SETTINGS.id ? (
       <SettingsPage />
     ) : live ? (
-      // keyed by source: a tab of the same name on another source is another page
-      <Browse
-        key={`${live}/${id}`}
-        instanceId={live}
-        tab={id}
-        sections={id === BROWSE.id ? browseSections(source) : []}
-      />
+      id === BROWSE.id ? (
+        <BrowseBySource live={live} />
+      ) : (
+        // keyed by source: a tab of the same name on another source is another page
+        <Browse key={`${live}/${id}`} instanceId={live} tab={id} sections={[]} />
+      )
     ) : (
       <Notice>Add a music source in Decky → MusicDeck to browse it here.</Notice>
     );

@@ -11,7 +11,7 @@
 import { FC, useEffect, useRef, useState } from "react";
 import { FaBroadcastTower, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp } from "react-icons/fa";
 import { CastDevice, Result } from "../api";
-import { canCast, castChoices, chooseCast, handedTo, playingOn, prepareCastMenu, thisDevice } from "../components/CastMenu";
+import { canCast, castChoices, chooseCast, playingOn, prepareCastMenu, thisDevice } from "../components/CastMenu";
 import { player } from "../player";
 import { pluginState, useStore } from "../store";
 import { setVolume } from "./bar";
@@ -130,7 +130,6 @@ const Transport: FC<{ play: number; ends: boolean; gap: number; span?: number }>
  *  in the main window). */
 const Cast: FC<{ onList: (at: [number, number], list: Result<CastDevice[]> | null) => void }> = ({ onList }) => {
   useStore(player.state);
-  useStore(handedTo);
   if (!canCast(player.current?.instanceId ?? pluginState.get()?.active_service ?? "")) return null;
   return (
     <button
@@ -163,7 +162,6 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
   // the cast list: where, and the devices (null while they're looked for)
   const [devices, setDevices] = useState<{ at: [number, number]; list: Result<CastDevice[]> | null } | null>(null);
   useStore(player.state);
-  useStore(handedTo);
   // a speaker or TV it's cast to, or another device it was handed to
   const where = playingOn();
   const [volume, setVolumeOpen] = useState(false);

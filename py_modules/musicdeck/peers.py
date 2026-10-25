@@ -118,8 +118,9 @@ class Peers:
         self.prompts: dict[str, dict[str, Any]] = {}
         self.prompted_at: dict[str, float] = {}
         self.pairable_until = 0.0
-        # music handed here by a paired device ("Play on" there): (its id, {"session", "services"})
-        self.on_play: Optional[Callable[[str, dict[str, Any]], Awaitable[None]]] = None
+        # a paired device playing on this one, as on a speaker (cast/peer.py there): (its id, "start" | "load" |
+        # "control" | "end" | "status", what it sent) -> the answer
+        self.on_cast: Optional[Callable[[str, str, Any], Awaitable[Any]]] = None
         self.seen_sigs: dict[str, float] = {}
         self.port = 0
         self.runner: Optional[web.AppRunner] = None
@@ -154,7 +155,9 @@ class Peers:
         app.router.add_get("/p/hello", self._signed(self._hello))
         app.router.add_get("/p/session", self._signed(self._session))
         app.router.add_post("/p/took-over", self._signed(self._took_over))
-        app.router.add_post("/p/play", self._signed(self._play))
+        for action in ("start", "load", "control", "end"):
+            app.router.add_post(f"/p/cast/{action}", self._signed(self._casting(action)))
+        app.router.add_get("/p/cast/status", self._signed(self._casting("status")))
         app.router.add_get("/p/plays", self._signed(self._plays))
         app.router.add_post("/p/unpair", self._signed(self._unpaired))
         app.router.add_get("/p/stream/{instance}/{id:.+}", self._linked("stream"))
@@ -487,12 +490,12 @@ class Peers:
         await self.emit("peer_took_over", {"name": self.paired[peer_id].get("name", "")})
         return {"ok": True}
 
-    async def _play(self, request, peer_id, payload) -> dict[str, Any]:
-        """A paired device hands its music here (its Play on): it plays here from where it was."""
-        if not isinstance(payload, dict) or not isinstance(payload.get("session"), dict) or not self.on_play:
-            raise web.HTTPBadRequest()
-        await self.on_play(peer_id, payload)
-        return {"ok": True}
+    def _casting(self, action: str):
+        async def handle(request, peer_id, payload) -> Any:
+            if not self.on_cast or (action != "status" and not isinstance(payload, dict)):
+                raise web.HTTPBadRequest()
+            return await self.on_cast(peer_id, action, payload)
+        return handle
 
     def targets(self) -> list[dict[str, str]]:
         """The paired devices that are on, as places to play ("Play on"): {"id": "musicdeck:<id>", "name", ...}."""

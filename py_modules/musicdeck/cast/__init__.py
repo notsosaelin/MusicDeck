@@ -8,7 +8,8 @@ Deck only relays bytes, and its EQ, levelling and crossfade don't apply.
 
 Three kinds of device: Google Cast (castv2.py; Chromecast, Google/Nest speakers, TVs and soundbars
 with Cast), UPnP/DLNA renderers (upnp.py; Sonos, AV receivers, smart TVs, an Xbox's Media Player) and
-Rokus (roku.py; Roku players and Roku TVs, through Play on Roku). All report
+Rokus (roku.py; Roku players and Roku TVs, through Play on Roku); and the user's other devices running MusicDeck
+(peer.py, through peers.py), listed first, which are given the song itself rather than a link. All report
 {"state": "playing"|"paused"|"buffering"|"idle", "position", "duration"?, "ended"?, "error"?},
 passed on to the frontend as "cast_status" events; {"gone": reason} means the session ended
 without the user ending it (the device went away, or something else started playing on it).
@@ -22,6 +23,7 @@ from .. import debuglog
 from ..services import MusicService, ServiceError
 from . import mdns, roku, upnp
 from .castv2 import CastError, Chromecast
+from .peer import PeerError, PeerRenderer
 from .roku import Roku, RokuError
 from .upnp import Renderer, UpnpError
 
@@ -29,7 +31,8 @@ GOOGLECAST = "_googlecast._tcp.local"
 SEARCH_SECONDS = 2.5
 CONTROLS = {"play", "pause", "seek", "stop", "volume"}
 
-Device = Union[Chromecast, Renderer, Roku]
+Device = Union[Chromecast, Renderer, Roku, PeerRenderer]
+ERRORS = (CastError, UpnpError, RokuError, PeerError)
 # kinds that fetch a plain file (no HLS) in a format they list: given the compatible stream
 PLAIN = {"upnp", "roku"}
 
@@ -48,6 +51,9 @@ class CastManager:
         self.info: Optional[dict] = None
         self.lock = asyncio.Lock()
         self._sending: set[asyncio.Task] = set()
+        # the user's other devices (peers.Peers), and this one's sources as they're told to them; set by the plugin
+        self.peers = None
+        self.services: Callable[[], list[dict]] = lambda: []
 
     # --- finding devices ---
 
@@ -80,11 +86,14 @@ class CastManager:
         for error in (casts, renderers, rokus):
             if isinstance(error, BaseException):
                 debuglog.debug("cast", "search failed", error=repr(error))
+        for target in self.peers.targets() if self.peers else []:
+            found[target["id"]] = {**target, "peer": target["id"].split(":", 1)[1]}
         if self.info:
             found.setdefault(self.info["id"], self.info)
         self.found = found
+        # the user's own devices first, then by name
         return sorted(({k: d[k] for k in ("id", "name", "model", "kind")} for d in found.values()),
-                      key=lambda d: d["name"].lower())
+                      key=lambda d: (d["kind"] != "musicdeck", d["name"].lower()))
 
     # --- the session ---
 
@@ -99,8 +108,12 @@ class CastManager:
             mine: list[Device] = []
             on_status = lambda status: mine[0] is self.device and self._status(status)  # noqa: E731
             on_gone = lambda reason: mine[0] is self.device and self._gone(reason)  # noqa: E731
-            if info["kind"] == "chromecast":
-                device: Device = Chromecast(info["host"], info["port"], on_status, on_gone)
+            if info["kind"] == "musicdeck":
+                if not self.peers:
+                    raise ServiceError("That device isn't paired")
+                device: Device = PeerRenderer(self.peers, info["peer"], self.services, on_status, on_gone)
+            elif info["kind"] == "chromecast":
+                device = Chromecast(info["host"], info["port"], on_status, on_gone)
             elif info["kind"] == "roku":
                 device = Roku(info, self.http, on_status, on_gone)
             else:
@@ -108,8 +121,9 @@ class CastManager:
             mine.append(device)
             try:
                 await device.connect()
-                await self.server.open_lan(info["host"])
-            except (CastError, UpnpError, RokuError, OSError) as e:
+                if device.kind != "musicdeck":  # it's given songs, not links to this machine's casting site
+                    await self.server.open_lan(info["host"])
+            except (*ERRORS, OSError) as e:
                 await device.close(stop_player=False)
                 await self.server.close_lan()
                 raise ServiceError(str(e) or "Couldn't connect to the device")
@@ -132,6 +146,17 @@ class CastManager:
         service = self.lookup(instance_id)
         if service is None:
             raise ServiceError("Unknown service")
+        if isinstance(self.device, PeerRenderer):
+            # another MusicDeck plays it from its own copy of the service, or streamed from here
+            track_id = track.get("id")
+            if not isinstance(track_id, str):
+                raise ServiceError("Bad track")
+            async with self.lock:
+                try:
+                    await self._connected().load_track(instance_id, track, float(start or 0), bool(autoplay))  # type: ignore[union-attr]
+                except PeerError as e:
+                    raise ServiceError(str(e))
+            return
         if not service.castable:
             raise ServiceError(f"{service.display_name} can't play on other devices from here")
         track_id, art = track.get("id"), track.get("art")
@@ -149,7 +174,7 @@ class CastManager:
             try:
                 await device.load(link["url"], link["type"], meta, float(start or 0), bool(autoplay),
                                   bool(track.get("live")))
-            except (CastError, UpnpError, RokuError) as e:
+            except ERRORS as e:
                 raise ServiceError(str(e))
 
     async def control(self, action: str, value: Optional[float] = None) -> None:
@@ -167,7 +192,7 @@ class CastManager:
                     await device.set_volume(float(value))  # type: ignore[arg-type]
                 else:
                     await getattr(device, action)()
-            except (CastError, UpnpError, RokuError) as e:
+            except ERRORS as e:
                 raise ServiceError(str(e))
 
     def _connected(self) -> Device:

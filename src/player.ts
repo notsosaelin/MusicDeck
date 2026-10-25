@@ -251,7 +251,7 @@ export class Player {
   private readonly newElement = () => {
     const audio = new Audio();
     audio.volume = this.casting ? this.localVolume : this.state.get().volume;
-    audio.loop = this.state.get().repeat === "one";
+    audio.loop = this.state.get().repeat === "one" && !this.renderFor;
     return audio;
   };
   private readonly decks = [
@@ -315,6 +315,12 @@ export class Player {
   private stallWatch?: number;
   /** Sleep timer "end of track": pause when the current track finishes instead of moving on */
   stopAfterCurrent = false;
+  /** Another of the user's devices playing on this one, as on a speaker (devices.tsx): its name. This one then plays
+   *  each song it's given and stops at its end (no next song, repeat or radio of its own), and counts no listens
+   *  (the other does). */
+  renderFor: string | null = null;
+  /** playing for another device, the song it gave came to its end */
+  renderEnded = false;
   private lastProgress = { time: 0, at: 0 };
 
   constructor() {
@@ -1084,7 +1090,7 @@ export class Player {
     const outgoing = this.deck;
     this.deck = incoming;
     this.loadToken++; // anything still resolving for the old deck is dropped
-    this.audio.loop = this.state.get().repeat === "one";
+    this.audio.loop = this.state.get().repeat === "one" && !this.renderFor;
     this.becomeCurrent(index);
     if (preloaded.gain && !preloaded.item.track.gain) {
       this.updateTrack(preloaded.item.instanceId, preloaded.item.track.id, { gain: preloaded.gain });
@@ -1159,7 +1165,7 @@ export class Player {
       this.stationNoted = item;
       playedStation(item.instanceId, item.track).catch(() => {});
     }
-    if (item && !this.nowPlayingSent && reportsPlays(item.instanceId)) {
+    if (item && !this.nowPlayingSent && !this.renderFor && reportsPlays(item.instanceId)) {
       this.nowPlayingSent = true;
       scrobble(item.instanceId, item.track.id, false, item.track).catch(() => {});
     }
@@ -1175,7 +1181,7 @@ export class Player {
     }
     this.lastTime = t;
     const item = this.current;
-    if (!item || this.submitted || !reportsPlays(item.instanceId)) return;
+    if (!item || this.submitted || this.renderFor || !reportsPlays(item.instanceId)) return;
     const duration = this.position.get().duration;
     if (duration < 30) return; // too short to count, per the usual scrobbling rules
     if (this.audio.currentTime >= Math.min(duration * SCROBBLE_FRACTION, SCROBBLE_MAX_SECONDS)) {
@@ -1273,6 +1279,11 @@ export class Player {
   }
 
   private onEnded() {
+    if (this.renderFor) {
+      this.renderEnded = true;
+      this.state.update({ playing: false });
+      return;
+    }
     if (this.stopAfterCurrent) {
       this.stopAfterCurrent = false;
       dlog("sleep timer: stopped after track");

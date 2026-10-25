@@ -4407,14 +4407,29 @@ async def run():
                   "a paired device's songs play through it; an unknown device's don't")
             check([t["name"] for t in A.targets()] == ["Device B"] and A.targets()[0]["kind"] == "musicdeck",
                   "a paired device that's on is somewhere to play")
-            handed_to_b = []
+            from musicdeck.cast.peer import PeerRenderer
+            asked_b = []
 
-            async def on_play(peer_id, payload):
-                handed_to_b.append((peer_id, payload))
-            B.on_play = on_play
-            await A.call(B.me["id"], "POST", "/p/play", {"session": {"queue": [], "index": 0, "position": 3}, "services": []})
-            check(handed_to_b and handed_to_b[0][0] == A.me["id"] and handed_to_b[0][1]["session"]["position"] == 3,
-                  "Play on another device hands it the queue and where it was")
+            async def on_cast(peer_id, action, payload):
+                asked_b.append((action, payload))
+                return {"state": "playing", "position": 12.5, "duration": 200} if action == "status" else {"volume": 0.4}
+            B.on_cast = on_cast
+            statuses = []
+            renderer = PeerRenderer(A, B.me["id"], lambda: [{"id": "loc", "type": "local", "name": "Local files"}],
+                                    statuses.append, lambda reason: statuses.append({"gone": reason}))
+            await renderer.connect()
+            await renderer.load_track("loc", {"id": "t1", "title": "Song"}, 30, True)
+            await renderer.seek(40)
+            for _ in range(30):
+                if statuses:
+                    break
+                await asyncio.sleep(0.1)
+            await renderer.close()
+            actions = [x[0] for x in asked_b]
+            check(renderer.volume == 0.4 and actions[:3] == ["start", "load", "control"] and "end" in actions
+                  and asked_b[1][1]["start"] == 30 and asked_b[2][1] == {"action": "seek", "value": 40},
+                  f"playing on another device: it's given the song, where to start and the controls ({actions})")
+            check(statuses and statuses[0]["position"] == 12.5, "and says where it's got to, once a second")
             await A.unpair(B.me["id"])
             check(not A.paired and not B.paired, "unpairing forgets on both")
         finally:

@@ -120,6 +120,9 @@ class Plugin:
         # music
         self.peers: Optional[peermod.Peers] = None
         self.last_peer_sync = 0.0
+        # the paired device playing on this one now (as on a speaker), and where it's got to here
+        self.render_for: Optional[str] = None
+        self.render_status: dict[str, Any] = {}
 
     # --- lifecycle ---
 
@@ -178,8 +181,11 @@ class Plugin:
                     decky.DECKY_PLUGIN_SETTINGS_DIR, _device_name(), decky.logger, decky.emit, self._session_for_peer,
                     lambda: [{"id": s["id"], "type": s["type"], "name": s["name"]} for s in self.settings.services()],
                     self.play_log, self.server.for_peer, self.http, version.current())
-                self.peers.on_play = self._played_here
+                self.peers.on_cast = self._cast_here
                 await self.peers.start()
+                self.cast.peers = self.peers
+                self.cast.services = lambda: [{"id": s["id"], "type": s["type"], "name": s["name"]}
+                                              for s in self.settings.services()]
             except OSError as e:
                 decky.logger.warning(f"Your devices: couldn't start ({e})")
                 self.peers = None
@@ -926,41 +932,56 @@ class Plugin:
 
     @_when_ready
     async def cast_devices(self) -> dict[str, Any]:
-        """Speakers and TVs on the network: [{"id", "name", "model", "kind"}], after the user's other devices that are
-        on ("musicdeck": playing there hands the music over, sent by send_to_device)."""
-        async def work():
-            devices = self.peers.targets() if self.peers else []
-            try:
-                return devices + await self.cast.search()
-            except ServiceError:
-                if devices:
-                    return devices
-                raise
-        return await _result(work())
+        """Speakers and TVs on the network, after the user's other devices that are on: [{"id", "name", "model",
+        "kind"}] ("musicdeck" for those: cast/peer.py)."""
+        return await _result(self.cast.search())
+
+    # --- another device playing on this one (cast/peer.py there, peers.py here) ---
+
+    async def _cast_here(self, peer_id: str, action: str, payload: Any) -> Any:
+        """What a paired device playing on this one asks: the frontend plays ("peer_cast" events) and says where it's
+        got to (report_render_status), which the other device asks for once a second."""
+        name = self.peers.paired.get(peer_id, {}).get("name", "") if self.peers else ""
+        if action == "status":
+            if self.render_for != peer_id:
+                return {"gone": f"Something else is playing on {_device_name()}"}
+            return self.render_status
+        if action == "start":
+            self.render_for, self.render_status = peer_id, {"state": "idle", "position": 0}
+            await decky.emit("peer_cast", {"action": "start", "name": name})
+            return {"volume": self.settings.get("volume")}
+        if self.render_for != peer_id:
+            return {"ok": False}
+        if action == "load":
+            track, instance = payload.get("track"), payload.get("instance")
+            if not isinstance(track, dict) or not isinstance(instance, str):
+                return {"ok": False}
+            start = payload.get("start") if isinstance(payload.get("start"), (int, float)) else 0
+            session = self._handed_over(peer_id, {"services": payload.get("services") or [], "session": {
+                "queue": [{"instanceId": instance, "track": track}], "index": 0, "position": start}})
+            if not session["queue"]:
+                return {"ok": False}
+            self.render_status = {"state": "buffering", "position": start}
+            await decky.emit("peer_cast", {"action": "load", "name": name, "item": session["queue"][0], "start": start,
+                                           "autoplay": bool(payload.get("autoplay"))})
+        elif action == "control":
+            control, value = payload.get("action"), payload.get("value")
+            if control not in ("play", "pause", "seek", "stop", "volume"):
+                return {"ok": False}
+            await decky.emit("peer_cast", {"action": "control", "control": control,
+                                           "value": value if isinstance(value, (int, float)) else None})
+        elif action == "end":
+            self.render_for = None
+            await decky.emit("peer_cast", {"action": "end", "stop": bool(payload.get("stop"))})
+        return {"ok": True}
 
     @_when_ready
-    async def send_to_device(self, peer_id: str, session: dict[str, Any]) -> dict[str, Any]:
-        """Plays this queue on another of the user's devices, from where it is here (Play on)."""
-        async def work():
-            if not self.peers or not isinstance(peer_id, str) or peer_id not in self.peers.paired:
-                raise ServiceError("That device isn't paired")
-            clean = _clean_session(session)
-            if not clean["queue"]:
-                raise ServiceError("Nothing to play")
-            services = [{"id": s["id"], "type": s["type"], "name": s["name"]} for s in self.settings.services()]
-            try:
-                await self.peers.call(peer_id, "POST", "/p/play", {"session": clean, "services": services}, timeout=10)
-            except peermod.PeerError as e:
-                raise ServiceError(str(e))
-            return True
-        return await _result(work())
-
-    async def _played_here(self, peer_id: str, payload: dict[str, Any]) -> None:
-        """Another device handed its music here: the frontend plays it ("peer_play")."""
-        session = self._handed_over(peer_id, payload)
-        if session["queue"]:
-            name = self.peers.paired.get(peer_id, {}).get("name", "") if self.peers else ""
-            await decky.emit("peer_play", {"name": name, "session": session})
+    async def report_render_status(self, status: dict[str, Any]) -> None:
+        """Where this device has got to with what another is playing on it: {"state", "position", "duration",
+        "ended"}."""
+        if isinstance(status, dict) and self.render_for:
+            self.render_status = {k: status[k] for k in ("state", "position", "duration", "ended", "volume")
+                                  if k in status and isinstance(status[k], (str, int, float, bool))}
 
     @_when_ready
     async def cast_start(self, device_id: str) -> dict[str, Any]:
