@@ -28,6 +28,8 @@ from musicdeck.devices import DeviceWatcher
 from musicdeck.services.audiocd import AudioCdService
 from musicdeck.services.device import DeviceService
 from musicdeck.services.ipod import IpodService
+from musicdeck.services.iphone import IphoneService
+from musicdeck.services.phone import PhoneService
 from musicdeck.services.shelf import LocalLibrary
 from musicdeck.recents import Recents
 from musicdeck.settings import DEFAULTS, Settings, save_json
@@ -230,7 +232,10 @@ class Plugin:
         old = self.device_instances.pop(device["id"], None)
         if old:
             await old.stop()
-        cls = AudioCdService if device["kind"] == "cd" else IpodService if device["kind"] == "ipod" else DeviceService
+        kind = device["kind"]
+        cls = (AudioCdService if kind == "cd" else IpodService if kind == "ipod"
+               else PhoneService if kind == "mtp" and device["config"].get("wpd")
+               else IphoneService if kind == "ios" and device["config"].get("udid") else DeviceService)
         instance = cls(device["id"], device["config"], decky.DECKY_PLUGIN_RUNTIME_DIR)
         # its news (a CD named, a rip done) comes as Local files', with its name
         def announce(text: str, name: str = device["name"]) -> None:
@@ -299,7 +304,8 @@ class Plugin:
                 config = {k: device[k] for k in ("drive", "toc", "disc_id")}
             else:
                 config = {"paths": device["paths"], "kind": device["kind"], "source": device.get("source", ""),
-                          "mount": device.get("mount", ""), "uri": device.get("uri", "")}
+                          "mount": device.get("mount", ""), "uri": device.get("uri", ""), "wpd": device.get("wpd", ""),
+                          "udid": device.get("udid", ""), "device_id": device.get("device_id", 0)}
             known = self.devices.get(device["id"])
             entry = {"id": device["id"], "name": names.get(device["id"]) or device["name"], "own_name": device["name"],
                      "kind": device["kind"], "config": config}

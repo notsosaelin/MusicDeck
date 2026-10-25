@@ -32,7 +32,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from . import itunesdb, native
+from . import itunesdb, native, winio
 from .devices import _unescape
 from .itunesdb import HASH58, HASH72, HASHAB, HASH_NONE, ITunesDB, ITunesDBError
 
@@ -205,7 +205,14 @@ def sysinfo(control: str) -> dict[str, str]:
 
 
 def usb_facts(source: str) -> tuple[Optional[int], str]:
-    """(USB product id, serial number) of the device a /dev/sd* partition is on, from sysfs."""
+    """(USB product id, serial number) of the device a /dev/sd* partition is on, from sysfs. On Windows
+    `source` is \\\\.\\E:, and they're in its USB device's instance id (winio)."""
+    if winio.WINDOWS:
+        usb = winio.usb_device(source[4:5]) if len(source or "") > 4 else None
+        parsed = winio.parse_usb_id(usb[1]) if usb else None
+        if not parsed:
+            return None, ""
+        return (parsed[1] if parsed[0] == 0x05AC else None), parsed[2]
     name = os.path.basename(source or "")
     if not name or not os.path.isdir("/sys/class/block"):
         return None, ""
@@ -227,7 +234,12 @@ def usb_facts(source: str) -> tuple[Optional[int], str]:
 
 
 def mount_type(root: str) -> str:
-    """The file system a mount is ("vfat", "hfsplus"...), from /proc/self/mounts; "" when not found."""
+    """The file system a mount is ("vfat", "hfsplus"...), from /proc/self/mounts; "" when not found. On
+    Windows, its volume's (FAT32 is Linux's "vfat"; Windows mounts no HFS+)."""
+    if winio.WINDOWS:
+        vol = winio.volume(root[:1]) if root[1:2] == ":" else None
+        fs = (vol or {}).get("fs", "").lower()
+        return "vfat" if fs in ("fat", "fat32") else fs
     try:
         with open("/proc/self/mounts", "r", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -339,7 +351,10 @@ def hash72_key(control: str, guid: Optional[bytes], database: Optional[str]) -> 
 
 
 def usb_node(source: str) -> Optional[str]:
-    """/dev/bus/usb/BBB/DDD of the Apple device a /dev/sd* partition is on (sysfs), for control requests."""
+    """/dev/bus/usb/BBB/DDD of the Apple device a /dev/sd* partition is on (sysfs), for control requests.
+    On Windows the drive itself (\\\\.\\E:), when it's Apple's: SysInfoExtended comes over SCSI there."""
+    if winio.WINDOWS:
+        return source if source and usb_facts(source)[0] is not None else None
     name = os.path.basename(source or "")
     if not name or not os.path.isdir("/sys/class/block"):
         return None
@@ -356,7 +371,10 @@ def usb_node(source: str) -> Optional[str]:
 def read_sysinfo_extended(node: str) -> str:
     """SysInfoExtended from the iPod itself: vendor control request 0x40, value 2, in 4 KiB pieces until
     a short one (libgpod's ipod-usb.c), through usbdevfs. Needs the USB device to be the user's (uaccess,
-    as media players are); "" when it isn't, or the iPod doesn't answer."""
+    as media players are); "" when it isn't, or the iPod doesn't answer. On Windows, whose storage driver
+    has the USB device, the same XML from the iPod's SCSI vital product data pages (winio)."""
+    if winio.WINDOWS:
+        return winio.ipod_sysinfo_extended(node[4:5]) if len(node) > 4 else ""
     try:
         import ctypes
         import fcntl

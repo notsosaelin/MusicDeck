@@ -18,6 +18,8 @@ from .local import LocalService
 
 #: free space is read again after this long (a phone's comes over USB)
 SPACE_SECONDS = 30
+#: not read yet (time.monotonic() counts from boot: 0.0 would be "just read" for 30 s after it)
+NEVER = float("-inf")
 
 
 class DeviceService(LocalService):
@@ -35,7 +37,7 @@ class DeviceService(LocalService):
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, self.prepare_config(config, None), runtime_dir)
-        self._space: tuple[float, Optional[dict[str, int]]] = (0.0, None)
+        self._space: tuple[float, Optional[dict[str, int]]] = (NEVER, None)
 
     def space(self) -> Optional[dict[str, int]]:
         """{"total", "free"} bytes on it, or None when it won't say (some phones)."""
@@ -63,7 +65,7 @@ class DeviceService(LocalService):
     async def free_for(self, size: int) -> None:
         """Raises when `size` bytes won't fit on it."""
         from .base import ServiceError
-        self._space = (0.0, None)
+        self._space = (NEVER, None)
         room = await asyncio.to_thread(self.space)
         if room and room["free"] < size + 16 * 1024 * 1024:
             raise ServiceError(f"Not enough room: {_size(size)} to copy, {_size(room['free'])} free")

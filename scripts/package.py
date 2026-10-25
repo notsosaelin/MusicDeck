@@ -51,6 +51,10 @@ for platform_name, (name, fix) in CDRSKIN.items():
         shutil.copyfile(ROOT / "backend" / "cdrskin" / "UPSTREAM", ROOT / "bin" / platform_name / "cdrskin.UPSTREAM")
     else:
         print(f"note: no bin/{platform_name}/{name} ({fix}): that build burns no CDs")
+# mtp-helper (phones over MTP, Windows: Linux has GVfs): bundled when built
+if not (ROOT / "bin" / "windows-x86_64" / "mtp-helper.exe").exists():
+    print("note: no bin/windows-x86_64/mtp-helper.exe (bash scripts/build_mtp_helper.sh, in MSYS2's UCRT64 shell): "
+          "that build doesn't see phones")
 
 OUT = ROOT / "out"
 OUT.mkdir(exist_ok=True)

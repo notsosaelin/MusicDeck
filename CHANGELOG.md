@@ -3,6 +3,31 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.31.0
+
+- **Devices on Windows**: everything Local files' Devices does on the Deck now works on a Windows PC too.
+  - Music players, USB sticks and card readers show up by their drive letter's name, and eject the way
+    "Safely remove" does. A stick keeps the same entry (index, favourites) on Windows as on the Deck.
+  - **iPods** are named and identified as on Linux, and sync, covers and all. Their SysInfoExtended comes
+    from the iPod over SCSI, as libgpod does it. A Mac-formatted iPod (which Windows can't read) is said, not
+    silently missing.
+  - **Audio CDs** play and rip, and data CDs of MP3s play.
+  - **Phones** set to File transfer: through Windows' own MTP support (a small helper, mtp-helper). As Windows
+    doesn't show a phone as folders, its songs are read off it as they're needed, to index them and to play
+    them, and up to 2 GB of them are kept on the PC. Copying music to a phone works too.
+  - **iPhones and iPod touches**: their synced music, read only, as on Linux. Needs Apple Devices or iTunes
+    installed (Windows has no iPhone driver without it), and the iPhone to trust the PC once.
+- **Recently deleted on Windows**: what's deleted goes to the Recycle Bin as before, and now Restore in
+  MusicDeck puts it back.
+- **New music found at once on Windows**, as on the Deck, rather than by the hourly check.
+- **An equalizer for each output on Windows**: the speakers, headphones, a Bluetooth device or a TV each
+  keep their own, as on the Deck.
+- Tried on real hardware so far: a HiBy R4 over MTP (played from, and a song copied off it), and a PC's own
+  drives, Recycle Bin and sound output. iPods, CDs and iPhones on Windows not yet.
+- A device plugged in within 30 seconds of the Deck starting didn't say how much room it had at first.
+- A Local files folder holding a whole drive (or /) no longer stalls MusicDeck while it's watched for new
+  music: the first 10,000 folders are watched, and the hourly check covers the rest.
+
 ## 0.30.2
 
 - **Burn to CD on Windows**: the Windows zip has cdrskin too, the same libburn talking to the drive through

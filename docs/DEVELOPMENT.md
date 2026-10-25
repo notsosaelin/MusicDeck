@@ -28,7 +28,7 @@ decky.pyi                  type stubs for Decky's `decky` module (from the plugi
   and `x86_64-pc-windows-gnu` targets, cargo-zigbuild
   and zig. Linux or WSL.
 - For hashab and cdrskin: zig (on PATH, or `~/.local/zig`), make. Linux or WSL.
-- For Windows' cdrskin: [MSYS2](https://www.msys2.org)'s UCRT64 shell, with
+- For Windows' cdrskin and mtp-helper: [MSYS2](https://www.msys2.org)'s UCRT64 shell, with
   `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkgconf make`.
 
 ## Build
@@ -41,6 +41,7 @@ bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static 
 bash scripts/build_hashab.sh            # bin/<platform>/hashab (the iPod nano 6G/7G signature), checked against its test vectors
 bash scripts/build_cdrskin.sh           # bin/linux-*/cdrskin (burning CDs): libburn's release, checked by SHA-256, static musl
 bash scripts/build_cdrskin_windows.sh   # bin/windows-x86_64/cdrskin.exe: libburn on libcdio, static (MSYS2 UCRT64 shell)
+bash scripts/build_mtp_helper.sh        # bin/windows-x86_64/mtp-helper.exe: phones over MTP on Windows (MSYS2 UCRT64 shell)
 pnpm smoke                              # the built bundle loads, wires its player, unloads cleanly
 python scripts/package.py               # out/MusicDeck-<version>-<platform>.zip (linux-x86_64, linux-arm64,
                                         # windows-x86_64), each with its own helpers, and their .sha256
@@ -263,8 +264,9 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
-3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py`.
-4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`, with `bash scripts/build_cdrskin_windows.sh` run
-   in MSYS2's UCRT64 shell before `package.py`
+3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py && python tests/test_windows.py` (on Windows
+   too: `test_windows.py` asks the PC's own drives and sound output there).
+4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`, with `bash scripts/build_cdrskin_windows.sh` and
+   `bash scripts/build_mtp_helper.sh` run in MSYS2's UCRT64 shell before `package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
 6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.

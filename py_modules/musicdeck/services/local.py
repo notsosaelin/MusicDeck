@@ -484,6 +484,8 @@ class LocalService(MusicService):
     # scrobble: plays counted on the Deck (Most played, Recently played), when "Report plays" is on
     # tags: edited in the files, and looked up on MusicBrainz; artwork: albums' own pictures, set or found
     features = frozenset({"star", "lyrics", "radio", "scrobble", "tags", "artwork"})
+    #: its folders watched for new music (not a phone's mirror, which MusicDeck itself fills)
+    watches = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
@@ -586,11 +588,12 @@ class LocalService(MusicService):
         except (FileNotFoundError, json.JSONDecodeError):
             self.review = {}
         self.rescan()
-        self.watcher = FolderWatcher(self.roots, self.rescan)
-        try:
-            self.watcher.start()
-        except OSError:
-            self.watcher.stop()
+        if self.watches:
+            self.watcher = FolderWatcher(self.roots, self.rescan)
+            try:
+                self.watcher.start()
+            except OSError:
+                self.watcher.stop()
         self.recheck = spawn(self._recheck(), "checking for new music")
 
     async def _recheck(self) -> None:
@@ -649,48 +652,53 @@ class LocalService(MusicService):
             self.scan_progress["scanning"] = False
         self._queue_new_albums()
 
+    def _listing(self, previous: dict[str, dict[str, Any]]) -> Any:
+        """(path, size, mtime) of every file under the roots the scan looks at, in order; hidden ones
+        (macOS's "._" shadows, a copy being tag-edited: tagging.py) and hidden folders left out. A phone on
+        Windows lists its own (services/phone.py); `previous` (the index by path) says what's known."""
+        for root in self.roots:
+            # followlinks=False avoids symlink loops; os.walk skips unreadable dirs silently
+            for directory, dirnames, filenames in os.walk(root):
+                dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+                for name in sorted(filenames):
+                    if name.startswith(".") or tagging.is_temp(name):
+                        continue
+                    path = os.path.join(directory, name)
+                    try:
+                        st = os.stat(path)
+                    except OSError:
+                        continue
+                    yield path, st.st_size, st.st_mtime
+
     def _scan_blocking(self) -> None:
         previous = {t["path"]: t for t in self.tracks.values()}
         # a library's very first scan is all "new": only what arrives after it is new music
         first = not previous
         tracks: dict[str, dict[str, Any]] = {}
         playlist_files: list[str] = []
-        for root in self.roots:
-            # followlinks=False avoids symlink loops; os.walk skips unreadable dirs silently
-            for directory, dirnames, filenames in os.walk(root):
-                dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
-                for name in sorted(filenames):
-                    # hidden files: macOS's "._" shadows, and a copy being tag-edited (tagging.py)
-                    if name.startswith(".") or tagging.is_temp(name):
-                        continue
-                    ext = os.path.splitext(name)[1].lower()
-                    path = os.path.join(directory, name)
-                    if ext in PLAYLIST_EXTENSIONS:
-                        playlist_files.append(path)
-                        continue
-                    if ext not in AUDIO_EXTENSIONS:
-                        continue
-                    try:
-                        st = os.stat(path)
-                    except OSError:
-                        continue
-                    old = previous.get(path)
-                    unchanged = old and old["mtime"] == st.st_mtime and old["size"] == st.st_size
-                    # a video (a phone's camera clips): not music. Checked once per file (indexes from
-                    # before this check have them: "audio_only" marks the ones looked at)
-                    if ext in MAYBE_VIDEO and not (unchanged and old.get("audio_only")) and has_video(path):
-                        continue
-                    if unchanged:
-                        record = old
-                    else:
-                        # "added": when it came into the library; its tags edited since don't make it new
-                        added = old.get("added", old["mtime"]) if old else st.st_mtime
-                        record = {"path": path, "mtime": st.st_mtime, "size": st.st_size, "added": added,
-                                  **read_tags(path)}
-                    if ext in MAYBE_VIDEO:
-                        record["audio_only"] = True
-                    tracks[_hash(path)] = record
-                    self.scan_progress["found"] = len(tracks)
+        for path, size, mtime in self._listing(previous):
+            ext = os.path.splitext(path)[1].lower()
+            if ext in PLAYLIST_EXTENSIONS:
+                playlist_files.append(path)
+                continue
+            if ext not in AUDIO_EXTENSIONS:
+                continue
+            old = previous.get(path)
+            unchanged = old and old["mtime"] == mtime and old["size"] == size
+            # a video (a phone's camera clips): not music. Checked once per file (indexes from
+            # before this check have them: "audio_only" marks the ones looked at)
+            if ext in MAYBE_VIDEO and not (unchanged and old.get("audio_only")) and has_video(path):
+                continue
+            if unchanged:
+                record = old
+            else:
+                # "added": when it came into the library; its tags edited since don't make it new
+                added = old.get("added", old["mtime"]) if old else mtime
+                record = {"path": path, "mtime": mtime, "size": size, "added": added, **read_tags(path)}
+            if ext in MAYBE_VIDEO:
+                record["audio_only"] = True
+            tracks[_hash(path)] = record
+            self.scan_progress["found"] = len(tracks)
         by_path = {t["path"]: tid for tid, t in tracks.items()}
         playlists = {}
         for path in playlist_files:

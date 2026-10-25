@@ -171,7 +171,13 @@ source (`MusicService.remove`).
   (sticks, iPods, discs) or `-u` (phones, which aren't mounted again until unplugged), or the CD-ROM ioctl
   for an audio CD's tray. A busy device stays in Devices and says so.
 - **Space**: `DeviceService.space()` (statvfs, kept 30 s); copies check it first (`free_for`).
-- **Unplugged**: it leaves Local files. Polled every 3 s (`DeviceWatcher`). Linux only.
+- **Unplugged**: it leaves Local files. Polled every 3 s (`DeviceWatcher`).
+- **Windows** (`winio.py`): drives by letter (on USB or FireWire, with a volume: a player, stick or iPod;
+  a CD drive's data disc), ejected with "Safely remove" (`CM_Request_Device_EjectW`); audio CDs through
+  Windows' CD-ROM requests; an iPod's SysInfoExtended from its SCSI vital product data. Phones over MTP
+  through `bin/windows-x86_64/mtp-helper.exe` (Windows Portable Devices; `mtp.py`, `PhoneService`), and
+  iPhones over AFC through Apple Mobile Device Service (`ios.py`, `IphoneService`), both read into a mirror
+  on the PC (`<data>/phones/<id>`) whose songs are fetched as needed (2 GB kept).
 - **Deleting** (`LocalLibrary.delete`, `trash.py`): a song (with its .lrc), an album (its folder whole when only
   artwork, logs and cue sheets would be left), a folder or a playlist file goes to the freedesktop.org trash
   (the home's, or the drive's own `.Trash-<uid>`), with a `.trashinfo`, so the desktop's Trash restores it as

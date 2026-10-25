@@ -32,6 +32,7 @@ from .base import ServiceError, StreamSource
 from .device import DeviceService, _size as device_size
 from .ipod import IpodService
 from .local import LocalService
+from .phone import PhoneService
 
 PREFIX = "dv~"
 ID_KEYS = ("album_id", "artist_id")
@@ -392,7 +393,11 @@ class LocalLibrary(LocalService):
                     number = f"{f['track']:02d} " if f.get("track") else ""
                     file_name = (number + models.safe_name(f.get("title") or "Track", "Track")
                                  + os.path.splitext(f["path"])[1].lower())
-                copied += await asyncio.to_thread(self._copy_one, f["path"], where, file_name)
+                source = await self._readable(f)
+                if isinstance(index, PhoneService):
+                    copied += await asyncio.to_thread(index.copy_in, source, where, file_name)
+                else:
+                    copied += await asyncio.to_thread(self._copy_one, source, where, file_name)
                 self.copy_progress["done"] += 1
             self.copy_progress["running"] = False
             if index is not None and copied:
@@ -405,10 +410,21 @@ class LocalLibrary(LocalService):
             if self.announce:
                 self.announce(f"Copying to {name} stopped: {self.copy_progress['error']}")
 
+    async def _readable(self, f: dict[str, Any]) -> str:
+        """A song's file to read: a phone's (on Windows) copied off it first, when it isn't on the PC."""
+        try:
+            instance = self._device(f["from"])["instance"] if f.get("from") else None
+        except ServiceError:
+            instance = None
+        if isinstance(instance, PhoneService):
+            return await asyncio.to_thread(instance.ensure, f["path"])
+        return f["path"]
+
     async def _copy_to_ipod(self, files: list[dict[str, Any]], playlist: str, name: str, ipod: IpodService) -> None:
         def progress(done: int) -> None:
             self.copy_progress["done"] = done
         try:
+            files = [{**f, "path": await self._readable(f)} for f in files]
             added = await ipod.put(files, playlist, progress)
             self.copy_progress["running"] = False
             if self.announce:
@@ -490,7 +506,7 @@ class LocalLibrary(LocalService):
             wavs, sizes = [], []
             for n, f in enumerate(files, 1):
                 wav = os.path.join(work, f"{n:02d}.wav")
-                frames = await asyncio.to_thread(burn.to_cd_audio, ffmpeg, f["path"], wav)
+                frames = await asyncio.to_thread(burn.to_cd_audio, ffmpeg, await self._readable(f), wav)
                 wavs.append(wav)
                 sizes.append(frames * burn.FRAME / 1024 / 1024)
                 progress.update(done=n, percent=round(100 * n / len(files)))

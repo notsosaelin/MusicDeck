@@ -12,7 +12,8 @@ the kernel's own CD audio support do: no program needed, so it works on SteamOS 
 * MusicBrainz knows a disc by its disc ID (`disc_id`): a hash of the track offsets.
 
 Drives are /dev/sr*. Steam's systemd gives the user at the screen access to them (uaccess), so reading
-needs no root. Linux only.
+needs no root. On Windows they're \\\\.\\D: and so on, read with Windows' own CD-ROM requests (winio.py:
+IOCTL_CDROM_READ_TOC, IOCTL_CDROM_RAW_READ): the same frames.
 """
 import base64
 import ctypes
@@ -21,6 +22,8 @@ import os
 import struct
 import threading
 from typing import Callable, Optional
+
+from . import winio
 
 try:
     import fcntl
@@ -47,17 +50,11 @@ CHUNK = 75
 WAV_HEADER = 44
 
 
-DRIVE_CDROM = 5  # GetDriveTypeW's answer for a CD/DVD drive
-
-
 def drives() -> list[str]:
     """The CD/DVD drives there are: /dev/sr0, /dev/sr1... On Windows \\\\.\\D: and so on, the drive letters
-    Windows says are CD drives, named as libcdio (and so cdrskin) names them. Only burning uses those."""
-    if os.name == "nt":
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        mask = kernel32.GetLogicalDrives()
-        return [f"\\\\.\\{chr(65 + i)}:" for i in range(26)
-                if mask >> i & 1 and kernel32.GetDriveTypeW(f"{chr(65 + i)}:\\") == DRIVE_CDROM]
+    Windows says are CD drives, named as libcdio (and so cdrskin) names them."""
+    if winio.WINDOWS:
+        return [winio.device_path(d) for d in winio.letters() if winio.drive_type(d) == winio.DRIVE_CDROM]
     return sorted(f"/dev/{n}" for n in os.listdir("/dev") if n.startswith("sr") and n[2:].isdigit()) \
         if os.path.isdir("/dev") else []
 
@@ -69,6 +66,8 @@ def _open(device: str) -> int:
 
 def eject(device: str) -> bool:
     """Opens the drive's tray (CDROM_LOCKDOOR off, then CDROMEJECT), as `eject` does."""
+    if winio.WINDOWS and device:
+        return winio.cd_eject(device)
     if fcntl is None or not device:
         return False
     try:
@@ -89,6 +88,11 @@ def eject(device: str) -> bool:
 
 
 def has_audio_disc(device: str) -> bool:
+    if winio.WINDOWS:
+        try:
+            return winio.cd_has_disc(device) and any(audio for _, _, audio in winio.cd_toc(device))
+        except OSError:
+            return False
     if fcntl is None:
         return False
     try:
@@ -107,6 +111,8 @@ def has_audio_disc(device: str) -> bool:
 
 def read_toc(device: str) -> list[tuple[int, int, bool]]:
     """[(track number, start LBA, audio?)] in order, then (CDROM_LEADOUT, lead-out LBA, False)."""
+    if winio.WINDOWS:
+        return winio.cd_toc(device)
     assert fcntl is not None
     fd = _open(device)
     try:
@@ -166,6 +172,9 @@ class AudioReader:
         self.lock = threading.Lock()
 
     def read(self, lba: int, count: int) -> bytes:
+        if winio.WINDOWS:
+            with self.lock:
+                return winio.cd_read_audio(self.device, lba, count)
         assert fcntl is not None
         out = bytearray()
         with self.lock:
@@ -210,4 +219,4 @@ class TrackWav:
 
 
 def cd_reader(device: str) -> Optional[AudioReader]:
-    return AudioReader(device) if fcntl is not None else None
+    return AudioReader(device) if fcntl is not None or winio.WINDOWS else None

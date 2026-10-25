@@ -83,7 +83,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   Artist/Album). A CD is named by MusicBrainz, and its album page rips it to your Local files folder as
   tagged FLAC (with ffmpeg, which Bazzite has). No Local files source yet? Plugging something in adds one on
   ~/Music. Players whose firmware calls them by a code name can be renamed in Decky → MusicDeck, under
-  Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only.
+  Plugged in. Phones need GVfs in game mode (Bazzite has it); elsewhere, USB storage only. On Windows all of
+  it works too: drives by their letters, phones through Windows' own MTP support, and an iPhone's synced
+  music through Apple Devices or iTunes (installed, and trusted once).
 - **Burn a CD:** with a CD drive plugged in and a blank CD-R or CD-RW in it, Y on an album, artist or
   playlist in Local files → Burn to CD writes it as an audio CD any CD player plays, gapless, with its titles
   (CD-Text) for car stereos and players that show them. It says first how long it is and whether a CD-RW is
@@ -237,10 +239,12 @@ What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 | Windows (x86_64, and Arm through Windows' emulation) | Decky 3.3's experimental Windows build, e.g. installed by [Playhub](https://github.com/LoZazaMastro/Playhub) | Experimental |
 
 On Windows, some things work differently: YouTube runs in the Python that comes with MusicDeck's Windows
-zip (python.org's embeddable Python; nothing to install); one equalizer for every output (Windows doesn't say which output is in use the
-way PipeWire does); new music in your folders is found by the hourly check rather than at once; screen off
-and lowering the music in games depend on Steam's game mode, which Windows doesn't have; the Steam
-soundtracks source finds Steam where Windows' registry says it is. Decky's team doesn't support Windows: ask
+zip (python.org's embeddable Python; nothing to install); a phone's songs are copied to the PC as they're
+needed (up to 2 GB of them kept), since Windows doesn't show a phone as folders the way Linux does; a
+Mac-formatted iPod can't be read (Windows can't read HFS+: MusicDeck says so); an iPhone needs Apple Devices
+(or iTunes) installed, as Windows has no iPhone driver without it; screen off and lowering the music in
+games depend on Steam's game mode, which Windows doesn't have; the Steam soundtracks source finds Steam
+where Windows' registry says it is. Decky's team doesn't support Windows: ask
 Playhub's community, or here.
 
 Logs are in `~/homebrew/logs/MusicDeck/`. Turn on **Debug log** under Troubleshooting in the plugin settings

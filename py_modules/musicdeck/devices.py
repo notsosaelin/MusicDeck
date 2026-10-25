@@ -13,7 +13,11 @@ then played as a source of its own while it's there (DeviceService), as the Xbox
   it's set to "File transfer" (on Android, the USB notification).
 * Audio CDs: a disc in a /dev/sr* drive (cd.py reads it), its table of contents read once when it goes
   in; played by AudioCdService, which can rip it to Local files.
-* Linux only (on Windows, removable drives are drive letters; not yet).
+* Windows: drive letters (winio.py). A drive on USB (or FireWire) with a volume on it is a player, stick
+  or iPod; a CD drive with a data disc in it is a disc; audio CDs as on Linux. A drive's id is its
+  volume's serial number, which is what Linux calls a FAT or exFAT drive's UUID, so a stick keeps its id
+  on both. Ejecting is "Safely remove" (the USB device, CM_Request_Device_EjectW) or the tray. An iPod
+  that's Mac-formatted has no drive letter (Windows can't read HFS+): it's said, not shown.
 
 A device's id comes from what identifies it (its file system's UUID, or the phone's MTP name), so it
 keeps its index, favourites and playlists between plugs.
@@ -26,7 +30,7 @@ import shutil
 import urllib.parse
 from typing import Any, Awaitable, Callable, Optional
 
-from . import cd, debuglog
+from . import cd, debuglog, ios, mtp, winio
 
 POLL_SECONDS = 3
 # MTP needs a moment longer: `gio` is a process each time
@@ -132,6 +136,76 @@ def usb_storage(mounts_text: str, user: str, uuids: dict[str, str]) -> list[dict
     return found
 
 
+def windows_storage(drives: list[dict[str, Any]], ipod: Callable[[str], bool]) -> list[dict[str, Any]]:
+    """What's plugged in on Windows, from what winio says of each drive letter: {"letter", "type"
+    (GetDriveTypeW's), "volume" (winio.volume, or None), "storage" (winio.storage), "cda_only" (a CD whose
+    files are all .cda: an audio CD as Windows shows it)}. Internal drives (NVMe, SATA), card slots and
+    readers with nothing in them, and audio CDs (audio_cds finds those) are left out."""
+    found = []
+    for d in drives:
+        letter, vol, hw = d["letter"], d.get("volume"), d.get("storage") or {}
+        if not vol:
+            continue
+        root = f"{letter}:\\"
+        if d["type"] == winio.DRIVE_CDROM:
+            if d.get("cda_only"):
+                continue
+            kind = "disc"
+        elif hw.get("bus") in (winio.BUS_USB, winio.BUS_1394):
+            kind = "ipod" if ipod(root) else "usb"
+        else:
+            continue
+        name = vol["label"] or tidy_name(hw.get("vendor", ""), hw.get("product", "")) or f"Drive {letter}"
+        found.append({"id": _device_id("usb:" + vol["serial"]), "name": name, "kind": kind, "paths": [root],
+                      "source": winio.device_path(letter), "mount": root, "fs": vol["fs"].lower(),
+                      "read_only": vol["read_only"] or kind == "disc"})
+    return found
+
+
+def windows_phones(found: list[dict[str, str]], ejected: set[str]) -> list[dict[str, Any]]:
+    """Phones over MTP on Windows (mtp.phones), each a device read through mtp-helper
+    (services/phone.py); ones ejected stay out until they're unplugged."""
+    return [{"id": _device_id("mtp:" + mtp.stable_key(p["id"], p.get("serial", ""))), "kind": "mtp", "paths": [],
+             "wpd": p["id"],
+             "name": tidy_name(p.get("maker", ""), p.get("name", "")) or "Phone"}
+            for p in found if p["id"] not in ejected]
+
+
+def windows_iphones(found: list[dict[str, Any]], names: dict[str, str], ejected: set[str]) -> list[dict[str, Any]]:
+    """iPhones and iPod touches on Windows (ios.devices), read over AFC (services/iphone.py): those whose
+    name is known, which is once they trust this PC. The same id as on Linux (afc:<UDID>)."""
+    return [{"id": _device_id("afc:" + p["udid"]), "name": names[p["udid"]], "kind": "ios", "paths": [],
+             "udid": p["udid"], "device_id": p["device_id"]}
+            for p in found if p["udid"] in names and p["udid"] not in ejected]
+
+
+def unreadable_ipods(drives: list[dict[str, Any]]) -> list[str]:
+    """Drive letters of iPods plugged in with no volume Windows can read: Mac-formatted ones."""
+    return [d["letter"] for d in drives if not d.get("volume") and d["type"] != winio.DRIVE_CDROM
+            and (d.get("storage") or {}).get("vendor", "").lower() == "apple"
+            and "ipod" in (d.get("storage") or {}).get("product", "").lower()]
+
+
+def _windows_drives() -> list[dict[str, Any]]:
+    """What winio says of every drive letter, for windows_storage."""
+    found = []
+    for letter in winio.letters():
+        kind = winio.drive_type(letter)
+        if kind not in (winio.DRIVE_REMOVABLE, winio.DRIVE_FIXED, winio.DRIVE_CDROM):
+            continue  # network drives, RAM disks
+        vol = winio.volume(letter)
+        cda_only = False
+        if vol and kind == winio.DRIVE_CDROM:
+            try:
+                names = os.listdir(f"{letter}:\\")
+                cda_only = bool(names) and all(n.lower().endswith(".cda") for n in names)
+            except OSError:
+                cda_only = True
+        found.append({"letter": letter, "type": kind, "volume": vol,
+                      "storage": winio.storage(letter) if kind != winio.DRIVE_CDROM else {}, "cda_only": cda_only})
+    return found
+
+
 def is_ipod(root: str) -> bool:
     """An iPod with Apple's software (iPod_Control), read and synced through its database (ipod.py). One
     running Rockbox plays files as they are: a player like any other."""
@@ -216,10 +290,18 @@ class DeviceWatcher:
         # phones ejected: not mounted again until they're unplugged (no longer listed)
         self.ejected: set[str] = set()
         self.on_note: Optional[Callable[[str], Awaitable[None]]] = None
+        # Mac-formatted iPods plugged in (by drive letter), and those already said to be unreadable
+        self.hfs_ipods: list[str] = []
+        self.told_hfs: set[str] = set()
+        # Windows: the MTP helper, and the phones it last saw (asked every MTP_EVERY polls)
+        self.mtp = mtp.helper()
+        self.phones: list[dict[str, str]] = []
+        # and the iPhones Apple's service lists (their names by UDID are in ios_names once trusted)
+        self.iphones: list[dict[str, Any]] = []
 
     @property
     def available(self) -> bool:
-        return os.name == "posix" and os.path.exists("/proc/self/mounts")
+        return winio.WINDOWS or (os.name == "posix" and os.path.exists("/proc/self/mounts"))
 
     def start(self) -> None:
         if self.available and not self.task:
@@ -274,6 +356,12 @@ class DeviceWatcher:
                 await self.on_note(f"Unlock {name} and tap Trust to see its music")
 
     def _scan(self) -> list[dict[str, Any]]:
+        if winio.WINDOWS:
+            drives = _windows_drives()
+            self.hfs_ipods = unreadable_ipods(drives)
+            return (windows_storage(drives, is_ipod) + windows_phones(self.phones, self.ejected)
+                    + windows_iphones(self.iphones, self.ios_names, self.ejected)
+                    + audio_cds(cd.drives(), cd.has_audio_disc, cd.read_toc, self.discs))
         try:
             with open("/proc/self/mounts", "r", encoding="utf-8", errors="replace") as f:
                 mounts = f.read()
@@ -289,6 +377,12 @@ class DeviceWatcher:
         kind = device.get("kind")
         if kind == "cd":
             return "" if await asyncio.to_thread(cd.eject, device.get("drive", "")) else "The drive wouldn't open"
+        if winio.WINDOWS and kind in ("usb", "ipod", "disc"):
+            return await asyncio.to_thread(self._eject_windows, device)
+        if winio.WINDOWS and kind in ("mtp", "ios"):
+            # nothing to unmount: MusicDeck lets go of it until it's unplugged, as on Linux
+            self.ejected.add(device.get("wpd") or device.get("udid") or "")
+            return ""
         if not self.gio:
             return "Ejecting needs GVfs (gio), which this system doesn't have"
         target = device.get("uri") if kind in ("mtp", "ios") else device.get("mount")
@@ -310,13 +404,69 @@ class DeviceWatcher:
             self.ejected.add(target)
         return ""
 
+    @staticmethod
+    def _eject_windows(device: dict[str, Any]) -> str:
+        """A disc's tray opened; a stick's or iPod's USB device safely removed."""
+        source = device.get("source", "")
+        if device.get("kind") == "disc":
+            return "" if cd.eject(source) else "The drive wouldn't open"
+        usb = winio.usb_device(source[4:5]) if len(source) > 4 else None
+        if not usb:
+            return "Windows doesn't say which USB device that is"
+        return winio.eject_usb(usb[0])
+
+    async def _find_windows_phones(self) -> None:
+        """Phones over MTP (mtp-helper), and iPhones (Apple's service): an iPhone's name is asked once,
+        which needs it to trust this PC; until then it's asked to, once per plug."""
+        self.phones = await asyncio.to_thread(mtp.phones, self.mtp) if self.mtp else []
+        self.iphones = await asyncio.to_thread(ios.devices)
+        plugged = {p["udid"] for p in self.iphones}
+        self.ejected &= {p["id"] for p in self.phones} | plugged
+        self.asked_trust &= plugged
+        for phone in self.iphones:
+            udid = phone["udid"]
+            if udid in self.ios_names:
+                continue
+            name = await asyncio.to_thread(self._iphone_name, phone)
+            if name:
+                self.ios_names[udid] = name
+            elif udid not in self.asked_trust and self.on_note:
+                self.asked_trust.add(udid)
+                await self.on_note("Unlock your iPhone and tap Trust to see its music (if it doesn't ask, open "
+                                   "Apple Devices or iTunes once with it plugged in)")
+
+    @staticmethod
+    def _iphone_name(phone: dict[str, Any]) -> str:
+        record = ios.pair_record(phone["udid"])
+        if not record:
+            return ""
+        try:
+            with ios.Lockdown.session(phone["device_id"], record) as ld:
+                return str(ld.value("DeviceName") or "iPhone")
+        except (OSError, KeyError, ValueError) as e:
+            debuglog.debug("devices", "an iPhone didn't say its name", error=str(e))
+            return ""
+
+    async def _tell_hfs(self) -> None:
+        """Says once, per plug, that a Mac-formatted iPod can't be read on Windows."""
+        found = set(self.hfs_ipods)
+        for letter in sorted(found - self.told_hfs):
+            if self.on_note:
+                await self.on_note("This iPod is Mac-formatted, which Windows can't read. Restore it with iTunes "
+                                   "for Windows (or Apple Devices) to use it here; that erases it")
+        self.told_hfs = found
+
     async def _run(self) -> None:
         tick = 0
         while True:
             try:
-                if tick % MTP_EVERY == 0:
+                if tick % MTP_EVERY == 0 and not winio.WINDOWS:
                     await self._mount_phones()
+                elif tick % MTP_EVERY == 0:
+                    await self._find_windows_phones()
                 devices = await asyncio.to_thread(self._scan)
+                if winio.WINDOWS:
+                    await self._tell_hfs()
                 if devices != self.known:
                     self.known = devices
                     await self.on_change(devices)

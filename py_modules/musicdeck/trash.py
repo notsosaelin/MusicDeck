@@ -7,11 +7,16 @@ deleted: game mode has no file manager) or from the desktop's Trash.
   info/<name>.trashinfo (where it was, when it went).
 * One elsewhere (an SD card, a second drive) goes to that drive's own trash, <its top>/.Trash-<uid>, as
   the spec says: moving it there is a rename, and a trash across drives would be a copy.
-* Windows: the Recycle Bin (shell API), which MusicDeck doesn't restore from.
+* Windows: the Recycle Bin (shell API). It's a folder on each drive, $Recycle.Bin\\<the user's SID>\\, where
+  each thing recycled is a $R<id> (the file or folder itself) and a $I<id> beside it (where it was, and
+  when); MusicDeck finds its own by the path it had, and restores as Explorer does: the $R moved back, the
+  $I removed.
 """
 import ctypes
 import datetime
+import glob
 import os
+import struct
 import urllib.parse
 from typing import Optional
 
@@ -65,12 +70,13 @@ def _free_name(files_dir: str, info_dir: str, name: str) -> str:
 
 
 def trash(path: str) -> dict[str, str]:
-    """Moves a file or folder to the trash; returns where it went: {"original", "trashed", "info"}
-    ("" for both on Windows, where it's the Recycle Bin's)."""
+    """Moves a file or folder to the trash; returns where it went: {"original", "trashed", "info"} (on
+    Windows the Recycle Bin's $R and $I, or "" for both when it can't be found there)."""
     path = os.path.abspath(path)
     if RECYCLE_BIN:
         _recycle(path)
-        return {"original": path, "trashed": "", "info": ""}
+        trashed, info = recycled(path)
+        return {"original": path, "trashed": trashed, "info": info}
     trash_root, top = trash_dir_for(path)
     files_dir, info_dir = os.path.join(trash_root, "files"), os.path.join(trash_root, "info")
     os.makedirs(files_dir, exist_ok=True)
@@ -116,6 +122,43 @@ class _SHFILEOPSTRUCTW(ctypes.Structure):
     _fields_ = [("hwnd", ctypes.c_void_p), ("wFunc", ctypes.c_uint), ("pFrom", ctypes.c_wchar_p),
                 ("pTo", ctypes.c_wchar_p), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", ctypes.c_int),
                 ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", ctypes.c_wchar_p)]
+
+
+def recycle_info_path(data: bytes) -> str:
+    """Where a $I file says its $R was: version 2 (Windows 10 on) has the path's length, then the path;
+    version 1 (Vista to 8.1) a fixed 260 characters. Both: version, size, deletion time first, 8 bytes
+    each. "" when it isn't one."""
+    if len(data) < 24:
+        return ""
+    version = struct.unpack_from("<q", data)[0]
+    if version == 2 and len(data) >= 28:
+        length = struct.unpack_from("<I", data, 24)[0]
+        raw = data[28:28 + 2 * length]
+    elif version == 1:
+        raw = data[24:24 + 520]
+    else:
+        return ""
+    return raw.decode("utf-16-le", "replace").split("\0", 1)[0]
+
+
+def recycled(path: str, bin_root: Optional[str] = None) -> tuple[str, str]:
+    """(its $R, its $I) of what was just recycled from `path`: the newest $I in the drive's Recycle Bin
+    (the folders of it this user can read: their own) that says it was there; ("", "") if none does."""
+    bin_root = bin_root or os.path.join(os.path.splitdrive(path)[0] + os.sep, "$Recycle.Bin")
+    best, newest = ("", ""), -1.0
+    for info in glob.glob(os.path.join(glob.escape(bin_root), "*", "$I*")):
+        try:
+            when = os.path.getmtime(info)
+            if when <= newest:
+                continue
+            with open(info, "rb") as f:
+                said = recycle_info_path(f.read(4096))
+        except OSError:
+            continue
+        if said.lower() == path.lower():  # Windows' paths don't mind case
+            folder, name = os.path.split(info)
+            best, newest = (os.path.join(folder, "$R" + name[2:]), info), when
+    return best
 
 
 def _recycle(path: str) -> None:
