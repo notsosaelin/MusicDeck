@@ -128,6 +128,7 @@ class Plugin:
 
     async def _main(self):
         decky.logger.addFilter(debuglog.Redacting())
+        _quiet_connection_resets(asyncio.get_running_loop())
         # sign-ins, Spotify's stored credentials, listening history and logs: this user's only, even
         # on distros whose home folders others can read
         for folder in (decky.DECKY_PLUGIN_SETTINGS_DIR, decky.DECKY_PLUGIN_RUNTIME_DIR, decky.DECKY_PLUGIN_LOG_DIR):
@@ -2056,6 +2057,21 @@ CATALOGUE_TYPES = {"qobuz", "tidal", "spotify", "youtube", "soundcloud", "bandca
 TOOK_OVER_SAVE = 0.6
 #: another device's music is offered to continue here for this long after it was last played
 HANDOFF_FRESH = 12 * 3600
+
+
+def _quiet_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
+    """Windows' asyncio logs a connection the other end dropped (another device restarting, a speaker going off) as an
+    error while it closes it: harmless, and left out of the log; everything else is logged as before."""
+    default = loop.get_exception_handler()
+
+    def handle(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if isinstance(context.get("exception"), ConnectionResetError) and "connection_lost" in str(context.get("message", "")) + repr(context.get("handle", "")):
+            return
+        if default:
+            default(loop, context)
+        else:
+            loop.default_exception_handler(context)
+    loop.set_exception_handler(handle)
 
 
 def _device_name() -> str:

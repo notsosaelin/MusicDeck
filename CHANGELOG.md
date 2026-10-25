@@ -3,6 +3,11 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.4
+
+- Windows: the log no longer shows an error when another device drops its connection (it restarting, a speaker going
+  off); it was harmless.
+
 ## 0.39.3
 
 - **Picking it back up follows the music**: once another of your devices has continued what was playing here, Play
