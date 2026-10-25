@@ -214,6 +214,19 @@ m.previewSource(id)                       // another source's Home/Browse/Search
 Screenshots of the QAM: `python scripts/cdp.py QuickAccess "1" --shot qam.png`. Dialogs render in
 the "Steam Big Picture Mode" target. (The screen must be on; a sleeping display captures black.)
 
+In desktop Steam, each window is a target by its title: "Steam" (the main window, where Music is),
+"MusicDeck" (the mini player), "MusicDeck Settings" and the other dialogs. A window covered by others
+isn't painted, so its capture waits forever: bring it to the front first
+(`SteamClient.Window.BringToFront()` in it). `--hover x,y` moves the mouse there before the capture, for
+hover states (CSS pixels: on a 2x display, half the screenshot's).
+
+```js
+const d = m.desktop.current;              // desktop Steam's parts, while it's showing
+d.showMusic(); d.openMini(); d.mini()     // Music, the mini player (its window)
+d.showSettings(); d.showEqualizer()       // the dialogs
+m.lookup.open(sourceId, album, files)     // Look up details for an album
+```
+
 Desktop Steam (src/desktop): MusicDeck still runs in SharedJSContext, and draws into the main window, whose
 target is titled "Steam" (its parts carry `data-musicdeck`: the tab, the section, the hover menu, the
 soundtrack button). From SharedJSContext, `window.__musicdeck.desktop.current` drives it without the mouse:

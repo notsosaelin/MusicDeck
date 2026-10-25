@@ -11,10 +11,12 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Desktop Steam too:** a **Music** tab beside Store, Library and Community, as if Steam always had one.
   Your library on the left and its pages on the right, laid out as Steam's library is (an album headed by its
   art with a green Play), track lists with columns to sort, Ctrl/Shift to pick several, right-click for
-  Steam's own menus, and a player along the bottom with the queue, synced lyrics, a visualizer and the
-  equalizer. Click the cover for a big Now Playing (lyrics, up next or the art, full size, over the whole
-  section). Leave Music while it plays and a mini player window takes over, dragged anywhere and kept on top
-  if you like (or opened by hand from the player). Also on the
+  Steam's own menus, and a player along the bottom laid out as Spotify's is (the song, the controls and its
+  place, then lyrics, queue, casting, volume; the equalizer and settings under **...**). Click the cover for a
+  big Now Playing: the cover over a blur of itself, beside its synced lyrics, what's up next, or alone, with
+  a visualizer. Leave Music while it plays and a mini player window takes over: dragged anywhere, sized at
+  will (the cover filling it, with the controls on hover; or a strip of cover, names and controls), kept on
+  top if you like, and opened by hand from the player too. Dialogs resize like any window. Also on the
   desktop: smart playlists (Local files' songs picked by rules, as iTunes's are), Get Info for several songs
   at once, dragging songs onto a playlist or a device in the sidebar (and music files from your desktop into
   Local files), a device's capacity at a glance, keyboard shortcuts, media keys and the system's media

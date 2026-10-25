@@ -33,15 +33,19 @@
 - pacman updates are the user's to run in a visible MSYS2 window (they prompt; hidden, they hang).
 - Before a release, the backend is deployed to the Deck (`notsosaelin@192.168.1.155`, key login;
   `MUSICDECK_DEVICE=... python scripts/deploy.py --backend`) and its newest log in `~/homebrew/logs/MusicDeck/`
-  checked for errors: Decky's Python lacks parts of the standard library (0.31.0 shipped not starting there).
+  (the dated `2026-*.log`, not `musicdeck-debug.log`, which is often newer) checked for errors: Decky's Python lacks parts of the standard library (0.31.0 shipped not starting there).
   `test_cast.py` loads the backend with those parts blocked; a module that needs one imports it when called.
 - Desktop Steam is tested through its debugger: this PC's on 127.0.0.1:8080, the Deck's through
   `ssh -N -L 18090:localhost:8080` (run with a `timeout`, and reopened when it ends).
 - Desktop test scripts that wait use SharedJSContext's timers (`window.opener.setTimeout` from the main
   window): a minimized or covered Steam window's own timers are throttled and the script hangs.
-- Screenshots of desktop Steam don't work here (a minimized window captures the wallpaper; the Deck's
-  Xwayland gives black): check the DOM, `document.visibilityState` and `GetWindowDimensions` instead.
-  On this PC "hidden" usually means covered by another window: compare with the main window's.
+- UI changes are looked at, not only queried: `bash out/winbuild/shot.sh <window title> <name> [js]` brings
+  the window to the front (`SteamClient.Window.BringToFront`; a covered one isn't painted and the capture
+  hangs) and screenshots it through the debugger, on the PC and on the Deck alike (X captures of the Deck
+  come out black; the debugger's don't). `cdp.py ... --hover x,y` shows hover states; the Deck's
+  coordinates are CSS pixels, half its screen's. "hidden" visibility on the PC means covered, not broken.
+- Steam's dialog windows are opened by Steam's own code: their flags (resizable...) are in the
+  `about:blank?createflags=` address handed to `window.open`, not in showModal's options (ignored).
 - `scripts/cdp.py <title>` picks the target titled exactly that first: the main window is "Steam",
   the Decky side "SharedJSContext"; each test script's first line says which it runs in.
 

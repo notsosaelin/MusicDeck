@@ -6,6 +6,7 @@ inspecting and driving MusicDeck on a device (see "Debugging" in docs/DEVELOPMEN
     python scripts/cdp.py SharedJSContext "window.__musicdeck.player.state.get()"
     python scripts/cdp.py QuickAccess "1" --shot qam.png       # screenshot the Quick Access Menu
     python scripts/cdp.py SharedJSContext path/to/script.js    # run a file; may be an async IIFE
+    python scripts/cdp.py MusicDeck "1" --hover 150,150 --shot mini.png   # with the mouse over it
 
 Targets (by title): SharedJSContext (where MusicDeck runs), QuickAccess_* (the QAM), "Steam Big
 Picture Mode" (the main window, where dialogs render). Needs `pip install websockets` and Decky's
@@ -48,6 +49,10 @@ async def main() -> None:
             print("EXCEPTION:", json.dumps(inner["exceptionDetails"], indent=1))
         else:
             print(json.dumps(inner.get("result", {}).get("value"), indent=1))
+        if "--hover" in sys.argv:  # the mouse moved to x,y first (CSS :hover), as a person's would be
+            x, y = (float(v) for v in sys.argv[sys.argv.index("--hover") + 1].split(","))
+            await call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+            await asyncio.sleep(0.4)
         if "--shot" in sys.argv:
             out = sys.argv[sys.argv.index("--shot") + 1]
             shot = await call("Page.captureScreenshot", format="png")

@@ -3,6 +3,31 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.34.0
+
+Desktop Steam, from a round of use of 0.33.0:
+
+- **The player along the bottom, tidied** as Spotify's is: the song on the left (its title opens the album,
+  the artist the artist), shuffle, previous, a white play button, next and repeat over a seek line in the
+  middle, then lyrics, queue, casting, volume, the mini player and the big view on the right. The equalizer
+  and settings moved under **...**; the visualizer to the big Now Playing. Seeking and volume are dragged
+  (they only took a click), and a click on the speaker mutes. As the window narrows, the volume's slider
+  and then the mini player button give way rather than squeezing the rest.
+- **The big Now Playing, rearranged** after Apple Music's and Spotify's: the library steps aside and the whole
+  section (the player too) lies on a blur of the cover; a **Hide** button and the Lyrics / Up next / Art switch
+  along the top (their headings were cut off before); the cover sized to the room there is, never squashed.
+  Lyrics without timings read in full white; synced ones light up line by line. Up next shows covers and
+  lengths. The side panel has a title and a close button.
+- **The mini player, redrawn** after Spotify's: it opens square with the cover filling it, the controls
+  showing when the mouse is over it, and a thin progress line along its edge. Make it tall and the cover
+  sits above the song; make it short and wide and it's a strip of cover, names and controls. It opens where
+  and at the size you left it.
+- **Dialogs resize** (Settings, the equalizer, Look up details...): Steam made them fixed in size, whatever
+  MusicDeck asked. Their content fills the window as it's resized: Settings showed a black bar beside it.
+- **Look up details' search** by artist and album did nothing: the button and Enter search now. Releases
+  that look alike say their format and country.
+- Rows of albums on Home have no scrollbar: arrows at either end on hover, and the wheel, move them along.
+
 ## 0.33.0
 
 - **A big Now Playing in desktop Steam**: click the cover in the player (or the expand button beside it) and

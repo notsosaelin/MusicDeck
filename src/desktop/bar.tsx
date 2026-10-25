@@ -1,95 +1,113 @@
 /**
- * The Music section's player: the bar along its bottom (what's playing, the controls, volume) and the
- * panels it opens beside the page (what's up next, the lyrics), as Spotify's desktop app has them.
+ * The Music section's player: the bar along its bottom and the panels it opens beside the page (what's up
+ * next, the lyrics), laid out as Spotify's desktop app has them: what's playing on the left, the controls
+ * and the song's place in the middle, the views and volume on the right; the rarer things (the equalizer,
+ * settings) under "...". As the window narrows, the volume's slider and then the rarer views give way.
  */
+import { Menu, MenuItem, showContextMenu } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
-import { FaBroadcastTower, FaCompress, FaExpand, FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaSlidersH, FaVolumeDown, FaVolumeMute, FaVolumeUp, FaWindowRestore } from "react-icons/fa";
+import { FaBroadcastTower, FaCompress, FaEllipsisH, FaExpand, FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp, FaWindowRestore } from "react-icons/fa";
 import { canCast, prepareCastMenu, showCastMenu } from "../components/CastMenu";
 import { Lyrics, getLyrics, setSetting } from "../api";
 import { player } from "../player";
-import { pluginState, useStore } from "../store";
+import { mediaUrl, pluginState, useStore } from "../store";
 import { desktopActions, go, panel, showPane, toggleFull } from "./data";
-import { Visualizer, showEqualizer } from "./polish";
-import { Controls, Cover, Seek, Titles } from "./parts";
+import { showEqualizer, showSettings } from "./polish";
+import { Button, Controls, Cover, Seek, Slider, Titles, clock } from "./parts";
 
 let volumeSave = 0;
+/** the volume before muting, for unmuting */
+let unmuted = 1;
+
+const setVolume = (v: number) => {
+  player.setVolume(v);
+  window.clearTimeout(volumeSave);
+  volumeSave = window.setTimeout(() => setSetting("volume", v).catch(() => {}), 1000);
+};
 
 const Volume: FC = () => {
-  const state = useStore(player.state);
-  const v = Math.round(state.volume * 100);
-  const Icon = v === 0 ? FaVolumeMute : v < 50 ? FaVolumeDown : FaVolumeUp;
+  const v = useStore(player.state).volume;
+  const Icon = v === 0 ? FaVolumeMute : v < 0.5 ? FaVolumeDown : FaVolumeUp;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <Icon style={{ opacity: 0.75, width: 14 }} />
-      <input
-        className="md-range"
-        type="range"
-        min={0}
-        max={100}
-        value={v}
-        aria-label="Volume"
-        onChange={(e) => {
-          const next = Number(e.target.value) / 100;
-          player.setVolume(next);
-          window.clearTimeout(volumeSave);
-          volumeSave = window.setTimeout(() => setSetting("volume", next).catch(() => {}), 1000);
+    <div className="md-volume">
+      <Button
+        label={v === 0 ? "Unmute" : "Mute"}
+        onClick={() => {
+          if (v > 0) unmuted = v;
+          setVolume(v === 0 ? unmuted || 0.5 : 0);
         }}
-      />
+      >
+        <Icon />
+      </Button>
+      <Slider label="Volume" value={v} onInput={setVolume} className="md-volume-range" />
     </div>
   );
 };
 
-const Toggle: FC<{ label: string; on: boolean; onClick: () => void; children: any }> = ({ label, on, onClick, children }) => (
-  <button className="md-icon" data-on={on ? "" : undefined} title={label} aria-label={label} onClick={onClick}>
-    {children}
-  </button>
-);
+const showMore = (target: EventTarget) =>
+  showContextMenu(
+    <Menu label="MusicDeck">
+      <MenuItem onSelected={showEqualizer}>Equalizer…</MenuItem>
+      <MenuItem onSelected={() => desktopActions.toggleMini()}>Mini player</MenuItem>
+      <MenuItem onSelected={showSettings}>MusicDeck settings…</MenuItem>
+    </Menu>,
+    target,
+  );
 
 export const PlayerBar: FC = () => {
   const state = useStore(player.state);
   const view = useStore(panel);
   const item = player.current;
+  const t = item?.track;
   // lit: what shows now, in whichever view
   const lit = (which: "queue" | "lyrics") => (view.full ? view.pane === which : view.open === which);
-  const toAlbum = () => {
-    const t = item?.track;
-    if (t?.album_id) go({ type: "collection", collection: { id: t.album_id, kind: "album", title: t.album, subtitle: t.artist, art: t.art } });
-  };
+  const toAlbum = t?.album_id
+    ? () => {
+        toggleFull(false);
+        go({ type: "collection", collection: { id: t.album_id!, kind: "album", title: t.album, subtitle: t.artist, art: t.art } });
+      }
+    : undefined;
+  const toArtist = t?.artist_id
+    ? () => {
+        toggleFull(false);
+        go({ type: "collection", collection: { id: t.artist_id!, kind: "artist", title: t.artist, subtitle: "", art: null } });
+      }
+    : undefined;
+  const castable = canCast(item?.instanceId ?? pluginState.get()?.active_service ?? "");
   return (
-    <div className="md-bar">
-      <div className="md-bar-side">
-        {/* the cover opens the full Now Playing view; the names, the album (as Spotify's bar does) */}
-        <div className="md-bar-cover" title={view.full ? "Back" : "Now Playing"} onClick={() => item && toggleFull()}>
+    <div className="md-bar" data-full={view.full ? "" : undefined}>
+      <div className="md-bar-left">
+        {/* the cover opens the big Now Playing (and closes it) */}
+        <div className="md-bar-cover" title={view.full ? "Leave Now Playing" : "Now Playing"} onClick={() => item && toggleFull()}>
           <Cover size={56} />
+          {item && <div className="md-bar-cover-hint">{view.full ? <FaCompress /> : <FaExpand />}</div>}
         </div>
-        <div style={{ minWidth: 0, flex: 1, cursor: item?.track.album_id ? "pointer" : "default" }} onClick={toAlbum}>
-          <Titles />
-        </div>
+        <Titles onTitle={toAlbum} onArtist={toArtist} />
       </div>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0, opacity: item ? 1 : 0.5 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Toggle label="Shuffle" on={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
+      <div className="md-bar-middle" data-idle={item ? undefined : ""}>
+        <div className="md-bar-controls">
+          <Button label={state.shuffle ? "Shuffle: on" : "Shuffle"} on={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
             <FaRandom />
-          </Toggle>
-          <Controls big />
-          <Toggle label={`Repeat: ${state.repeat}`} on={state.repeat !== "off"} onClick={() => player.cycleRepeat()}>
+          </Button>
+          <Controls size={34} />
+          <Button label={`Repeat: ${state.repeat}`} on={state.repeat !== "off"} onClick={() => player.cycleRepeat()}>
             <FaRedo />
             {state.repeat === "one" && <span className="md-badge">1</span>}
-          </Toggle>
+          </Button>
         </div>
-        <div style={{ width: "100%", maxWidth: 620 }}>
-          <Seek />
-        </div>
+        <Seek />
       </div>
-      <div className="md-bar-side" style={{ justifyContent: "flex-end", gap: 10 }}>
-        <Visualizer />
-        <Toggle label="Equalizer" on={false} onClick={showEqualizer}>
-          <FaSlidersH />
-        </Toggle>
+      <div className="md-bar-right">
+        <Button label="Lyrics" on={lit("lyrics")} onClick={() => showPane("lyrics")}>
+          <FaMicrophoneAlt />
+        </Button>
+        <Button label="Queue" on={lit("queue")} onClick={() => showPane("queue")}>
+          <FaListUl />
+        </Button>
         {/* whenever the live source can play on a speaker or TV, playing or not (as Spotify's devices button) */}
-        {canCast(item?.instanceId ?? pluginState.get()?.active_service ?? "") && (
+        {castable && (
           <button
-            className="md-icon"
+            className="md-ctl"
             data-on={state.castingTo ? "" : undefined}
             title={state.castingTo ? `Playing on ${state.castingTo.name}` : "Play on a speaker or TV"}
             aria-label="Play on"
@@ -99,19 +117,16 @@ export const PlayerBar: FC = () => {
             <FaBroadcastTower />
           </button>
         )}
-        <Toggle label="Mini player" on={false} onClick={() => desktopActions.toggleMini()}>
-          <FaWindowRestore />
-        </Toggle>
-        <Toggle label="Lyrics" on={lit("lyrics")} onClick={() => showPane("lyrics")}>
-          <FaMicrophoneAlt />
-        </Toggle>
-        <Toggle label="Queue" on={lit("queue")} onClick={() => showPane("queue")}>
-          <FaListUl />
-        </Toggle>
-        <Toggle label={view.full ? "Leave Now Playing" : "Now Playing, full"} on={view.full} onClick={() => toggleFull()}>
-          {view.full ? <FaCompress /> : <FaExpand />}
-        </Toggle>
         <Volume />
+        <Button label="Mini player" className="md-ctl md-bar-mini" onClick={() => desktopActions.toggleMini()}>
+          <FaWindowRestore />
+        </Button>
+        <Button label={view.full ? "Leave Now Playing" : "Now Playing, big"} on={view.full} onClick={() => item && toggleFull()}>
+          {view.full ? <FaCompress /> : <FaExpand />}
+        </Button>
+        <button className="md-ctl" title="More" aria-label="More" onClick={(e) => showMore(e.currentTarget)}>
+          <FaEllipsisH />
+        </button>
       </div>
     </div>
   );
@@ -120,31 +135,48 @@ export const PlayerBar: FC = () => {
 export const SidePanel: FC = () => {
   const { open, full } = useStore(panel);
   if (!open || full) return null;
-  return <aside className="md-panel">{open === "queue" ? <Queue /> : <LyricsPanel />}</aside>;
+  return (
+    <aside className="md-panel">
+      <div className="md-panel-head">
+        <span>{open === "queue" ? "Queue" : "Lyrics"}</span>
+        <button className="md-ctl" title="Close" aria-label="Close" onClick={() => showPane(open)}>
+          ✕
+        </button>
+      </div>
+      <div className="md-panel-body">{open === "queue" ? <Queue /> : <LyricsPanel />}</div>
+    </aside>
+  );
 };
 
+/** Up next: what plays now, then the rest in the order it'll play; double-click to jump to one. */
 export const Queue: FC<{ big?: boolean }> = ({ big }) => {
   const state = useStore(player.state);
   const order = player.playOrder;
   const at = order.indexOf(state.index);
   const next = at >= 0 ? order.slice(at + 1) : order;
   const row = (i: number, now = false) => {
-    const t = state.queue[i]?.track;
+    const q = state.queue[i];
+    const t = q?.track;
     if (!t) return null;
+    const art = (t.art && mediaUrl("art", q.instanceId, t.art)) || "";
     return (
-      <div key={`${i}-${t.id}`} className={big ? "md-queue-row md-queue-big" : "md-queue-row"} data-now={now ? "" : undefined} onDoubleClick={() => player.jumpTo(i)}>
+      <div key={`${i}-${t.id}`} className="md-queue-row" data-big={big ? "" : undefined} data-now={now ? "" : undefined}
+           title="Double-click to play" onDoubleClick={() => player.jumpTo(i)}>
+        {art ? <img className="md-queue-art" src={art} loading="lazy" draggable={false} /> : <div className="md-queue-art md-noart" />}
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="md-td" style={{ color: now ? "#1a9fff" : "#dcdedf" }}>{t.title}</div>
+          <div className="md-td md-queue-title">{t.title}</div>
           <div className="md-td md-dim" style={{ fontSize: 12 }}>{t.artist}</div>
         </div>
+        {!!t.duration && <span className="md-dim md-queue-time">{clock(t.duration)}</span>}
       </div>
     );
   };
   return (
     <>
-      <div className="md-heading" style={{ marginTop: 0 }}>Now playing</div>
+      <div className="md-queue-heading">Now playing</div>
       {state.index >= 0 ? row(state.index, true) : <div className="md-dim">Nothing</div>}
-      <div className="md-heading">Next up · {next.length}</div>
+      <div className="md-queue-heading">Next up{next.length ? ` · ${next.length}` : ""}</div>
+      {!next.length && <div className="md-dim" style={{ padding: "4px 8px" }}>Nothing after this song</div>}
       {next.slice(0, 200).map((i) => row(i))}
       {next.length > 200 && <div className="md-dim">and {next.length - 200} more</div>}
     </>
@@ -176,48 +208,71 @@ export const LyricsPanel: FC<{ big?: boolean }> = ({ big }) => {
   useEffect(() => {
     box.current?.querySelector(`[data-line="${now}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [now]);
-  if (!item) return <div className="md-dim">Nothing playing</div>;
-  if (lyrics === null) return <div className="md-dim">Looking for lyrics…</div>;
-  if (lyrics === "none" || !lines.length) return <div className="md-dim">No lyrics for this song</div>;
+  const quiet = (text: string) => <div className={big ? "md-lyrics-empty" : "md-dim"}>{text}</div>;
+  if (!item) return quiet("Nothing playing");
+  if (lyrics === null) return quiet("Looking for lyrics…");
+  if (lyrics === "none" || !lines.length) return quiet("No lyrics for this song");
   return (
-    <div ref={box}>
-      <div className="md-heading" style={{ marginTop: 0 }}>{lyrics.title || "Lyrics"}</div>
+    <div ref={box} data-synced={lyrics.synced ? "" : undefined}>
       {lines.map((l, i) => (
         <div
           key={i}
           data-line={i}
           className={big ? "md-lyric md-lyric-big" : "md-lyric"}
           data-now={i === now ? "" : undefined}
+          data-past={lyrics.synced && i < now ? "" : undefined}
           style={{ cursor: l.t !== null ? "pointer" : "default" }}
           onClick={() => l.t !== null && player.seek(l.t)}
         >
-          {l.text || " "}
+          {l.text || "♪"}
         </div>
       ))}
-      {lyrics.source && <div className="md-dim" style={{ marginTop: 16, fontSize: 11 }}>From {lyrics.source}</div>}
+      {lyrics.source && <div className="md-dim" style={{ marginTop: 24, fontSize: 11 }}>Lyrics from {lyrics.source}</div>}
     </div>
   );
 };
 
 export const BAR_CSS = `
-.md-bar { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: rgba(0,0,0,0.4);
-  border-top: 1px solid rgba(255,255,255,0.06); }
-.md-bar-side { display: flex; align-items: center; gap: 12px; width: 300px; min-width: 0; }
-.md-icon { position: relative; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none;
-  background: none; color: #8b929a; cursor: pointer; border-radius: 2px; font-size: 13px; }
-.md-icon:hover { color: #fff; }
-.md-icon[data-on] { color: #1a9fff; }
-.md-badge { position: absolute; right: 2px; bottom: 2px; font-size: 9px; }
-.md-range { width: 110px; accent-color: #1a9fff; }
-.md-panel { width: 320px; min-width: 320px; padding: 20px; overflow-y: auto; background: rgba(0,0,0,0.25);
+.md-bar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(300px, 1.5fr) minmax(180px, 1fr); align-items: center;
+  gap: 16px; height: 80px; padding: 0 16px; box-sizing: border-box; background: #10141a; border-top: 1px solid rgba(255,255,255,0.06); }
+.md-bar[data-full] { background: rgba(0,0,0,0.45); border-top-color: transparent; }
+.md-bar-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.md-bar-cover { position: relative; flex-shrink: 0; cursor: pointer; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+.md-bar-cover-hint { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 10px; background: rgba(0,0,0,0.7); color: #fff; opacity: 0; transition: opacity 0.15s; }
+.md-bar-cover:hover .md-bar-cover-hint { opacity: 1; }
+.md-bar-middle { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; max-width: 720px; width: 100%; justify-self: center; }
+.md-bar-middle[data-idle] { opacity: 0.45; pointer-events: none; }
+.md-bar-controls { display: flex; align-items: center; gap: 10px; }
+.md-bar-right { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+.md-volume { display: flex; align-items: center; gap: 2px; margin: 0 4px; }
+.md-volume-range { width: 96px; flex: none; }
+.md-badge { position: absolute; right: 3px; top: 3px; font-size: 9px; font-weight: 700; }
+@media (max-width: 1180px) { .md-volume-range { display: none; } }
+@media (max-width: 980px) { .md-bar-mini { display: none; } .md-bar { grid-template-columns: minmax(140px, 1fr) minmax(260px, 1.6fr) auto; } }
+.md-panel { width: 320px; min-width: 320px; display: flex; flex-direction: column; background: rgba(0,0,0,0.25);
   border-left: 1px solid rgba(255,255,255,0.06); box-sizing: border-box; }
-.md-queue-row { display: flex; padding: 6px 8px; border-radius: 2px; cursor: default; }
-.md-queue-row:hover { background: rgba(255,255,255,0.05); }
+.md-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 6px 20px; color: #fff; font-size: 16px; font-weight: 600; }
+.md-panel-body { flex: 1; overflow-y: auto; padding: 0 12px 20px 20px; }
+.md-queue-heading { margin: 18px 0 6px; padding: 0 8px; font-size: 13px; font-weight: 600; color: #fff; }
+.md-queue-heading:first-child { margin-top: 4px; }
+.md-queue-row { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 4px; cursor: default; }
+.md-queue-row:hover { background: rgba(255,255,255,0.07); }
+.md-queue-art { width: 40px; height: 40px; min-width: 40px; border-radius: 3px; object-fit: cover; }
+.md-queue-title { color: #dcdedf; }
+.md-queue-row[data-now] .md-queue-title { color: #1a9fff; }
+.md-queue-time { font-size: 12px; font-variant-numeric: tabular-nums; }
+.md-queue-row[data-big] { padding: 8px 10px; }
+.md-queue-row[data-big] .md-queue-art { width: 48px; height: 48px; min-width: 48px; }
+.md-queue-row[data-big] .md-queue-title { font-size: 15px; }
 .md-lyric { font-size: 16px; line-height: 1.7; color: #8b929a; transition: color 0.2s; }
 .md-lyric[data-now] { color: #fff; }
-.md-lyric-big { font-size: 28px; line-height: 1.45; font-weight: 600; padding: 6px 0; color: rgba(255,255,255,0.35); }
+.md-lyric-big { font-size: 30px; line-height: 1.35; font-weight: 700; padding: 8px 0; color: rgba(255,255,255,0.32); transition: color 0.25s; }
+.md-lyric-big:hover { color: rgba(255,255,255,0.75); }
+.md-lyric-big[data-past] { color: rgba(255,255,255,0.55); }
 .md-lyric-big[data-now] { color: #fff; }
-.md-queue-big { padding: 10px 12px; font-size: 15px; }
-.md-bar-cover { cursor: pointer; border-radius: 3px; transition: transform 0.15s; }
-.md-bar-cover:hover { transform: scale(1.05); }
+/* lyrics without times: nothing to follow, all of them read alike */
+:not([data-synced]) > .md-lyric-big { color: rgba(255,255,255,0.85); }
+:not([data-synced]) > .md-lyric { color: #dcdedf; }
+.md-lyrics-empty { font-size: 22px; font-weight: 600; color: rgba(255,255,255,0.55); padding-top: 8px; }
 `;

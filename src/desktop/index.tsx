@@ -13,13 +13,14 @@ import { Place, desktopActions, go, goBack, goForward } from "./data";
 import { followDialogs } from "./dialog";
 import { installDesktopLookup } from "./identify";
 import { catchDrops, loadSmart } from "./manage";
-import { SoundtrackButton, TabMenu, currentRoute, shortcuts } from "./polish";
+import { SoundtrackButton, TabMenu, currentRoute, shortcuts, showEqualizer, showSettings } from "./polish";
 import { BASE_CSS, MiniPlayer, MusicView } from "./views";
 import { Root, TopNav, UI_MODE_DESKTOP, contentBounds, createRoot, findTopNav, fontFaces, mainWindow, pageBackground } from "./steamui";
 
 /** how often the main window and its navigation are looked for (Steam draws them after it starts) */
 const CHECK_MS = 1500;
-const MINI = { width: 360, height: 92 };
+/** its first size (the art, as Spotify's mini player opens), and the smallest: a strip of cover, names and controls */
+const MINI = { width: 300, height: 300, minWidth: 220, minHeight: 72 };
 const MINI_PLACE = "musicdeck:mini-player";
 const MINI_PIN = "musicdeck:mini-player-on-top";
 // Steam's popup creation flags (EPopupCreationFlags, read from its own code): its main window's 274 is
@@ -54,16 +55,16 @@ class MiniWindow {
 
   open(styleFrom: Document | null) {
     if (this.isOpen) return;
-    let place = { x: 80, y: 80 };
+    let place = { x: 80, y: 80, width: MINI.width, height: MINI.height };
     try {
       place = { ...place, ...JSON.parse(localStorage.getItem(MINI_PLACE) || "{}") };
     } catch {}
     // a Steam window like its others (the news popup's kind): made by SharedJSContext, drawn by us
     const flags = RESIZABLE | (pinned() ? ALWAYS_ON_TOP : 0);
     const win = window.open(
-      `about:blank?createflags=${flags}&minwidth=${MINI.width - 60}&minheight=${MINI.height}`,
+      `about:blank?createflags=${flags}&minwidth=${MINI.minWidth}&minheight=${MINI.minHeight}`,
       "MusicDeck_MiniPlayer",
-      `width=${MINI.width},height=${MINI.height},left=${place.x},top=${place.y}`,
+      `width=${place.width},height=${place.height},left=${place.x},top=${place.y}`,
     );
     if (!win) return;
     this.win = win;
@@ -72,8 +73,8 @@ class MiniWindow {
     doc.title = "MusicDeck";
     const style = doc.createElement("style");
     style.textContent = `${styleFrom ? fontFaces(styleFrom) : ""}${BASE_CSS}
-      html, body { margin: 0; height: 100%; background: #171d25; overflow: hidden; user-select: none;
-        font-family: "Motiva Sans", Arial, Helvetica, sans-serif; border: 1px solid rgba(255,255,255,0.08); box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #10141a; overflow: hidden; user-select: none;
+        font-family: "Motiva Sans", Arial, Helvetica, sans-serif; }
       #md-mini { height: 100%; }`;
     doc.head.appendChild(style);
     const host = doc.createElement("div");
@@ -101,6 +102,13 @@ class MiniWindow {
     this.dragging(win);
     // where it was left (window.open's left/top aren't kept by every window manager)
     (win as any).SteamClient?.Window?.MoveTo(place.x, place.y, true);
+    (win as any).SteamClient?.Window?.ResizeTo(place.width, place.height, true);
+    // the size it's left at is kept with its place
+    let resized = 0;
+    win.addEventListener("resize", () => {
+      win.clearTimeout(resized);
+      resized = win.setTimeout(() => this.remember(win), 400);
+    });
     // closed some other way (the taskbar, Alt+F4): the user's choice too
     win.addEventListener("beforeunload", () => {
       const byUs = this.closing;
@@ -115,7 +123,7 @@ class MiniWindow {
     const steamWindow = (win as any).SteamClient?.Window;
     let drag: { pointer: [number, number]; window: [number, number] } | null = null;
     win.document.addEventListener("pointerdown", async (e) => {
-      if ((e.target as Element).closest?.("button, .md-seek") || !steamWindow) return;
+      if ((e.target as Element).closest?.("button, .md-slider") || !steamWindow) return;
       (e.target as Element).setPointerCapture?.(e.pointerId);
       const pointer: [number, number] = [e.screenX, e.screenY];
       const at = await steamWindow.GetWindowDimensions();
@@ -124,14 +132,21 @@ class MiniWindow {
     win.document.addEventListener("pointermove", (e) => {
       if (drag) steamWindow.MoveTo(drag.window[0] + e.screenX - drag.pointer[0], drag.window[1] + e.screenY - drag.pointer[1], true);
     });
-    win.document.addEventListener("pointerup", async () => {
+    win.document.addEventListener("pointerup", () => {
       if (!drag) return;
       drag = null;
-      const at = await steamWindow.GetWindowDimensions();
-      try {
-        localStorage.setItem(MINI_PLACE, JSON.stringify({ x: at.x, y: at.y }));
-      } catch {}
+      this.remember(win);
     });
+  }
+
+  /** where it is and how big, for next time */
+  private async remember(win: Window) {
+    if (win.closed) return;
+    const at = await (win as any).SteamClient?.Window?.GetWindowDimensions?.();
+    if (!at) return;
+    try {
+      localStorage.setItem(MINI_PLACE, JSON.stringify({ x: at.x, y: at.y, width: win.innerWidth, height: win.innerHeight }));
+    } catch {}
   }
 
   private forget() {
@@ -446,6 +461,8 @@ class Desktop {
     openMini: () => this.mini.open(mainWindow()?.document ?? null),
     closeMini: () => this.mini.close(),
     reloadSmart: () => loadSmart(),
+    showSettings: () => showSettings(),
+    showEqualizer: () => showEqualizer(),
     mini: () => this.mini.window,
     state: () => ({ tab: !!this.music?.connected, musicShowing: !!this.music?.active, miniOpen: this.mini.isOpen,
                     miniDismissed: this.miniDismissed }),

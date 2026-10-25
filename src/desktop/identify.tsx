@@ -6,7 +6,7 @@
  * own (dialog.ts), so its styles are its own.
  */
 import { ModalRoot } from "@decky/ui";
-import { CSSProperties, FC, useEffect, useState } from "react";
+import { CSSProperties, FC, KeyboardEvent, useEffect, useState } from "react";
 import { FaCompactDisc, FaSearch } from "react-icons/fa";
 import * as api from "../api";
 import { Collection, LookupChanges, Release } from "../api";
@@ -22,6 +22,8 @@ const input: CSSProperties = { flex: 1, minWidth: 0, height: 32, padding: "0 10p
                                background: "#1b2129", color: "#fff", font: "inherit", fontSize: 14 };
 const button: CSSProperties = { height: 32, padding: "0 16px", border: "none", borderRadius: 2, background: "#3d4450", color: "#fff",
                                 font: "inherit", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 };
+
+const tracksLabel = (n: number) => `${n} ${n === 1 ? "track" : "tracks"}`;
 
 const clock = (s: number) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}` : "–");
 
@@ -71,6 +73,13 @@ export const IdentifyDialog: FC<{ instanceId: string; album: Collection; files: 
       })
       .catch((e) => setError(String(e)));
   };
+  const enter = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    // Enter would also submit the dialog's own form (its OK)
+    e.preventDefault();
+    e.stopPropagation();
+    search(true);
+  };
   useEffect(() => search(), []);
   useEffect(() => {
     setChanges(null);
@@ -99,19 +108,14 @@ export const IdentifyDialog: FC<{ instanceId: string; album: Collection; files: 
   return (
     <ModalRoot bAllowFullSize closeModal={closeModal} onCancel={closeModal}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, height: "calc(100vh - 120px)", minHeight: 420, color: "#dcdedf" }}>
-        <form
-          style={{ display: "flex", gap: 8 }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            search(true);
-          }}
-        >
-          <input style={input} value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="Artist" />
-          <input style={input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Album" />
-          <button type="submit" style={button}>
+        {/* not a form: the dialog is one already (Decky's ModalRoot), and a form in a form never submits */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={input} value={artist} onChange={(e) => setArtist(e.target.value)} onKeyDown={enter} placeholder="Artist" />
+          <input style={input} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={enter} placeholder="Album" />
+          <button type="button" style={button} onClick={() => search(true)}>
             <FaSearch /> Search
           </button>
-        </form>
+        </div>
         <div style={{ display: "flex", gap: 18, flex: 1, minHeight: 0 }}>
           <div style={{ width: 320, minWidth: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
             {error && <div style={{ color: "#e88" }}>{error}</div>}
@@ -127,8 +131,9 @@ export const IdentifyDialog: FC<{ instanceId: string; album: Collection; files: 
                 <Cover url={r.cover} size={52} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.title}</div>
-                  <div style={{ ...dim, fontSize: 12 }}>{[r.artist, r.year, `${r.tracks} tracks`].filter(Boolean).join(" · ")}</div>
-                  <div style={{ ...dim, fontSize: 11 }}>{r.source}</div>
+                  <div style={{ ...dim, fontSize: 12 }}>{[r.artist, r.year, tracksLabel(r.tracks)].filter(Boolean).join(" · ")}</div>
+                  {/* what tells two editions of one album apart (MusicBrainz knows each pressing) */}
+                  <div style={{ ...dim, fontSize: 11 }}>{[r.source, r.format, r.country].filter(Boolean).join(" · ")}</div>
                 </div>
                 <Sure n={r.confidence ?? r.score} />
               </div>
@@ -148,7 +153,7 @@ export const IdentifyDialog: FC<{ instanceId: string; album: Collection; files: 
                         <div style={{ width: `${sure}%`, height: "100%", borderRadius: 3, background: confidenceColour(sure) }} />
                       </div>
                       <span style={{ fontSize: 13 }}>
-                        {sure >= 90 ? "Sure match" : sure >= 70 ? "Likely" : "Unlikely"} ({sure}%){chosen.tracks !== files ? ` · ${chosen.tracks} tracks, yours ${files}` : ""}
+                        {sure >= 90 ? "Sure match" : sure >= 70 ? "Likely" : "Unlikely"} ({sure}%){chosen.tracks !== files ? ` · ${tracksLabel(chosen.tracks)}, yours ${files}` : ""}
                       </span>
                     </div>
                   </div>

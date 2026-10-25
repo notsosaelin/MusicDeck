@@ -5,7 +5,7 @@
  * art as a game's is by its hero, with a green Play.
  */
 import { CSSProperties, FC, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { FaCompactDisc, FaEject, FaEllipsisH, FaFolder, FaHdd, FaListUl, FaPlay, FaRandom, FaSearch, FaUser } from "react-icons/fa";
+import { FaChevronLeft, FaChevronRight, FaCompactDisc, FaEject, FaEllipsisH, FaFolder, FaHdd, FaListUl, FaPlay, FaRandom, FaSearch, FaUser } from "react-icons/fa";
 import * as api from "../api";
 import { Collection, Page, Section, SmartPlaylist, Track } from "../api";
 import { showCollectionMenu, showTrackMenu } from "../components/TrackMenu";
@@ -511,9 +511,28 @@ const PageBody: FC<{ id: string; page: Page; from: Collection; skipHeader?: bool
 
 // --- cards ------------------------------------------------------------------------------------------
 
-/** Albums, artists, playlists as covers: a row that scrolls (Home's shelves) or a wrapping grid. */
+/** Albums, artists, playlists as covers: a row that scrolls (Home's shelves: no scrollbar, arrows at its
+ *  ends on hover, as Steam's and Spotify's have) or a wrapping grid. */
 const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, items, row }) => {
   const shelf = useRef<HTMLDivElement>(null);
+  // more to see either way: its arrows show
+  const [more, setMore] = useState<[boolean, boolean]>([false, false]);
+  const measure = () => {
+    const el = shelf.current;
+    if (el) setMore([el.scrollLeft > 4, el.scrollLeft + el.clientWidth < el.scrollWidth - 4]);
+  };
+  useEffect(() => {
+    const el = shelf.current;
+    if (!el || !row) return;
+    measure();
+    const win = el.ownerDocument.defaultView;
+    win?.addEventListener("resize", measure);
+    return () => win?.removeEventListener("resize", measure);
+  }, [row, items.length]);
+  const page = (way: 1 | -1) => {
+    const el = shelf.current;
+    el?.scrollBy({ left: way * Math.max(200, el.clientWidth - 200), behavior: "smooth" });
+  };
   // the wheel over a shelf moves it along, as Steam's library shelves do, until its end: then the page scrolls
   useEffect(() => {
     const el = shelf.current;
@@ -528,11 +547,23 @@ const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, ite
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
   }, [row]);
+  const cards = items.map((c) => <Card key={`${c.kind}:${c.id}`} id={id} item={c} />);
+  if (!row) return <div className="md-grid">{cards}</div>;
   return (
-    <div ref={shelf} className={row ? "md-shelf" : "md-grid"}>
-      {items.map((c) => (
-        <Card key={`${c.kind}:${c.id}`} id={id} item={c} />
-      ))}
+    <div className="md-shelf-box">
+      <div ref={shelf} className="md-shelf" onScroll={measure}>
+        {cards}
+      </div>
+      {more[0] && (
+        <button className="md-shelf-arrow" data-way="back" aria-label="Back" onClick={() => page(-1)}>
+          <FaChevronLeft />
+        </button>
+      )}
+      {more[1] && (
+        <button className="md-shelf-arrow" data-way="on" aria-label="More" onClick={() => page(1)}>
+          <FaChevronRight />
+        </button>
+      )}
     </div>
   );
 };
@@ -777,7 +808,16 @@ export const LIBRARY_CSS = `
 .md-section { margin-bottom: 8px; }
 .md-shelf { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; }
 .md-shelf .md-card { width: 176px; min-width: 176px; }
-.md-shelf { scroll-behavior: auto; scrollbar-width: thin; }
+.md-shelf { scroll-behavior: auto; scrollbar-width: none; }
+.md-shelf::-webkit-scrollbar { display: none; }
+.md-shelf-box { position: relative; }
+.md-shelf-arrow { position: absolute; top: 72px; width: 40px; height: 40px; border-radius: 50%; border: none; display: flex;
+  align-items: center; justify-content: center; background: rgba(16,20,26,0.9); color: #fff; font-size: 15px; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.6); opacity: 0; transition: opacity 0.15s; }
+.md-shelf-box:hover .md-shelf-arrow { opacity: 1; }
+.md-shelf-arrow:hover { background: #3d4450; }
+.md-shelf-arrow[data-way="back"] { left: -12px; }
+.md-shelf-arrow[data-way="on"] { right: -12px; }
 .md-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 22px 18px; }
 .md-card-art .md-noart svg, .md-hero-cover .md-noart svg { width: 32%; height: 32%; }
 .md-card { cursor: pointer; min-width: 0; }
