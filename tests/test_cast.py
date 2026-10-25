@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import wave
@@ -442,8 +443,41 @@ async def manager_tests(http, path):
 
 
 # standard modules Decky's frozen Python leaves out; importing one stops the whole backend loading (sqlite3 is
-# in it: _sqlite3 and libsqlite3 ship with Decky 3.x on every platform)
+# in it: _sqlite3 and libsqlite3 ship with Decky 3.x on every platform). plistlib isn't either: on Linux the
+# system's is found instead, and Bazzite's (Python 3.15's) fails to load in Decky's Python. Only ios.py
+# (iPhones on Windows, whose Decky has it) may use it, and only when it's called.
 MISSING_IN_DECKY = ("xml.etree", "xml.dom", "tkinter")
+NOT_AT_LOAD = MISSING_IN_DECKY + ("plistlib",)
+
+# loads the backend as Decky would, with those modules gone: any of them imported while it loads fails it
+LOAD_AS_DECKY = r"""
+import importlib, importlib.abc, logging, os, sys, tempfile, types
+blocked = set(sys.argv[1].split(","))
+class Gone(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if any(name == b or name.startswith(b + ".") for b in blocked):
+            raise ImportError(f"{name} isn't in Decky's Python")
+for name in list(sys.modules):
+    if any(name == b or name.startswith(b + ".") for b in blocked):
+        del sys.modules[name]
+sys.meta_path.insert(0, Gone())
+root = sys.argv[2]
+sys.path[:0] = [root, os.path.join(root, "py_modules")]
+tmp = tempfile.mkdtemp()
+decky = types.ModuleType("decky")
+decky.logger = logging.getLogger("decky")
+for key in ("DECKY_PLUGIN_SETTINGS_DIR", "DECKY_PLUGIN_RUNTIME_DIR", "DECKY_PLUGIN_LOG_DIR", "DECKY_USER_HOME"):
+    setattr(decky, key, tmp)
+async def emit(*a): pass
+decky.emit = emit
+sys.modules["decky"] = decky
+import main
+for folder in ("", "services", "cast"):
+    for f in sorted(os.listdir(os.path.join(root, "py_modules", "musicdeck", folder))):
+        if f.endswith(".py") and f != "__init__.py":
+            importlib.import_module(".".join(p for p in ("musicdeck", folder, f[:-3]) if p))
+print("loaded")
+"""
 
 
 def decky_python_tests():
@@ -464,6 +498,11 @@ def decky_python_tests():
                         if line.lstrip().startswith(("import ", "from ")) and any(m in line for m in MISSING_IN_DECKY):
                             offenders.append(f"{os.path.relpath(file, ROOT)}: {line.strip()}")
     check(not offenders, f"nothing imports a module Decky's Python doesn't have: {offenders}")
+    loaded = subprocess.run([sys.executable, "-c", LOAD_AS_DECKY, ",".join(NOT_AT_LOAD), ROOT],
+                            capture_output=True, text=True, timeout=120)
+    check(loaded.returncode == 0 and loaded.stdout.strip().endswith("loaded"),
+          f"the backend and every module of it load without {', '.join(NOT_AT_LOAD)}: "
+          f"{(loaded.stderr.strip().splitlines() or [''])[-1]}")
 
 
 async def run():

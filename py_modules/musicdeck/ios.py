@@ -18,7 +18,6 @@ says so: the phone asks "Trust this computer?" once Apple Devices or iTunes has 
 """
 import contextlib
 import os
-import plistlib
 import socket
 import ssl
 import struct
@@ -26,6 +25,15 @@ import tempfile
 from typing import Any, Iterator, Optional
 
 USBMUX = ("127.0.0.1", 27015)
+
+
+def _plist() -> Any:
+    """plistlib, loaded only when an iPhone is talked to. Decky's frozen Python on Linux doesn't carry it,
+    and falls back to the system's, which can be another version's and fail to load (Bazzite's 3.15 copy
+    needs frozendict): importing it with this module would stop the whole backend there."""
+    import plistlib
+
+    return plistlib
 LOCKDOWN_PORT = 62078
 LABEL = "MusicDeck"
 #: where Apple's sync puts music, under the media share's root
@@ -55,13 +63,13 @@ def _recv(sock: Any, n: int) -> bytes:
 # --- usbmux ---------------------------------------------------------------------------------------
 
 def _mux_message(payload: dict[str, Any], tag: int = 1) -> bytes:
-    body = plistlib.dumps({"ClientVersionString": LABEL, "ProgName": LABEL, "kLibUSBMuxVersion": 3, **payload})
+    body = _plist().dumps({"ClientVersionString": LABEL, "ProgName": LABEL, "kLibUSBMuxVersion": 3, **payload})
     return struct.pack("<IIII", 16 + len(body), 1, 8, tag) + body
 
 
 def _mux_reply(sock: Any) -> dict[str, Any]:
     length, _, _, _ = struct.unpack("<IIII", _recv(sock, 16))
-    return plistlib.loads(_recv(sock, length - 16))
+    return _plist().loads(_recv(sock, length - 16))
 
 
 def _mux(address: Any = None) -> socket.socket:
@@ -77,7 +85,7 @@ def devices(address: Any = None) -> list[dict[str, Any]]:
         with _mux(address) as sock:
             sock.sendall(_mux_message({"MessageType": "ListDevices"}))
             reply = _mux_reply(sock)
-    except (OSError, ValueError, plistlib.InvalidFileException):
+    except (OSError, ValueError):  # a bad plist is a ValueError
         return []
     found = []
     for d in reply.get("DeviceList", []):
@@ -93,10 +101,10 @@ def pair_record(udid: str, address: Any = None) -> Optional[dict[str, Any]]:
         with _mux(address) as sock:
             sock.sendall(_mux_message({"MessageType": "ReadPairRecord", "PairRecordID": udid}))
             reply = _mux_reply(sock)
-    except (OSError, ValueError, plistlib.InvalidFileException):
+    except (OSError, ValueError):  # a bad plist is a ValueError
         return None
     data = reply.get("PairRecordData")
-    return plistlib.loads(data) if isinstance(data, bytes) else None
+    return _plist().loads(data) if isinstance(data, bytes) else None
 
 
 def connect(device_id: int, port: int, address: Any = None) -> socket.socket:
@@ -138,10 +146,10 @@ class Lockdown:
         self.sock = sock
 
     def request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        body = plistlib.dumps({"Label": LABEL, **payload})
+        body = _plist().dumps({"Label": LABEL, **payload})
         self.sock.sendall(struct.pack(">I", len(body)) + body)
         length, = struct.unpack(">I", _recv(self.sock, 4))
-        reply = plistlib.loads(_recv(self.sock, length))
+        reply = _plist().loads(_recv(self.sock, length))
         if "Error" in reply:
             raise IosError(f"the iPhone said {reply['Error']}")
         return reply

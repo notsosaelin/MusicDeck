@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.31.1
+
+- **MusicDeck didn't start on some Linux systems** (Bazzite among them) in 0.31.0: the iPhone support for
+  Windows loaded a part of Python that Decky's own Python doesn't carry, and the system's copy didn't fit.
+  It's loaded only when an iPhone is used on Windows now. The tests now load MusicDeck the way Decky does,
+  without those parts, so this can't slip through again.
+
 ## 0.31.0
 
 - **Devices on Windows**: everything Local files' Devices does on the Deck now works on a Windows PC too.
