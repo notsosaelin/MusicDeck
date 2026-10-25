@@ -3,6 +3,32 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.32.0
+
+- **MusicDeck in desktop Steam**: a **Music** tab between Library and Community, with a section of its own,
+  built the way Steam's library is: your sources' music on the left (Home and each source's own tabs, your
+  playlists, smart playlists, what's plugged in), the page on the right, and the player along the bottom.
+  - Albums, artists and playlists open headed by their art, with a green Play and Shuffle; track lists sort
+    by any column, take Ctrl and Shift to pick several, and play from where you double-click.
+  - Right-click a song, album or playlist for its menu: Steam's own menus, with everything MusicDeck's track
+    and album menus do in Game Mode (Play next, Add to playlist, Copy to a device, Burn to CD, Edit tags,
+    Delete...). Several songs picked: Play, Play next, Add to queue, Add to playlist, Copy to a device, Get
+    Info for all of them at once.
+  - **Smart playlists**: Local files' songs picked by rules (artist, album, genre, year, plays, when they were
+    added or last played, favourites, length), matching all or any, sorted and limited, as iTunes's are.
+  - **Drag and drop**: songs and albums onto a playlist or a device in the sidebar; music files from your
+    desktop into Local files (an Imported folder).
+  - **The player**: the queue and synced lyrics beside the page, a visualizer, volume, the equalizer.
+  - **Mini player**: leave Music while something plays and a small window of its own takes over, dragged
+    anywhere and opening where you left it; double-click its cover to go back to Music.
+  - Media keys and the system's media controls (Windows' media overlay, MPRIS on Linux) play and pause, skip
+    and show what's playing; keyboard shortcuts while Music shows (Space, Ctrl+arrows, Ctrl+F, Ctrl+L...);
+    Steam's back and forward arrows go back and forward in Music.
+  - **Play soundtrack** on the page of a game whose soundtrack you own.
+  - The Music tab's menu on hover, as Store's and Community's have; MusicDeck's settings as a dialog.
+  - About 90 KB more of MusicDeck, and nothing that runs in the background: it's drawn while desktop Steam
+    shows and taken away when Big Picture or Game Mode does.
+
 ## 0.31.1
 
 - **MusicDeck didn't start on some Linux systems** (Bazzite among them) in 0.31.0: the iPhone support for

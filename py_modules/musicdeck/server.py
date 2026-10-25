@@ -19,7 +19,9 @@ a fresh random link, only that device's address is answered, and the site closes
 """
 import asyncio
 import base64
+import contextlib
 import mimetypes
+import os
 import re
 import secrets
 import socket
@@ -31,7 +33,7 @@ from urllib.parse import quote, urljoin, urlparse
 import aiohttp
 from aiohttp import web
 
-from . import debuglog
+from . import debuglog, tagging
 from .cache import Cache
 from .net import tls
 from .services import MusicService, ServiceError, StreamSource
@@ -55,6 +57,8 @@ if TYPE_CHECKING:
     from .offline import OfflineStore
 
 ServiceLookup = Callable[[str], Optional[MusicService]]
+# the most a file dropped onto Music may be (a long FLAC album as one file is ~1 GB)
+IMPORT_MAX = 2 * 1024 ** 3
 
 
 def _b64(value: str) -> str:
@@ -113,6 +117,7 @@ class StreamServer:
         app.router.add_get("/stream/{instance}/{id:.+}", self._handle_stream)
         app.router.add_get("/art/{instance}/{id:.+}", self._handler(lambda s, i: s.art(i)))
         app.router.add_get("/fetch", self._handle_fetch)
+        app.router.add_post("/import/{instance}", self._handle_import)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -297,6 +302,37 @@ class StreamServer:
     def _check_key(self, request: web.Request) -> None:
         if not secrets.compare_digest(request.query.get("k", ""), self.key):
             raise web.HTTPForbidden()
+
+    async def _handle_import(self, request: web.Request) -> web.Response:
+        """A music file dropped onto desktop Steam's Music section: its bytes, into Local files (the
+        source's import_target), written under a temporary name first. Sent as a plain-text body, so the
+        page posts it without a CORS preflight; the answer says it may read it."""
+        self._check_key(request)
+        cors = {"Access-Control-Allow-Origin": "*"}
+        service = self.lookup(request.match_info["instance"])
+        if service is None or not hasattr(service, "import_target"):
+            return web.json_response({"ok": False, "error": "That source doesn't take files"}, headers=cors)
+        try:
+            target = service.import_target(request.query.get("name", ""))
+        except (ServiceError, OSError) as e:
+            return web.json_response({"ok": False, "error": str(e)}, headers=cors)
+        folder, name = os.path.split(target)
+        part = os.path.join(folder, f".{name}{tagging.TEMP_SUFFIX}")
+        size = 0
+        try:
+            with open(part, "wb") as f:
+                async for chunk in request.content.iter_chunked(1 << 16):
+                    size += len(chunk)
+                    if size > IMPORT_MAX:
+                        raise ServiceError("That file is too big to be music")
+                    f.write(chunk)
+            os.replace(part, target)
+        except (ServiceError, OSError) as e:
+            with contextlib.suppress(OSError):
+                os.remove(part)
+            return web.json_response({"ok": False, "error": str(e)}, headers=cors)
+        service.rescan()
+        return web.json_response({"ok": True, "name": name}, headers=cors)
 
     async def _handle_stream(self, request: web.Request) -> web.StreamResponse:
         self._check_key(request)

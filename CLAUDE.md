@@ -31,6 +31,12 @@
 - WSL's VM starts when first called, so `time.monotonic()` there can be under a minute: don't treat 0.0 as
   "long ago" (DeviceService's space cache did).
 - pacman updates are the user's to run in a visible MSYS2 window (they prompt; hidden, they hang).
+- Before a release, the backend is deployed to the Deck (`notsosaelin@192.168.1.155`, key login;
+  `MUSICDECK_DEVICE=... python scripts/deploy.py --backend`) and its newest log in `~/homebrew/logs/MusicDeck/`
+  checked for errors: Decky's Python lacks parts of the standard library (0.31.0 shipped not starting there).
+  `test_cast.py` loads the backend with those parts blocked; a module that needs one imports it when called.
+- Desktop Steam is tested through its debugger: this PC's on 127.0.0.1:8080, the Deck's through
+  `ssh -N -L 18090:localhost:8080` (run with a `timeout`, and reopened when it ends).
 
 ## Where things build
 

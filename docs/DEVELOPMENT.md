@@ -214,6 +214,14 @@ m.previewSource(id)                       // another source's Home/Browse/Search
 Screenshots of the QAM: `python scripts/cdp.py QuickAccess "1" --shot qam.png`. Dialogs render in
 the "Steam Big Picture Mode" target. (The screen must be on; a sleeping display captures black.)
 
+Desktop Steam (src/desktop): MusicDeck still runs in SharedJSContext, and draws into the main window, whose
+target is titled "Steam" (its parts carry `data-musicdeck`: the tab, the section, the hover menu, the
+soundtrack button). From SharedJSContext, `window.__musicdeck.desktop.current` drives it without the mouse:
+`.showMusic()`, `.hideMusic()`, `.openMini()`, `.mini()` (the mini player's window), `.state()`. Scripts run in
+the "Steam" target reach SharedJSContext as `window.opener`. Dialogs (`showModal`) open as windows of their own
+("Decky Dialog"); menus (`showContextMenu`) draw inside the window that was clicked, and close on Escape. A
+Steam window's `screenX`/`screenY` don't follow it once it's moved: ask `SteamClient.Window.GetWindowDimensions()`.
+
 ### Common problems
 
 - **The plugin doesn't load at all** (no Soundtracks takeover, missing from Decky): check the plugin
@@ -264,7 +272,7 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
-3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py && python tests/test_windows.py` (on Windows
+3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py && python tests/test_windows.py && python tests/test_desktop.py` (on Windows
    too: `test_windows.py` asks the PC's own drives and sound output there).
 4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`, with `bash scripts/build_cdrskin_windows.sh` and
    `bash scripts/build_mtp_helper.sh` run in MSYS2's UCRT64 shell before `package.py`

@@ -8,6 +8,15 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Eighteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
   Audiobookshelf, SoulSync, SoundCloud, YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live
   Music Archive, Qobuz, TIDAL, Spotify and Soulseek. One source is live at a time, chosen in the plugin's Decky page.
+- **Desktop Steam too:** a **Music** tab beside Store, Library and Community, as if Steam always had one.
+  Your library on the left and its pages on the right, laid out as Steam's library is (an album headed by its
+  art with a green Play), track lists with columns to sort, Ctrl/Shift to pick several, right-click for
+  Steam's own menus, and a player along the bottom with the queue, synced lyrics, a visualizer and the
+  equalizer. Leave Music while it plays and a mini player window takes over, dragged anywhere. Also on the
+  desktop: smart playlists (Local files' songs picked by rules, as iTunes's are), Get Info for several songs
+  at once, dragging songs onto a playlist or a device in the sidebar (and music files from your desktop into
+  Local files), a device's capacity at a glance, keyboard shortcuts, media keys and the system's media
+  controls, and Play soundtrack on the page of a game whose soundtrack you own. Windows and Linux desktops.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
 - **Games:** pick an album or playlist for a game and it plays when the game starts; or have the music
@@ -177,10 +186,16 @@ Add your own free app's Client ID in the Spotify source (the dialog links to Spo
 | Decky → MusicDeck | Add and manage sources, pick the live one, playback options, ListenBrainz and Last.fm, debug log |
 | Quick Access → Soundtracks tab | The player. Takes over the tab by default, or gets its own tab |
 | The expand button on the panel's tab strip (or the lyrics) | The media center, full screen |
+| Desktop Steam → **Music** (beside Library) | The music library and player of desktop Steam, its menu on hover; the mini player when you leave it |
 
 Controller: **A** plays or opens, **X** adds a track to the queue (removes it, in the queue) or plays an album or
 playlist without opening it, **Y** opens a track's or playlist's options (including the sleep timer for the
 playing track), **B** goes back, **L1**/**R1** switch tabs. Re-selecting Library or Search returns to its start.
+
+Desktop: **Space** plays and pauses, **Ctrl+←/→** previous and next, **Ctrl+↑/↓** volume, **Ctrl+F** search,
+**Ctrl+L** lyrics, **Ctrl+Q** queue, **Alt+←/→** (or Steam's arrows, or the mouse's side buttons) back and
+forward, **Ctrl+A** picks every song in a list, **Enter** plays the picked ones. Double-click a song to play from
+it; right-click anything for its menu.
 
 On Now playing, down from the player is its second page: the lyrics, or the queue (switched at the page's
 top). The queue lists tracks in the order they'll play (shuffled or not); **Clear** at its top empties it

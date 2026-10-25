@@ -470,6 +470,24 @@ export const logEvents = callable<[entries: { t: number; event: string; data?: R
 
 // MusicDeck playlists (stored on the device, per source)
 export const localPlaylists = callable<[id: string], Collection[]>("local_playlists");
+
+/** A smart playlist (desktop Steam's Music section): Local files' songs picked by rules (LocalService.smart). */
+export interface SmartRule {
+  field: "title" | "artist" | "album" | "albumartist" | "genre" | "year" | "plays" | "added_days" | "played_days" | "starred" | "duration";
+  op: "contains" | "is" | "is_not" | "starts" | "gt" | "lt";
+  value: string;
+}
+export interface SmartPlaylist {
+  id: string;
+  name: string;
+  /** the source it picks from */
+  source: string;
+  rules: { rules: SmartRule[]; match: "all" | "any"; sort: string; limit: number };
+}
+export const smartPlaylists = callable<[], SmartPlaylist[]>("smart_playlists");
+export const saveSmartPlaylist = callable<[playlist: Partial<SmartPlaylist>], SmartPlaylist[]>("save_smart_playlist");
+export const deleteSmartPlaylist = callable<[playlistId: string], SmartPlaylist[]>("delete_smart_playlist");
+export const smartTracks = callable<[id: string, rules: SmartPlaylist["rules"]], Result<Track[]>>("smart_tracks");
 export const createPlaylist = callable<[id: string, name: string, tracks: Track[]], Collection>("create_playlist");
 export const saveAsPlaylist = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Collection>>(
   "save_as_playlist",

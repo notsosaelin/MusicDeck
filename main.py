@@ -2,6 +2,7 @@ import asyncio
 import functools
 import json
 import os
+import secrets
 import time
 from datetime import datetime
 from typing import Any, Awaitable, Optional
@@ -1224,6 +1225,57 @@ class Plugin:
     @_when_ready
     async def local_playlists(self, instance_id: str) -> list[dict[str, Any]]:
         return self.playlists.for_instance(instance_id)
+
+    # --- smart playlists (desktop Steam's Music section; Local files' songs picked by rules) ---
+
+    def _smart_path(self) -> str:
+        return os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "smart-playlists.json")
+
+    def _smart_read(self) -> list[dict[str, Any]]:
+        try:
+            with open(self._smart_path(), "r", encoding="utf-8") as f:
+                found = json.load(f)
+        except (OSError, ValueError):
+            return []
+        return [p for p in found if isinstance(p, dict) and p.get("id")] if isinstance(found, list) else []
+
+    def _smart_write(self, playlists: list[dict[str, Any]]) -> None:
+        path = self._smart_path()
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(playlists, f)
+        os.replace(tmp, path)
+
+    @_when_ready
+    async def smart_playlists(self) -> list[dict[str, Any]]:
+        """{"id", "name", "source", "rules": {...}} each (LocalService.smart says what rules are)."""
+        return self._smart_read()
+
+    @_when_ready
+    async def save_smart_playlist(self, playlist: dict[str, Any]) -> list[dict[str, Any]]:
+        """Adds a smart playlist, or replaces the one with its id; the list after."""
+        if not isinstance(playlist, dict) or not str(playlist.get("name", "")).strip():
+            raise ValueError("A smart playlist needs a name")
+        kept = {"id": str(playlist.get("id") or secrets.token_hex(6)), "name": str(playlist["name"]).strip()[:120],
+                "source": str(playlist.get("source", "")), "rules": playlist.get("rules") or {}}
+        playlists = [p for p in self._smart_read() if p["id"] != kept["id"]] + [kept]
+        self._smart_write(playlists)
+        return playlists
+
+    @_when_ready
+    async def delete_smart_playlist(self, playlist_id: str) -> list[dict[str, Any]]:
+        playlists = [p for p in self._smart_read() if p["id"] != playlist_id]
+        self._smart_write(playlists)
+        return playlists
+
+    @_when_ready
+    async def smart_tracks(self, instance_id: str, rules: dict[str, Any]) -> dict[str, Any]:
+        async def work():
+            instance = self._instance(instance_id)
+            if not hasattr(instance, "smart"):
+                raise ServiceError("Smart playlists are for Local files")
+            return self._liked(instance_id, {"tracks": await asyncio.to_thread(instance.smart, rules or {})})["tracks"]
+        return await _result(work())
 
     @_when_ready
     async def create_playlist(self, instance_id: str, name: str, tracks: list[dict[str, Any]]) -> dict[str, Any]:

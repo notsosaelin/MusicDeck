@@ -29,6 +29,7 @@ import { duckFor, reconcile, runningGame, toggleGameMusic, watchGames } from "./
 import { syncLibraryEntry, watchLibraryEntry } from "./libraryEntry";
 import { installQamPatch } from "./qam";
 import { pluginState, refreshState } from "./store";
+import { desktopDebug, startDesktop } from "./desktop";
 
 /** The backend can still be starting (e.g. right after an update), so retry with backoff. */
 async function loadStateWithRetry(attempts = 8): Promise<api.PluginState> {
@@ -65,6 +66,8 @@ export default definePlugin(() => {
   const unwatchGames = watchGames();
   const unwatchCast = watchCastStatus();
   const unwatchLibraryEntry = watchLibraryEntry();
+  // desktop Steam: the Music tab, the mini player and media keys (src/desktop)
+  const stopDesktop = startDesktop();
   // a source's own news (local files: what new albums got): a toast, and lists that show it again
   const sourceNote = (instanceId: string, text: string) => {
     const name = pluginState.get()?.services.find((s) => s.id === instanceId)?.name ?? "MusicDeck";
@@ -102,6 +105,8 @@ export default definePlugin(() => {
     setSleepTimer,
     sleepTimer,
     syncSteam,
+    // desktop Steam: desktop.current?.showMusic(), .openMini(), .mini() (its window), .state()
+    desktop: desktopDebug,
     // pretend which games are running, e.g. games.reconcile([570]) then games.reconcile([]); which app
     // is in front: games.duckFor(570), games.duckFor(769)
     games: { reconcile, runningGame, toggle: toggleGameMusic, duckFor },
@@ -129,6 +134,7 @@ export default definePlugin(() => {
       unwatchGames();
       unwatchCast();
       unwatchLibraryEntry();
+      stopDesktop();
       removeEventListener("source_note", sourceNote);
       setSleepTimer(null);
       releaseToastHooks();

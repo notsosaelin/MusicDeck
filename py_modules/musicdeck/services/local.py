@@ -1796,6 +1796,99 @@ class LocalService(MusicService):
             raise ServiceError("Track not found")
         return StreamSource(path=t["path"])
 
+    # --- smart playlists (desktop Steam's Music section) ---
+
+    SMART_FIELDS = {"title", "artist", "album", "albumartist", "genre", "year", "plays", "added_days",
+                    "played_days", "starred", "duration"}
+    SMART_LIMIT = 5000
+
+    def smart(self, rules: dict[str, Any]) -> list[dict[str, Any]]:
+        """The songs a smart playlist's rules pick, as iTunes's smart playlists do: {"rules": [{"field",
+        "op" ("contains", "is", "is_not", "starts", "gt", "lt"), "value"}], "match": "all" | "any", "sort"
+        ("added", "plays", "played", "random", "title", "artist", "year"), "limit"}. Fields: what the index
+        knows of a song (genre is any of its genres; added_days and played_days count back from today)."""
+        now = time.time()
+        conditions = [r for r in rules.get("rules") or [] if isinstance(r, dict) and r.get("field") in self.SMART_FIELDS]
+        every = rules.get("match", "all") != "any"
+
+        def value(tid: str, t: dict[str, Any], field: str) -> Any:
+            if field == "genre":
+                return [g.lower() for g in t.get("genres") or [t.get("genre", "")]]
+            if field == "plays":
+                return self.plays.get(tid, {}).get("count", 0)
+            if field == "added_days":
+                return (now - t.get("added", t.get("mtime", now))) / 86400
+            if field == "played_days":
+                last = self.plays.get(tid, {}).get("last")
+                return (now - last) / 86400 if last else float("inf")
+            if field == "starred":
+                return tid in self.favourites
+            if field == "year":
+                return int(t["year"]) if str(t.get("year", "")).isdigit() else 0
+            if field == "duration":
+                return t.get("duration") or 0
+            return str(t.get(field) or "").lower()
+
+        def holds(tid: str, t: dict[str, Any], rule: dict[str, Any]) -> bool:
+            have, op, want = value(tid, t, rule["field"]), rule.get("op", "is"), rule.get("value")
+            if isinstance(have, bool):
+                return have == (str(want).lower() in ("1", "true", "yes"))
+            if isinstance(have, (int, float)):
+                try:
+                    want = float(want)
+                except (TypeError, ValueError):
+                    return False
+                return {"gt": have > want, "lt": have < want, "is": have == want, "is_not": have != want}.get(op, False)
+            want = str(want or "").lower()
+            texts = have if isinstance(have, list) else [have]
+            if op == "contains":
+                return any(want in x for x in texts)
+            if op == "starts":
+                return any(x.startswith(want) for x in texts)
+            if op == "is_not":
+                return all(x != want for x in texts)
+            return any(x == want for x in texts)
+
+        picked = [(tid, t) for tid, t in self.tracks.items()
+                  if not conditions or (all if every else any)(holds(tid, t, r) for r in conditions)]
+        order = rules.get("sort", "added")
+        if order == "random":
+            random.shuffle(picked)
+        else:
+            keys = {"added": lambda it: -it[1].get("added", it[1].get("mtime", 0)),
+                    "plays": lambda it: -self.plays.get(it[0], {}).get("count", 0),
+                    "played": lambda it: -self.plays.get(it[0], {}).get("last", 0),
+                    "title": lambda it: (it[1]["title"] or "").lower(),
+                    "artist": lambda it: ((it[1]["albumartist"] or it[1]["artist"] or "").lower(), it[1]["album"].lower(),
+                                          it[1]["disc"], it[1]["track"]),
+                    "year": lambda it: -value(it[0], it[1], "year")}
+            picked.sort(key=keys.get(order, keys["added"]))
+        limit = rules.get("limit") or self.SMART_LIMIT
+        limit = min(int(limit), self.SMART_LIMIT) if str(limit).isdigit() else self.SMART_LIMIT
+        return [self._track(tid, t) for tid, t in picked[:limit]]
+
+    # --- files dropped onto desktop Steam's Music section ---
+
+    def import_target(self, name: str) -> str:
+        """Where a music file dropped onto MusicDeck goes: the library's first folder's Imported folder,
+        under its own name (another number when that's taken). Only Local files takes them."""
+        if self.type != "local":
+            raise ServiceError("Music can be dropped onto Local files only")
+        base = os.path.basename(str(name).replace("\\", "/"))
+        stem, ext = os.path.splitext(base)
+        if ext.lower() not in AUDIO_EXTENSIONS and ext.lower() not in PLAYLIST_EXTENSIONS:
+            raise ServiceError(f"{base or 'That'} isn't a music file")
+        if not self.roots:
+            raise ServiceError("Local files has no folder to put music in")
+        folder = os.path.join(self.roots[0], "Imported")
+        os.makedirs(folder, exist_ok=True)
+        stem = models.safe_name(stem, "Imported")
+        target, n = os.path.join(folder, stem + ext.lower()), 1
+        while os.path.exists(target):
+            n += 1
+            target = os.path.join(folder, f"{stem} ({n}){ext.lower()}")
+        return target
+
     async def art(self, art_id: str) -> StreamSource:
         kind, _, tid = art_id.partition(":")
         if kind == "a":  # an artist's picture
