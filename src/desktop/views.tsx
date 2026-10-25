@@ -10,11 +10,14 @@ import { panel } from "./data";
 import { fileDrag } from "./manage";
 import { MINI_CSS } from "./mini";
 import { Backdrop, NOW_PLAYING_CSS, NowPlayingFull } from "./nowplaying";
-import { PARTS_CSS } from "./parts";
+import { PARTS_CSS, STARS_CSS } from "./parts";
 import { POLISH_CSS } from "./polish";
+import { STATS_CSS } from "./stats";
+import { TOOLS_CSS } from "./tools";
+import { COLUMNS_CSS } from "./columns";
 
 /** Styles our parts use, in whichever document they're drawn (the main window's, or the mini player's). */
-export const BASE_CSS = PARTS_CSS + LIBRARY_CSS + BAR_CSS + POLISH_CSS + NOW_PLAYING_CSS + MINI_CSS;
+export const BASE_CSS = PARTS_CSS + STARS_CSS + LIBRARY_CSS + BAR_CSS + POLISH_CSS + NOW_PLAYING_CSS + MINI_CSS + STATS_CSS + TOOLS_CSS + COLUMNS_CSS;
 
 /** The Music section. Music files dragged in from the desktop go into Local files (the drag itself is caught by
  *  catchDrops, before Steam's window can refuse it). While the big Now Playing shows, the library steps aside

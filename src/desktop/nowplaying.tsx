@@ -12,7 +12,8 @@ import { useStore } from "../store";
 import { LyricsPanel, Queue } from "./bar";
 import { Pane, go, panel, toggleFull } from "./data";
 import { ArtOrIcon } from "./library";
-import { coverUrl } from "./parts";
+import { Stars, coverUrl } from "./parts";
+import { canRate } from "../ratings";
 import { Visualizer } from "./polish";
 
 const PANES: [Pane | "art", string][] = [
@@ -92,6 +93,11 @@ export const NowPlayingFull: FC = () => {
               </>
             )}
           </div>
+          {item && canRate(item.instanceId) && (
+            <div className="md-np-stars">
+              <Stars instanceId={item.instanceId} track={item.track} size={20} />
+            </div>
+          )}
           <div className="md-np-vis">
             <Visualizer width={260} height={28} />
           </div>
@@ -137,6 +143,7 @@ export const NOW_PLAYING_CSS = `
 .md-np-sub > span { overflow: hidden; text-overflow: ellipsis; }
 .md-np[data-pane="art"] .md-np-sub { justify-content: center; }
 .md-np-dot { flex-shrink: 0; }
+.md-np-stars { margin-top: 12px; }
 .md-np-vis { margin-top: 18px; opacity: 0.8; height: 28px; }
 .md-np-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; max-width: 760px; }
 /* a short fade at the foot only, and room after the last line to scroll it clear of the fade */

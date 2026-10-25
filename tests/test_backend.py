@@ -301,6 +301,289 @@ async def run():
               and not (await plugin.get_tags(lid, "track", loose))["data"]["undo"], f"undone, as it was: {t}")
         check(not (await plugin.undo_tags(lid, "track", loose))["ok"], "nothing more to undo")
 
+        print("local library: ratings, skips, listening stats")
+        from mutagen.id3 import ID3
+        rated = await plugin.set_rating(lid, loose, 4)
+        popm = ID3(library.tracks[loose]["path"]).getall("POPM")
+        check(rated == {"ok": True, "data": 4} and popm and popm[0].rating == 196 and library.tracks[loose]["rating"] == 4,
+              f"a rating goes into the MP3 as Windows and MusicBee write it (POPM 196 for four stars): {rated} {popm}")
+        check(not any(n.startswith(".") for n in os.listdir(mp3_dir)), "and no copy is left beside it")
+        cleared = await plugin.set_rating(lid, loose, 0)
+        check(cleared["data"] == 0 and not ID3(library.tracks[loose]["path"]).getall("POPM"), "a rating of none removes it")
+        check(not (await plugin.set_rating(lid, loose, 7))["ok"], "a rating past five stars is refused")
+        flac_rated = os.path.join(mp3_dir, "rated.flac")
+        shutil.copy(flac_path, flac_rated)
+        webm = os.path.join(mp3_dir, "clip.webm")
+        with open(webm, "wb") as f:
+            f.write(b"\x1a\x45\xdf\xa3" + bytes(64))
+        library.rescan()
+        await library.scan_task
+        by_path = {t["path"]: tid for tid, t in library.tracks.items()}
+        await plugin.set_rating(lid, by_path[flac_rated], 5)
+        check(FLAC(flac_rated).get("RATING") == ["100"] and library.tracks[by_path[flac_rated]]["rating"] == 5,
+              "FLAC keeps it as RATING 0-100, read back as five stars")
+        if by_path.get(webm):
+            kept = await plugin.set_rating(lid, by_path[webm], 3)
+            check(kept["data"] == 3 and library.ratings.get(by_path[webm]) == 3,
+                  f"a file that can't hold a rating has it kept by MusicDeck: {kept}")
+        await plugin.set_rating(lid, loose, 2)
+        await plugin.report_skip(lid, loose)
+        await plugin.report_skip(lid, loose)
+        smart = library.smart({"rules": [{"field": "rating", "op": "gt", "value": "1"}, {"field": "skips", "op": "gt", "value": "1"}]})
+        check([t["id"] for t in smart] == [loose] and smart[0]["rating"] == 2,
+              f"smart playlists pick by rating and skips, and tracks carry their rating: {[t['title'] for t in smart]}")
+        best = library.smart({"rules": [{"field": "rating", "op": "gt", "value": "0"}], "sort": "rating"})
+        stars = [t["rating"] for t in best]
+        check(stars == sorted(stars, reverse=True) and stars[0] == 5 and 2 in stars, f"and sort by it, best first: {stars}")
+        log_before = (await plugin.listening_stats("all"))["data"]["plays"]
+        song = library._track(loose, library.tracks[loose])
+        plugin.recent_scrobbles.clear()
+        await plugin.scrobble(lid, loose, True, song)
+        await plugin.scrobble(lid, loose, True, song)  # a duplicate report within seconds isn't a second listen
+        summary = (await plugin.listening_stats("week"))["data"]
+        check(summary["plays"] - log_before == 1 and summary["top_songs"][0]["plays"] >= 1 and summary["streak"] >= 1
+              and sum(summary["hours"]) == summary["plays"] and summary["seconds"] >= 0,
+              f"a listen goes into your stats: {summary['plays']} plays, {summary['top_songs'][:1]}")
+        check(not (await plugin.listening_stats("decade"))["ok"], "an unknown period is refused")
+        for extra in (flac_rated, webm):
+            os.remove(extra)
+
+        print("local library: the clean-up report")
+        tidy = os.path.join(lib2, "Tidy")
+        os.makedirs(os.path.join(tidy, "copies"), exist_ok=True)
+        make_wav(os.path.join(tidy, "01 One.wav"), "One", "Band", "Halves", 1, albumartist="Band")
+        make_wav(os.path.join(tidy, "02 Two.wav"), "Two", "Band", "Halves", 2, albumartist="")  # none: grouped apart
+        shutil.copy(os.path.join(tidy, "01 One.wav"), os.path.join(tidy, "copies", "One (copy).wav"))
+        library.rescan()
+        await library.scan_task
+        report = (await plugin.library_health(lid))["data"]
+        dupe = next((g for g in report["duplicates"] if g[0]["title"] == "One"), None)
+        check(dupe and len(dupe) == 2 and all(d["quality"] and d["folder"] for d in dupe),
+              f"the same song in two folders is a duplicate, each copy with its folder and quality: {dupe}")
+        split = next((s for s in report["split"] if s["album"] == "Halves"), None)
+        check(split and len(split["parts"]) == 2 and split["suggest"] == "Band",
+              f"one folder's album under two album artists is split, and the fix suggested: {split}")
+        check(report["untagged_count"] >= 1 and all(u["missing"] for u in report["untagged"])
+              and report["missing_files"] == 0 and report["tracks"] == len(library.tracks),
+              f"songs missing details listed with what's missing: {report['untagged_count']}")
+        fixed = await plugin.fix_split_album(lid, split["path"], "Halves", "Band")
+        halves = {library._album_key(t) for t in library.tracks.values() if t["album"] == "Halves" and "copies" not in t["path"]}
+        check(fixed["ok"] and len(halves) == 1, f"fixed, it's one album again: {fixed}")
+        check(not any(s["album"] == "Halves" for s in (await plugin.library_health(lid))["data"]["split"]),
+              "and no longer reported")
+        shutil.rmtree(tidy)
+
+        print("local library: measuring loudness")
+        if shutil.which("ffmpeg"):
+            loud_dir = os.path.join(lib2, "Loud")
+            os.makedirs(loud_dir, exist_ok=True)
+            for n, (volume, ext) in enumerate([("0.5", "flac"), ("0.1", "flac")], 1):
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+                                "-af", f"volume={volume}", "-metadata", f"title=Tone {n}", "-metadata", "artist=Meter",
+                                "-metadata", "album=Tones", "-metadata", f"track={n}",
+                                os.path.join(loud_dir, f"0{n} Tone {n}.{ext}")], check=True)
+            library.rescan()
+            await library.scan_task
+            tones = sorted((tid for tid, t in library.tracks.items() if t["path"].startswith(loud_dir)),
+                           key=lambda tid: library.tracks[tid]["path"])
+            before = (await plugin.library_health(lid))["data"]["no_gain"]
+            check(before >= 2, f"songs without loudness tags are counted: {before}")
+            check((await plugin.scan_loudness(lid))["ok"], "measuring starts")
+            await library.loudness_task
+            rg = [library.tracks[tid]["rg"] for tid in tones]
+            check(all(rg) and rg[1]["track"] > rg[0]["track"] + 10 and rg[0]["album"] == rg[1]["album"]
+                  and 0 < rg[0]["track_peak"] <= 1.2,
+                  f"each song's gain from its loudness (the quiet one raised more), one album gain for both: {rg}")
+            check((await plugin.library_health(lid))["data"]["no_gain"] == before - 2, "and they're no longer counted")
+            shutil.rmtree(loud_dir)
+            library.rescan()
+            await library.scan_task
+        else:
+            print("  (no ffmpeg here: loudness not measured)")
+
+        print("local library: moving in from iTunes or MusicBee")
+        from urllib.parse import quote as urlquote
+        mp3_path = library.tracks[loose]["path"]
+        other = next(tid for tid, t in library.tracks.items() if tid != loose and t.get("title") and t.get("artist"))
+        o = library.tracks[other]
+        location = "file://localhost/" + urlquote(mp3_path.replace("\\", "/").lstrip("/"))
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Tracks</key><dict>
+ <key>11</key><dict><key>Track ID</key><integer>11</integer><key>Name</key><string>whatever</string>
+  <key>Location</key><string>{location}</string><key>Play Count</key><integer>42</integer>
+  <key>Skip Count</key><integer>3</integer><key>Rating</key><integer>80</integer>
+  <key>Play Date UTC</key><date>2024-03-01T20:15:00Z</date><key>Loved</key><true/></dict>
+ <key>12</key><dict><key>Track ID</key><integer>12</integer><key>Name</key><string>{o['title']}</string>
+  <key>Artist</key><string>{o['artist']}</string><key>Album</key><string>{o['album']}</string>
+  <key>Location</key><string>file://localhost/D:/Somewhere/else.mp3</string><key>Play Count</key><integer>1000</integer></dict>
+ <key>13</key><dict><key>Track ID</key><integer>13</integer><key>Name</key><string>Not here</string></dict>
+</dict>
+<key>Playlists</key><array>
+ <dict><key>Name</key><string>Library</string><key>Master</key><true/><key>Playlist Items</key><array>
+  <dict><key>Track ID</key><integer>11</integer></dict></array></dict>
+ <dict><key>Name</key><string>Road trip</string><key>Playlist Items</key><array>
+  <dict><key>Track ID</key><integer>12</integer></dict><dict><key>Track ID</key><integer>11</integer></dict>
+  <dict><key>Track ID</key><integer>13</integer></dict></array></dict>
+ <dict><key>Name</key><string>Clever</string><key>Smart Info</key><data>AAAA</data><key>Playlist Items</key><array>
+  <dict><key>Track ID</key><integer>11</integer></dict></array></dict>
+</array></dict></plist>"""
+        lib_xml = os.path.join(tmp, "iTunes Library.xml")
+        with open(lib_xml, "w", encoding="utf-8") as f:
+            f.write(plist)
+        library.plays.pop(loose, None)
+        library.ratings.pop(loose, None)
+        library.favourites.discard(loose)
+        await plugin.set_rating(lid, loose, 0)
+        moved_in = await plugin.import_library(lid, lib_xml)
+        got = moved_in.get("data") or {}
+        check(moved_in["ok"] and got["songs"] == 3 and got["matched"] == 2 and got["playlists"] == 1,
+              f"songs matched by path, then by artist, title and album; only the plain playlist comes: {moved_in}")
+        check(library.plays[loose]["count"] == 42 and library.plays[loose]["skips"] == 3 and library.plays[loose]["last"] > 1.7e9
+              and library.plays[other]["count"] == 1000 and library._stars_of(loose, library.tracks[loose]) == 4
+              and loose in library.favourites,
+              f"play counts, skips, last plays, ratings and loves come across: {library.plays[loose]}")
+        road = next(p for p in plugin.playlists.playlists if p["instance_id"] == lid and p["name"] == "Road trip")
+        check([t["id"] for t in road["tracks"]] == [other, loose], "the playlist keeps its order, without the songs not here")
+        again = (await plugin.import_library(lid, lib_xml))["data"]
+        check(again["playlists"] == 0 and library.plays[loose]["count"] == 42, "importing twice adds nothing twice")
+        bad = os.path.join(tmp, "not a library.xml")
+        with open(bad, "w") as f:
+            f.write("<html></html>")
+        check(not (await plugin.import_library(lid, bad))["ok"], "a file that isn't a library is said so")
+        exported = await plugin.export_playlists(lid)
+        m3u = os.path.join(exported["data"]["folder"], "Road trip.m3u8")
+        check(exported["ok"] and os.path.exists(m3u) and open(m3u, encoding="utf-8").read().startswith("#EXTM3U")
+              and mp3_path in open(m3u, encoding="utf-8").read(),
+              f"playlists exported as .m3u8 files other players open: {exported}")
+        shutil.rmtree(exported["data"]["folder"])
+        await plugin.playlist_delete("md:" + road["id"])
+
+        print("local library: CUE sheets")
+        if shutil.which("ffmpeg"):
+            rip = os.path.join(lib2, "Rip")
+            os.makedirs(rip, exist_ok=True)
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=6",
+                            os.path.join(rip, "Whole Album.flac")], check=True)
+            with open(os.path.join(rip, "Whole Album.cue"), "w", encoding="utf-8") as f:
+                f.write('REM GENRE "Ambient"\nREM DATE 1999\nPERFORMER "Sheet Band"\nTITLE "One File"\n'
+                        'FILE "Whole Album.wav" WAVE\n'
+                        '  TRACK 01 AUDIO\n    TITLE "Opening"\n    INDEX 01 00:00:00\n'
+                        '  TRACK 02 AUDIO\n    TITLE "Closing"\n    PERFORMER "Guest"\n    INDEX 01 00:03:00\n')
+            library.rescan()
+            await library.scan_task
+            parts = sorted(((tid, t) for tid, t in library.tracks.items() if t["path"].startswith(rip)), key=lambda kv: kv[1]["track"])
+            check([(t["title"], t["artist"], t["album"], t["track"], round(t["duration"])) for _, t in parts]
+                  == [("Opening", "Sheet Band", "One File", 1, 3), ("Closing", "Guest", "One File", 2, 3)]
+                  and parts[0][1]["year"] == "1999" and parts[0][1]["genres"] == ["Ambient"],
+                  f"a whole-album file with a .cue is its songs (the sheet naming it .wav is found as .flac): {[t['title'] for _, t in parts]}")
+            library.rescan()  # and again: the index holds the songs now, not the file
+            await library.scan_task
+            again = sorted((round(t["duration"]), t["cue"]) for t in library.tracks.values() if t["path"].startswith(rip))
+            check([d for d, _ in again] == [3, 3] and again[1][1][1] > 5.9, f"a second scan splits the file the same: {again}")
+            source = await library.stream(parts[1][0])
+            from mutagen.flac import FLAC as _FLAC
+            check(source.path and abs(_FLAC(source.path).info.length - 3) < 0.2,
+                  f"a song plays as its slice of the file: {source.path}")
+            check(not (await plugin.set_tags(lid, "track", parts[0][0], {"title": "x"}))["ok"], "its tags aren't edited in the shared file")
+            rated = await plugin.set_rating(lid, parts[0][0], 5)
+            check(rated["ok"] and library.ratings.get(parts[0][0]) == 5, "its rating is kept by MusicDeck")
+            check(not (await plugin.delete_from_library(lid, "track", parts[0][0]))["ok"], "one song of it isn't deleted alone")
+            # converting: a CUE song and a whole file, to MP3 with their names
+            conv_root = os.path.join(tmp, "converted")
+            started = library.convert_songs([parts[1][0]], "mp3", conv_root)
+            await library.convert_task
+            made = os.path.join(conv_root, "MP3", "Sheet Band", "One File", "02 Closing.mp3")
+            from mutagen.mp3 import MP3 as _MP3
+            from mutagen.easyid3 import EasyID3 as _EID3
+            check(started == 1 and library.convert_progress["failed"] == 0 and os.path.exists(made)
+                  and abs(_MP3(made).info.length - 3) < 0.3 and _EID3(made)["title"] == ["Closing"] and _EID3(made)["artist"] == ["Guest"],
+                  f"songs converted to MP3, named and tagged, a CUE song as its slice: {library.convert_progress}")
+            check(not (await plugin.convert_songs(lid, [parts[0][0]], "wav"))["ok"], "an unknown format is refused")
+            shutil.rmtree(rip)
+            library.rescan()
+            await library.scan_task
+        else:
+            print("  (no ffmpeg here: CUE sheets not tried)")
+
+        print("local library: search fields, sorting names, the column browser")
+        from musicdeck import query as qmod
+        conds, words = qmod.parse('artist:nirvana year:>1990 rating:>=4 "come as" plays:x')
+        check(conds == [("artist", ":", "nirvana"), ("year", ">", 1990.0), ("rating", ">=", 4.0)]
+              and words == ["come as", "plays:x"], f"search words with fields: {conds} {words}")
+        check(qmod.sort_name("The Beatles") == "beatles" and qmod.sort_name("Theory") == "theory", "The Beatles sorts under B")
+        some = next(t for t in library.tracks.values() if t.get("artist") and t.get("year"))
+        found = (await plugin.search(lid, f'artist:"{some["artist"]}" year:={some["year"]}'))["data"]
+        check(found["tracks"] and all(t["artist"] == some["artist"] for t in found["tracks"]),
+              f"a field search finds by artist and year: {len(found['tracks'])} songs")
+        check(not (await plugin.search(lid, "year:>3000"))["data"]["tracks"], "and nothing past what holds")
+        cols = (await plugin.library_columns(lid))["data"]
+        check(cols["genres"] and cols["artists"] and cols["albums"] and cols["count"] == len(library.tracks),
+              f"the column browser: every genre, artist and album, and all songs: {cols['count']}")
+        g = cols["genres"][0][0]
+        narrowed = (await plugin.library_columns(lid, g))["data"]
+        check(narrowed["count"] == cols["genres"][0][1] and len(narrowed["artists"]) <= len(cols["artists"]),
+              f"a genre narrows the artists and songs: {g} {narrowed['count']}")
+
+        print("local library: tag tools and organizing files")
+        messy = os.path.join(lib2, "Messy")
+        make_wav(os.path.join(messy, "07 - Some Artist - the end of the world.wav"), "x", "y", "Messy Album", 1, albumartist="")
+        make_wav(os.path.join(messy, "08 - Some Artist - into the night.wav"), "x", "y", "Messy Album", 1, albumartist="")
+        library.rescan()
+        await library.scan_task
+        ids = sorted((tid for tid, t in library.tracks.items() if t["path"].startswith(messy)),
+                     key=lambda tid: library.tracks[tid]["path"])
+        preview = (await plugin.retag_preview(lid, ids, "from_names", {"pattern": "{track} - {artist} - {title}"}))["data"]
+        check(preview["count"] == 2 and preview["changes"][0]["fields"]["title"] == ["x", "the end of the world"]
+              and preview["changes"][0]["fields"]["track"] == [1, 7],
+              f"tags read from file names by a pattern, shown before anything's written: {preview['changes'][:1]}")
+        check(not (await plugin.retag_preview(lid, ids, "from_names", {"pattern": "{nope}"}))["ok"], "an unknown field is said")
+        await plugin.retag_apply(lid, ids, "from_names", {"pattern": "{track} - {artist} - {title}"})
+        check([library.tracks[t]["title"] for t in ids] == ["the end of the world", "into the night"]
+              and library.tracks[ids[0]]["artist"] == "Some Artist", "and written")
+        await plugin.retag_apply(lid, ids, "case", {"style": "title", "fields": ["title"]})
+        check([library.tracks[t]["title"] for t in ids] == ["The End of the World", "Into the Night"],
+              f"Title Case keeps small words small: {[library.tracks[t]['title'] for t in ids]}")
+        await plugin.retag_apply(lid, ids, "renumber", {})
+        check([library.tracks[t]["track"] for t in ids] == [1, 2], "renumbered in file order")
+        await plugin.retag_apply(lid, ids, "replace", {"field": "artist", "find": "some", "to": "Any"})
+        check(library.tracks[ids[0]]["artist"] == "Any Artist", "find and replace, any case")
+        check((await plugin.get_tags(lid, "track", ids[0]))["data"]["undo"], "each file's edit can be undone")
+
+        await plugin.star(lid, ids[0], True, library._track(ids[0], library.tracks[ids[0]]))
+        await plugin.set_rating(lid, ids[0], 5)
+        mine = await plugin.create_playlist(lid, "Tidy test", [library._track(ids[0], library.tracks[ids[0]])])
+        org = (await plugin.organize_preview(lid, "{albumartist}/{album}/{track} {title}", ids))["data"]
+        check(org["count"] == 2 and org["moves"][0]["to"] == os.path.join("Any Artist", "Messy Album", "01 The End of the World.wav"),
+              f"where they'd go, inside their library folder: {org['moves'][:1]}")
+        check(not (await plugin.organize_preview(lid, "{album}", ids))["ok"], "a pattern without the title or track number is refused")
+        done = await plugin.organize_apply(lid, "{albumartist}/{album}/{track} {title}", ids)
+        moved_to = os.path.join(lib2, "Any Artist", "Messy Album", "01 The End of the World.wav")
+        new_id = next(tid for tid, t in library.tracks.items() if t["path"] == moved_to)
+        check(done["ok"] and done["data"]["moved"] == 2 and os.path.exists(moved_to) and not os.path.exists(messy),
+              f"moved, and the emptied folder removed: {done}")
+        check(new_id in library.favourites and library.tracks[new_id]["rating"] == 5
+              and (await plugin.open_collection(lid, "playlist", mine["id"]))["data"]["tracks"][0]["id"] == new_id,
+              "favourites, ratings and MusicDeck's playlists follow the files")
+        undone = await plugin.organize_undo(lid)
+        check(undone["ok"] and os.path.exists(os.path.join(messy, "07 - Some Artist - the end of the world.wav"))
+              and not os.path.exists(os.path.join(lib2, "Any Artist")), f"and the organize undone: {undone}")
+        back = next(tid for tid, t in library.tracks.items() if t["path"].endswith("the end of the world.wav"))
+        check(back in library.favourites, "with what was kept under the files")
+        await plugin.playlist_delete(mine["id"])
+        shutil.rmtree(messy)
+        library.rescan()
+        await library.scan_task
+        # the albums made for these checks were "new music": their getting ready (look-ups) isn't for the tests below
+        library.import_queue.clear()
+        if library.import_task and not library.import_task.done():
+            library.import_task.cancel()
+            try:
+                await library.import_task
+            except BaseException:
+                pass
+
         albums = (await plugin.open_collection(lid, "list", "albums"))["data"]["collections"]
         works = next(a for a in albums if a["title"] == "Works")
         album_fields = (await plugin.get_tags(lid, "album", works["id"]))["data"]
@@ -1553,6 +1836,12 @@ async def run():
             async def art(self, art_id):
                 return Source(url=dl_url + "/cover.jpg")
 
+            async def open(self, kind, id):
+                # the source's own playlist "charts": two of the tracks
+                return {"title": "Charts", "subtitle": "", "art": None, "collections": [],
+                        "tracks": [{"id": i, "title": i.title(), "artist": "", "album": "", "duration": 10, "art": "c1"}
+                                   for i in ("file", "whole")]}
+
         class FakeStreamingOnly(FakeSource):
             type, display_name, downloadable = "fakesub", "Fake subscription", False
 
@@ -1593,6 +1882,25 @@ async def run():
             check(not any(f.endswith(".part") for f in os.listdir(plugin.offline.dir)), "failed downloads leave nothing behind")
             saved = (await plugin.playlist_offline(fid, mix["id"]))
             check(saved == {"on": True, "saved": 4, "total": 6}, "the dl_page counts what's saved")
+            # any playlist or album, from wherever it's opened: downloading saves it to your playlists first
+            check(await plugin.collection_offline(fid, "playlist", mix["id"]) == {"on": True, "saved": 4, "total": 6, "copy": mix["id"]},
+                  "a MusicDeck playlist's state, by its own id")
+            check(await plugin.collection_offline(fid, "playlist", "charts") == {"on": False, "total": 0, "saved": 0, "copy": None},
+                  "a source's playlist not saved yet: not downloaded")
+            got = await plugin.download_collection(fid, "playlist", "charts", True)
+            copies = [p for p in plugin.playlists.playlists if p.get("source") == {"kind": "playlist", "id": "charts"}]
+            check(got["ok"] and got["data"]["on"] and got["data"]["total"] == 2 and len(copies) == 1 and copies[0]["offline"],
+                  f"downloading a source's playlist saves it to your playlists and downloads that: {got}")
+            found = await plugin.saved_copy(fid, "playlist", "charts")
+            check(found and found["id"] == got["data"]["copy"] and await plugin.saved_copy(fid, "playlist", "elsewhere") is None,
+                  f"a saved playlist is known as saved from wherever it's opened: {found}")
+            again = await plugin.download_collection(fid, "playlist", "charts", True)
+            check(again["ok"] and len([p for p in plugin.playlists.playlists if p.get("source") == {"kind": "playlist", "id": "charts"}]) == 1,
+                  "asking again uses the same copy (no second one, no error)")
+            off = await plugin.download_collection(fid, "playlist", "charts", False)
+            check(off["ok"] and not off["data"]["on"] and (await plugin.collection_offline(fid, "playlist", "charts"))["copy"],
+                  "and the download can be removed; the saved playlist stays")
+            await plugin.playlist_delete(copies[0]["id"] if copies[0]["id"].startswith("md:") else "md:" + copies[0]["id"])
             index = json.load(open(os.path.join(plugin.offline.dir, "index.json")))
             check(all("secret" not in json.dumps(v) and "127.0.0.1" not in json.dumps(v) for v in index.values()),
                   "the index keeps file names only, not addresses or headers")

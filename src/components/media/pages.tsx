@@ -72,7 +72,7 @@ import {
   useResult,
 } from "../Browser";
 import { confirmClearQueue } from "../Queue";
-import { saveCollection, showCollectionMenu, showTrackMenu } from "../TrackMenu";
+import { showCollectionMenu, showTrackMenu } from "../TrackMenu";
 import {
   Card,
   CardBlanks,
@@ -96,6 +96,7 @@ import {
   useCardSize,
   useNear,
 } from "./parts";
+import { useDownload, useSavedCopy } from "../../download";
 
 /**
  * Where each browsing tab of the media center is: a history of views, B steps back through it. One per
@@ -846,6 +847,8 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
   useStore(pluginState); // the game music choices
   const withGame = !!game && musicFor(game.appid, instanceId)?.collection.id === collection.id;
   const saved = useLibrarySave(instanceId, collection, page);
+  const download = useDownload(instanceId, collection);
+  const copy = useSavedCopy(instanceId, collection);
   const pictured = collection.kind !== "list" && collection.kind !== "folder";
   const albumArtist = page && collection.kind === "album" ? mostCommon(page.tracks.map((t) => t.artist)) : undefined;
   const total = page?.tracks.reduce((sum, t) => sum + (t.duration || 0), 0) ?? 0;
@@ -898,11 +901,22 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
                 )}
               </>
             )}
-            {canSave(instanceId, collection) && page && page.tracks.length > 0 && (
-              <PageButton label="Save playlist" onClick={() => saveCollection(instanceId, collection)}>
-                <FaPlus /> Save
+            {download && page && page.tracks.length > 0 && (
+              <PageButton active={download.on} label={download.label} onClick={download.act}>
+                <FaDownload /> {download.label}
               </PageButton>
             )}
+            {canSave(instanceId, collection) && page && page.tracks.length > 0 &&
+              (copy.copy ? (
+                // saved already (from wherever this was opened): it opens your copy
+                <PageButton active label="Open your saved playlist" onClick={() => pushCenter(stack, { type: "collection", collection: copy.copy! })}>
+                  <FaCheck /> Saved
+                </PageButton>
+              ) : (
+                <PageButton label="Save playlist" onClick={copy.save}>
+                  <FaPlus /> Save
+                </PageButton>
+              ))}
             {saved && (
               <PageButton active={saved.on} onClick={saved.toggle}>
                 {saved.icon} {saved.label}

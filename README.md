@@ -41,6 +41,21 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays. MP3, FLAC, Ogg,
   Opus, AAC/ALAC (M4A), WAV and WebM play as they are; AIFF, Monkey's Audio, WavPack, DSD (DSF/DFF), TAK,
   TTA, CAF, MKA, WMA, Musepack and AC-3 play through ffmpeg when it's installed (lossless ones as FLAC).
+- **Ratings, stats and smarter shuffle:** rate songs 1-5 stars from the track list, Now Playing or a song's menu
+  (written into the files, where other players read them); skips are counted, and smart playlists pick by rating
+  and skips. **Your stats** sums up your listening from every source: listens, hours, top artists, albums and songs,
+  when in the day and week you listen, days in a row. Shuffle by **songs**, **albums** (whole albums in random
+  order) or **smart** (better-rated songs sooner, never the same artist twice running); save the queue as a playlist.
+- **Library tools (desktop):** a clean-up report with a fix beside each problem (duplicates, albums split in two,
+  albums without covers, songs missing details, files gone), **Tag tools** (tags from file names, capitalisation,
+  renumbering, find and replace), **Organize files** into folders by their tags, **loudness** measured for songs
+  without ReplayGain, **import** from iTunes or MusicBee (play counts, ratings, loves, playlists) and **export**
+  of playlists as .m3u8: each shown before it's done, and each undoable. A **column browser** (genre, artist,
+  album) and **search by field** (`artist:nirvana year:>1990 rating:>=4`). **CUE sheets** (a whole album in one
+  file) show as their songs; songs **convert** to MP3, AAC, Opus or FLAC for other devices.
+- **Downloads anywhere:** every playlist or album of a source that can download has Download, wherever it's
+  opened (Quick Access, the media center, desktop Steam, its menu); one from another source is saved to your
+  playlists first. A playlist you've saved says so wherever it's opened.
 - **Library manager for your files:** edit a track's or a whole album's tags (**Y** → Edit tags; the last
   edit to each file can be undone), fill them in with **Look up details**: [MusicBrainz](https://musicbrainz.org),
   Apple Music's and Deezer's public catalogues are all asked at once, the same record from several of them

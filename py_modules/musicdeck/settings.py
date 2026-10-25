@@ -20,9 +20,10 @@ DEFAULTS: dict[str, Any] = {
     "output_eqs": {},
     # levelling: "off" | "track" | "album" (ReplayGain); scrobble/queue_sync talk to the source's server
     # game_pause: pause while a game runs; game_duck: the share of its volume music keeps while a game
-    # is in front, 1 = as is (src/games.ts); crossfade: seconds, 0 = off (src/player.ts)
+    # is in front, 1 = as is (src/games.ts); crossfade: seconds, 0 = off (src/player.ts); shuffle_mode: "songs",
+    # "albums" (whole albums, in random order) or "smart" (the better-rated sooner, no artist twice running)
     "playback": {"levelling": "track", "scrobble": True, "queue_sync": True, "resume": True, "autoplay": True,
-                 "game_pause": False, "game_duck": 1.0, "crossfade": 0},
+                 "game_pause": False, "game_duck": 1.0, "crossfade": 0, "shuffle_mode": "songs"},
     # ListenBrainz scrobbling for every source; the token never goes to the frontend
     "listenbrainz": {"token": "", "user": ""},
     # Last.fm scrobbling: the user's own API account (key, secret) and the session the sign-in gave;

@@ -9,6 +9,7 @@ import { Queue, confirmClearQueue } from "./Queue";
 import { Visualizer } from "./media/nowplaying";
 import { ButtonRow, IconButton, watchSize } from "./common";
 import { FaCompactDisc, FaMusic, FaSearch } from "react-icons/fa";
+import { saveQueue } from "./TrackMenu";
 
 /** The second page's view: the song's lyrics or what's up next; kept while the panel is closed. */
 const pageTwo = new Store<{ side: "lyrics" | "queue" }>({ side: "lyrics" });
@@ -235,6 +236,11 @@ const PageSwitch: FC<{ side: "lyrics" | "queue"; upNext: number }> = ({ side, up
           Queue <span style={{ opacity: 0.7, fontWeight: 600 }}>{upNext}</span>
         </HeaderWord>
         <div style={{ flex: 1 }} />
+        {side === "queue" && (
+          <HeaderWord label="Save the queue as a playlist" onPick={() => saveQueue(window)}>
+            Save
+          </HeaderWord>
+        )}
         {side === "queue" && (
           <HeaderWord label="Clear queue" onPick={confirmClearQueue}>
             Clear

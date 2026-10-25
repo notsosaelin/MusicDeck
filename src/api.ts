@@ -21,10 +21,12 @@ export interface Track {
   } | null;
   /** an endless stream (radio station): no length, no seeking */
   live?: boolean;
+  /** 0-5 stars, from sources that keep ratings (feature "rate") */
+  rating?: number;
 }
 
 export type Feature =
-  "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork";
+  "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork" | "rate";
 
 export interface LyricLine {
   /** seconds; null for unsynced lyrics */
@@ -53,6 +55,9 @@ export interface PlaybackSettings {
   game_duck?: number;
   /** seconds the end of a track and the start of the next overlap; 0 = off (tracks still follow gaplessly) */
   crossfade?: number;
+  /** how shuffle orders: song by song, whole albums in random order, or smart (the better-rated sooner, no artist
+   *  twice in a row) */
+  shuffle_mode?: "songs" | "albums" | "smart";
 }
 
 export interface Session {
@@ -354,6 +359,81 @@ export const scrobble = callable<[id: string, trackId: string, submission: boole
   "scrobble",
 );
 export const getLyrics = callable<[id: string, track: Track], Result<Lyrics | null>>("get_lyrics");
+export const setRating = callable<[id: string, trackId: string, stars: number], Result<number>>("set_rating");
+export const reportSkip = callable<[id: string, trackId: string], Result<null>>("report_skip");
+
+/** One of your top artists, albums or songs (stats.py): its name and where it last played from. */
+export interface StatsItem {
+  name: string;
+  plays: number;
+  artist?: string;
+  album?: string;
+  id?: string;
+  src?: string;
+  art?: string;
+  album_id?: string;
+  artist_id?: string;
+  seconds?: number;
+  dur?: number;
+}
+export interface ListeningStats {
+  period: "week" | "month" | "year" | "all";
+  plays: number;
+  seconds: number;
+  songs: number;
+  artists_count: number;
+  days: number;
+  streak: number;
+  top_artists: StatsItem[];
+  top_albums: StatsItem[];
+  top_songs: StatsItem[];
+  /** listens by hour of the day (0-23) and day of the week (Monday first) */
+  hours: number[];
+  weekdays: number[];
+  first: number | null;
+}
+export const libraryHealth = callable<[id: string], Result<import("./desktop/tools").HealthReport>>("library_health");
+export const scanLoudness = callable<[id: string], Result<null>>("scan_loudness");
+export const loudnessStatus = callable<[id: string], Result<{ running: boolean; done: number; total: number; written: number; no_gain: number }>>(
+  "loudness_status",
+);
+export const importLibrary = callable<[id: string, path: string], Result<{ songs: number; matched: number; plays: number; ratings: number; loved: number; playlists: number }>>(
+  "import_library",
+);
+export const exportPlaylists = callable<[id: string], Result<{ folder: string; count: number }>>("export_playlists");
+export const libraryColumns = callable<[id: string, genre: string, artist: string, album: string], Result<import("./desktop/columns").Columns>>(
+  "library_columns",
+);
+export const convertSongs = callable<[id: string, ids: string[], fmt: string], Result<{ count: number; folder: string }>>("convert_songs");
+export const fixSplitAlbum = callable<[id: string, folder: string, album: string, albumartist: string], Result<{ changed: number }>>(
+  "fix_split_album",
+);
+export interface RetagPreview {
+  changes: { id: string; file: string; title: string; fields: Record<string, [string | number, string | number]> }[];
+  count: number;
+}
+export const retagPreview = callable<[id: string, ids: string[], op: string, args: Record<string, unknown>], Result<RetagPreview>>(
+  "retag_preview",
+);
+export const retagApply = callable<[id: string, ids: string[], op: string, args: Record<string, unknown>], Result<{ changed: number; failed: number; error: string }>>(
+  "retag_apply",
+);
+export interface OrganizePreview {
+  moves: { id: string; title: string; from: string; to: string }[];
+  count: number;
+  same: number;
+  clashes: { to: string; songs: string[] }[];
+  clash_count: number;
+  /** songs left where they are: no artist and no album to file them under */
+  untagged: number;
+  undo: boolean;
+}
+export const organizePreview = callable<[id: string, pattern: string, ids: string[] | null], Result<OrganizePreview>>("organize_preview");
+export const organizeApply = callable<[id: string, pattern: string, ids: string[] | null], Result<{ moved: number; failed: number; error: string }>>(
+  "organize_apply",
+);
+export const organizeUndo = callable<[id: string], Result<{ moved: number; failed: number; error: string }>>("organize_undo");
+export const listeningStats = callable<[period: ListeningStats["period"]], Result<ListeningStats>>("listening_stats");
 export const getRadio = callable<[id: string, track: Track], Result<Track[]>>("radio");
 export const getUserPlaylists = callable<[id: string], Result<Collection[]>>("user_playlists");
 export const addToPlaylist = callable<[id: string, playlistId: string, trackIds: string[]], Result<null>>(
@@ -485,7 +565,8 @@ export const localPlaylists = callable<[id: string], Collection[]>("local_playli
 
 /** A smart playlist (desktop Steam's Music section): Local files' songs picked by rules (LocalService.smart). */
 export interface SmartRule {
-  field: "title" | "artist" | "album" | "albumartist" | "genre" | "year" | "plays" | "added_days" | "played_days" | "starred" | "duration";
+  field: "title" | "artist" | "album" | "albumartist" | "genre" | "year" | "plays" | "added_days" | "played_days" | "starred" | "duration"
+    | "rating" | "skips";
   op: "contains" | "is" | "is_not" | "starts" | "gt" | "lt";
   value: string;
 }
@@ -511,6 +592,17 @@ export const playlistDelete = callable<[playlistId: string], void>("playlist_del
 export const setPlaylistOffline = callable<[playlistId: string, on: boolean], Result<null>>("set_playlist_offline");
 export const playlistOffline = callable<[id: string, playlistId: string], OfflineState | null>("playlist_offline");
 export const retryDownloads = callable<[], void>("retry_downloads");
+/** A playlist's or album's download: its own (a MusicDeck playlist) or its saved copy's ("copy": the copy's id) */
+export interface CollectionOffline extends OfflineState {
+  copy: string | null;
+}
+export const savedCopy = callable<[id: string, kind: string, collectionId: string], Collection | null>("saved_copy");
+export const collectionOffline = callable<[id: string, kind: string, collectionId: string], CollectionOffline | null>(
+  "collection_offline",
+);
+export const downloadCollection = callable<[id: string, kind: string, collectionId: string, on: boolean], Result<CollectionOffline>>(
+  "download_collection",
+);
 export const removeDownloads = callable<[], void>("remove_downloads");
 export const exportBackup = callable<[], Result<string>>("export_backup");
 export const importBackup = callable<[path: string], Result<string>>("import_backup");

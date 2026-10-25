@@ -114,6 +114,20 @@ class PlaylistStore:
         self._save()
         return len(fresh)
 
+    def retarget(self, instance_id: str, ids: dict[str, str]) -> int:
+        """A source's songs known by new ids (Local files' files moved: an id is its path's): its playlists follow."""
+        changed = 0
+        for p in self.playlists:
+            if p["instance_id"] != instance_id:
+                continue
+            for t in p["tracks"]:
+                if t["id"] in ids:
+                    t["id"] = ids[t["id"]]
+                    changed += 1
+        if changed:
+            self._save()
+        return changed
+
     # remove, rename and clear_art do nothing for a playlist that's gone (deleted from another
     # screen, or by a page left over from a reload); the views refresh afterwards
     def remove(self, collection_id: str, track_id: str) -> None:

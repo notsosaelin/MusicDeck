@@ -641,13 +641,18 @@ class LocalLibrary(LocalService):
             names = [t["title"] for t in inside]
         elif kind in ("track", "album"):
             items = self._target(kind, item_id)
+            if kind == "track" and items[0][1].get("cue"):
+                # one file holds the whole album (a CUE sheet's): a song can't go on its own
+                raise ServiceError("This song is one file with the rest of its album (a CUE sheet): delete the album")
             if kind == "track":
                 title = items[0][1]["title"]
             else:
                 title = items[0][1]["album"] or "Album"
             songs = len(items)
             names = [t["title"] for _, t in items]
-            planned = self._plan_delete([t["path"] for _, t in items])
+            # a CUE album's songs share one file, and its sheet goes with it
+            paths = list(dict.fromkeys([t["path"] for _, t in items] + [t["cue_sheet"] for _, t in items if t.get("cue_sheet")]))
+            planned = self._plan_delete(paths)
         else:
             raise ServiceError("Only songs, albums, folders and playlists are deleted")
 

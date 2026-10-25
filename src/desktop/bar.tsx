@@ -9,6 +9,8 @@ import { FC, useEffect, useRef, useState } from "react";
 import { FaBroadcastTower, FaCompress, FaEllipsisH, FaExpand, FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp, FaWindowRestore } from "react-icons/fa";
 import { canCast, prepareCastMenu, showCastMenu } from "../components/CastMenu";
 import { Lyrics, getLyrics, setSetting } from "../api";
+import { SHUFFLE_MODES, SHUFFLE_NOTES, updatePlayback } from "../components/Settings";
+import { saveQueue } from "../components/TrackMenu";
 import { player } from "../player";
 import { mediaUrl, pluginState, useStore } from "../store";
 import { desktopActions, go, panel, showPane, toggleFull } from "./data";
@@ -42,6 +44,28 @@ const Volume: FC = () => {
       </Button>
       <Slider label="Volume" value={v} onInput={setVolume} className="md-volume-range" />
     </div>
+  );
+};
+
+const shuffleName = () =>
+  SHUFFLE_MODES.find(([id]) => id === (pluginState.get()?.playback.shuffle_mode ?? "songs"))?.[1].toLowerCase() ?? "songs";
+
+/** Shuffle's style; choosing one turns shuffle on. */
+const showShuffleMenu = (target: EventTarget) => {
+  const mode = pluginState.get()?.playback.shuffle_mode ?? "songs";
+  showContextMenu(
+    <Menu label="Shuffle">
+      {SHUFFLE_MODES.map(([id, label]) => (
+        <MenuItem key={id} onSelected={async () => {
+          await updatePlayback({ shuffle_mode: id });
+          if (!player.state.get().shuffle) player.setShuffle(true);
+        }}>
+          {mode === id ? "✓ " : ""}
+          {label}: {SHUFFLE_NOTES[id].toLowerCase()}
+        </MenuItem>
+      ))}
+    </Menu>,
+    target,
   );
 };
 
@@ -87,9 +111,13 @@ export const PlayerBar: FC = () => {
       </div>
       <div className="md-bar-middle" data-idle={item ? undefined : ""}>
         <div className="md-bar-controls">
-          <Button label={state.shuffle ? "Shuffle: on" : "Shuffle"} on={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
-            <FaRandom />
-          </Button>
+          {/* right-click: how it shuffles (songs, albums, smart) */}
+          <span onContextMenu={(e) => { e.preventDefault(); showShuffleMenu(e.nativeEvent as unknown as EventTarget); }}>
+            <Button label={state.shuffle ? `Shuffle: on (${shuffleName()}) · right-click for the style` : "Shuffle · right-click for the style"}
+                    on={state.shuffle} onClick={() => player.setShuffle(!state.shuffle)}>
+              <FaRandom />
+            </Button>
+          </span>
           <Controls size={34} />
           <Button label={`Repeat: ${state.repeat}`} on={state.repeat !== "off"} onClick={() => player.cycleRepeat()}>
             <FaRedo />
@@ -176,7 +204,14 @@ export const Queue: FC<{ big?: boolean }> = ({ big }) => {
     <>
       <div className="md-queue-heading">Now playing</div>
       {state.index >= 0 ? row(state.index, true) : <div className="md-dim">Nothing</div>}
-      <div className="md-queue-heading">Next up{next.length ? ` · ${next.length}` : ""}</div>
+      <div className="md-queue-heading md-queue-heading-row">
+        <span>Next up{next.length ? ` · ${next.length}` : ""}</span>
+        {state.index >= 0 && (
+          <button className="md-text-button" onClick={(e) => saveQueue(e.currentTarget)}>
+            Save as playlist
+          </button>
+        )}
+      </div>
       {!next.length && <div className="md-dim" style={{ padding: "4px 8px" }}>Nothing after this song</div>}
       {next.slice(0, 200).map((i) => row(i))}
       {next.length > 200 && <div className="md-dim">and {next.length - 200} more</div>}
@@ -257,6 +292,9 @@ export const BAR_CSS = `
 .md-panel-body { flex: 1; overflow-y: auto; padding: 0 12px 20px 20px; }
 .md-queue-heading { margin: 18px 0 6px; padding: 0 8px; font-size: 13px; font-weight: 600; color: #fff; }
 .md-queue-heading:first-child { margin-top: 4px; }
+.md-queue-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.md-text-button { border: none; background: none; color: #8b929a; font: inherit; font-size: 12px; font-weight: 400; cursor: pointer; padding: 0; }
+.md-text-button:hover { color: #fff; text-decoration: underline; }
 .md-queue-row { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 4px; cursor: default; }
 .md-queue-row:hover { background: rgba(255,255,255,0.07); }
 .md-queue-art { width: 40px; height: 40px; min-width: 40px; border-radius: 3px; object-fit: cover; }

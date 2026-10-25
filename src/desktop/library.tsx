@@ -5,7 +5,7 @@
  * art as a game's is by its hero, with a green Play.
  */
 import { CSSProperties, FC, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { FaChevronLeft, FaChevronRight, FaCompactDisc, FaEject, FaEllipsisH, FaFolder, FaHdd, FaListUl, FaPlay, FaRandom, FaSearch, FaUser } from "react-icons/fa";
+import { FaChevronLeft, FaChevronRight, FaDownload, FaCompactDisc, FaEject, FaEllipsisH, FaFolder, FaHdd, FaListUl, FaPlay, FaRandom, FaSearch, FaUser } from "react-icons/fa";
 import * as api from "../api";
 import { Collection, Page, Section, SmartPlaylist, Track } from "../api";
 import { showCollectionMenu, showTrackMenu } from "../components/TrackMenu";
@@ -32,6 +32,12 @@ import {
 } from "./manage";
 import { SIZES, desktopDialog } from "./dialog";
 import { showSettings } from "./polish";
+import { canRate } from "../ratings";
+import { Stars } from "./parts";
+import { StatsPage } from "./stats";
+import { ToolsPage } from "./tools";
+import { ColumnsPage } from "./columns";
+import { useDownload } from "../download";
 
 const GROUPS: [string, string][] = [
   ["yours", "Your music"],
@@ -96,6 +102,9 @@ export const Sidebar: FC = () => {
       <div className="md-nav-item" data-current={at({ type: "home" }) ? "" : undefined} onClick={() => go({ type: "home" })}>
         Home
       </div>
+      <div className="md-nav-item" data-current={at({ type: "stats" }) ? "" : undefined} onClick={() => go({ type: "stats" })}>
+        Your stats
+      </div>
       {GROUPS.map(([group, heading]) => {
         const mine = tabs.filter((t) => (t.group ?? "yours") === group);
         if (!mine.length) return null;
@@ -116,6 +125,17 @@ export const Sidebar: FC = () => {
       })}
       {source && <Playlists id={source.id} local={source.type === "local"} at={at} />}
       {source?.type === "local" && <Devices />}
+      {source?.features.includes("tags") && (
+        <>
+          <div className="md-nav-item" style={{ marginTop: 16 }} data-current={at({ type: "columns" }) ? "" : undefined}
+               onClick={() => go({ type: "columns" })}>
+            Column browser
+          </div>
+          <div className="md-nav-item" data-current={at({ type: "tools" }) ? "" : undefined} onClick={() => go({ type: "tools" })}>
+            Library tools
+          </div>
+        </>
+      )}
       <div className="md-nav-item md-nav-add" style={{ marginTop: 16 }} onClick={showSettings}>
         Settings…
       </div>
@@ -291,6 +311,9 @@ export const Pages: FC = () => {
       {place.type === "search" && <SearchPage id={id} query={place.query} />}
       {place.type === "collection" && <CollectionPage id={id} collection={place.collection} />}
       {place.type === "smart" && <SmartPage id={id} playlist={place.playlist} />}
+      {place.type === "stats" && <StatsPage />}
+      {place.type === "tools" && <ToolsPage id={place.source ?? id} />}
+      {place.type === "columns" && <ColumnsPage id={id} />}
     </div>
   );
 };
@@ -411,6 +434,12 @@ const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
       <h1 className="md-title">“{query}”</h1>
       <Loading result={result} />
       {result?.ok && <PageBody id={id} page={result.data} from={{ id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null }} />}
+      {canLookUp(id) && !/\w+:/.test(query) && (
+        <div className="md-dim" style={{ marginTop: 24, fontSize: 13 }}>
+          Search by field too: <code>artist:nirvana</code> <code>year:&gt;1990</code> <code>rating:&gt;=4</code> <code>genre:jazz</code>{" "}
+          <code>plays:0</code> <code>format:flac</code>, with words in quotes kept together.
+        </div>
+      )}
     </>
   );
 };
@@ -422,6 +451,7 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
     api.openCollection(id, collection.kind, collection.id),
   );
   const page = result?.ok ? result.data : null;
+  const download = useDownload(id, collection);
   const cover = art(id, page?.art ?? collection.art);
   const tracks = page?.tracks ?? [];
   const length = tracks.reduce((n, t) => n + (t.duration || 0), 0);
@@ -451,6 +481,11 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
               <button className="md-button md-wide" disabled={tracks.length < 2} onClick={() => playFrom(id, collection, tracks, 0, true)}>
                 <FaRandom /> Shuffle
               </button>
+              {download && !!tracks.length && (
+                <button className="md-button md-wide" data-on={download.on ? "" : undefined} onClick={download.act}>
+                  <FaDownload /> {download.label}
+                </button>
+              )}
               {page?.action && <PageAction id={id} collection={collection} action={page.action} />}
               {collection.kind === "album" && canLookUp(id) && (
                 <button className="md-button md-wide" onClick={() => lookupOpener.open(id, collection, tracks.length)}>
@@ -635,7 +670,7 @@ const Tiles: FC<{ id: string; items: Collection[] }> = ({ items }) => (
 
 // --- the track table --------------------------------------------------------------------------------
 
-type Column = "number" | "title" | "artist" | "album" | "duration";
+type Column = "number" | "title" | "artist" | "album" | "duration" | "rating";
 const ROW = 32;
 /** longer lists than this scroll in a box of their own, drawing only the rows in sight */
 const VIRTUAL_FROM = 200;
@@ -653,11 +688,13 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
   const playing = useStore(player.state);
   const current = playing.index >= 0 ? playing.queue[playing.index]?.track.id : null;
   const showAlbum = from.kind !== "album";
+  const rates = canRate(id);
   const order = useMemo(() => {
     const idx = tracks.map((_, i) => i);
     if (!sort) return idx;
     const key = (t: Track, i: number): string | number =>
-      sort.by === "number" ? i : sort.by === "duration" ? t.duration || 0 : String(t[sort.by] ?? "").toLowerCase();
+      sort.by === "number" ? i : sort.by === "duration" ? t.duration || 0 : sort.by === "rating" ? t.rating || 0
+        : String(t[sort.by] ?? "").toLowerCase();
     idx.sort((a, b) => {
       const x = key(tracks[a], a);
       const y = key(tracks[b], b);
@@ -717,6 +754,7 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
         {head("title", "Title", { flex: 3 })}
         {head("artist", "Artist", { flex: 2 })}
         {showAlbum && head("album", "Album", { flex: 2 })}
+        {rates && head("rating", "Rating", { width: 84 })}
         {head("duration", "Time", { width: 64, textAlign: "right" })}
       </div>
       <div
@@ -766,6 +804,11 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
                 {showAlbum && (
                   <div className="md-td md-dim" style={{ flex: 2 }}>
                     {t.album}
+                  </div>
+                )}
+                {rates && (
+                  <div className="md-td" style={{ width: 84 }}>
+                    <Stars instanceId={id} track={t} />
                   </div>
                 )}
                 <div className="md-td md-dim" style={{ width: 64, textAlign: "right" }}>

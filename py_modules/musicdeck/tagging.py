@@ -22,6 +22,8 @@ try:
     # EasyMP4 knows neither: the composer atom, and the label as iTunes writes it
     EasyMP4Tags.RegisterTextKey("composer", "\xa9wrt")
     EasyMP4Tags.RegisterFreeformKey("organization", "LABEL")
+    # and a rating where write_rating puts it (0-100), so reading finds it
+    EasyMP4Tags.RegisterFreeformKey("rating", "RATING")
 except ImportError:  # vendored into py_modules by scripts/vendor.py
     mutagen = None
 
@@ -88,11 +90,11 @@ def _values(field: str, value: Any, old: Optional[list[str]]) -> Optional[list[s
     return [value] if value else None
 
 
-def _open(path: str) -> Any:
+def _open(path: str, easy: bool = True) -> Any:
     if mutagen is None:
         raise TagError("Tag editing isn't available (mutagen is missing)")
     try:
-        audio = mutagen.File(path, easy=True)
+        audio = mutagen.File(path, easy=easy)
     except Exception as e:
         raise TagError(f"Couldn't read the file's tags: {e}")
     if audio is None:
@@ -143,7 +145,7 @@ def _replace(temp: str, path: str) -> None:
             time.sleep(0.25)
 
 
-def _save_atomically(path: str, change: Any) -> None:
+def _save_atomically(path: str, change: Any, easy: bool = True) -> None:
     """Runs change(audio) on a copy of the file, saves it, then puts the copy in the file's place."""
     directory, name = os.path.split(path)
     temp = os.path.join(directory, f".{name}{TEMP_SUFFIX}{os.path.splitext(name)[1]}")
@@ -154,7 +156,7 @@ def _save_atomically(path: str, change: Any) -> None:
     except OSError as e:
         raise TagError(f"Couldn't copy the file to edit it: {e.strerror or e}")
     try:
-        audio = _open(temp)
+        audio = _open(temp, easy)
         change(audio)
         try:
             audio.save()
@@ -196,6 +198,76 @@ def write_raw(path: str, keys: dict[str, Optional[list[str]]]) -> None:
                 _write_key(audio.tags, key, values)
 
     _save_atomically(path, change)
+
+
+#: one to five stars as POPM 0-255, as Windows, MusicBee and foobar2000 write them
+POPM_STARS = {1: 1, 2: 64, 3: 128, 4: 196, 5: 255}
+POPM_EMAIL = "Windows Media Player 9 Series"
+
+
+def write_rating(path: str, stars: int) -> None:
+    """A 0-5 star rating (0 removes it) where other players look for it: ID3's POPM (MP3, and the ID3 inside
+    WAV/AIFF), a RATING of 0-100 in Vorbis comments (FLAC, Ogg, Opus), a RATING freeform atom in MP4. Other
+    formats raise TagError: their rating is kept by MusicDeck instead."""
+    if mutagen is None:
+        raise TagError("Tag editing isn't available (mutagen is missing)")
+    stars = max(0, min(5, int(stars)))
+
+    def change(audio: Any) -> None:
+        tags = audio.tags
+        if hasattr(tags, "getall"):  # ID3
+            count = next((f.count for f in tags.getall("POPM")), 0)
+            tags.delall("POPM")
+            if stars:
+                tags.add(id3.POPM(email=POPM_EMAIL, rating=POPM_STARS[stars], count=count))
+            return
+        kind = type(audio).__name__
+        if kind in ("FLAC", "OggVorbis", "OggOpus", "OggFLAC", "OggSpeex"):
+            for key in [k for k in tags.keys() if k.lower() in ("rating", "fmps_rating")]:
+                del tags[key]
+            if stars:
+                tags["RATING"] = [str(stars * 20)]
+            return
+        if kind == "MP4":
+            atom = "----:com.apple.iTunes:RATING"
+            if stars:
+                tags[atom] = [str(stars * 20).encode()]
+            elif atom in tags:
+                del tags[atom]
+            return
+        raise TagError("This kind of file can't hold a rating")
+
+    _save_atomically(path, change, easy=False)
+
+
+def write_replaygain(path: str, track_gain: float, track_peak: float, album_gain: float, album_peak: float) -> None:
+    """ReplayGain tags as players look for them: TXXX frames in ID3, REPLAYGAIN_* Vorbis comments, freeform
+    atoms in MP4. Other formats raise TagError."""
+    if mutagen is None:
+        raise TagError("Tag editing isn't available (mutagen is missing)")
+    values = {"REPLAYGAIN_TRACK_GAIN": f"{track_gain:+.2f} dB", "REPLAYGAIN_TRACK_PEAK": f"{track_peak:.6f}",
+              "REPLAYGAIN_ALBUM_GAIN": f"{album_gain:+.2f} dB", "REPLAYGAIN_ALBUM_PEAK": f"{album_peak:.6f}"}
+
+    def change(audio: Any) -> None:
+        tags = audio.tags
+        if hasattr(tags, "getall"):  # ID3
+            for key, value in values.items():
+                tags.delall(f"TXXX:{key}")
+                tags.delall(f"TXXX:{key.lower()}")
+                tags.add(id3.TXXX(encoding=3, desc=key, text=[value]))
+            return
+        kind = type(audio).__name__
+        if kind in ("FLAC", "OggVorbis", "OggOpus", "OggFLAC", "OggSpeex"):
+            for key, value in values.items():
+                tags[key] = [value]
+            return
+        if kind == "MP4":
+            for key, value in values.items():
+                tags[f"----:com.apple.iTunes:{key.lower()}"] = [value.encode()]
+            return
+        raise TagError("This kind of file can't hold loudness tags")
+
+    _save_atomically(path, change, easy=False)
 
 
 def is_temp(name: str) -> bool:

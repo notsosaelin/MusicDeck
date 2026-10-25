@@ -5,7 +5,9 @@
  */
 import { CSSProperties, FC, PointerEvent, useState } from "react";
 import { FaMusic, FaPause, FaPlay, FaStepBackward, FaStepForward } from "react-icons/fa";
+import { Track } from "../api";
 import { player } from "../player";
+import { rateTrack } from "../ratings";
 import { mediaUrl, useStore } from "../store";
 
 export const clock = (s: number) => {
@@ -226,4 +228,42 @@ export const PARTS_CSS = `
 .md-noart { display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.35);
   background: linear-gradient(135deg, #2a3240 0%, #1b2129 100%); }
 .md-nav-heading { padding: 14px 16px 4px; color: #8b929a; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+`;
+
+/** A song's stars: shown dim where unset, lit to the mouse's on hover; a click rates it (its own rating again
+ *  clears it). Only for sources that keep ratings (ratings.ts). */
+export const Stars: FC<{ instanceId: string; track: Track; size?: number }> = ({ instanceId, track, size = 13 }) => {
+  const [hover, setHover] = useState(0);
+  const shown = hover || track.rating || 0;
+  return (
+    <span className="md-stars" data-rated={track.rating ? "" : undefined} onMouseLeave={() => setHover(0)}
+          onDoubleClick={(e) => e.stopPropagation()}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <span
+          key={n}
+          className="md-star"
+          data-on={n <= shown ? "" : undefined}
+          data-preview={hover ? "" : undefined}
+          style={{ fontSize: size }}
+          title={track.rating === n ? "Clear the rating" : `${n} star${n > 1 ? "s" : ""}`}
+          onMouseEnter={() => setHover(n)}
+          onClick={(e) => {
+            e.stopPropagation();
+            rateTrack(instanceId, track, n);
+          }}
+        >
+          ★
+        </span>
+      ))}
+    </span>
+  );
+};
+
+export const STARS_CSS = `
+.md-stars { display: inline-flex; gap: 1px; cursor: pointer; line-height: 1; }
+.md-star { color: rgba(255,255,255,0.16); transition: color 0.1s; }
+.md-star[data-on] { color: #dcdedf; }
+.md-star[data-on][data-preview] { color: #1a9fff; }
+/* in a table, unrated songs' stars only show under the mouse */
+.md-row:not(:hover) .md-stars:not([data-rated]) { visibility: hidden; }
 `;

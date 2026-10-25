@@ -30,7 +30,11 @@ ID = re.compile(r"^[0-9a-f]{12}$")
 # preferences that move with a backup (not the debug log, nor anything about this device)
 PREFERENCES = ("qam_mode", "volume", "eq", "eq_per_output", "playback")
 # per-source files in the data folder that hold the user's own data (indexes rebuild themselves)
-SOURCE_FILES = ("local-{}-favourites.json", "steam-{}-favourites.json", "podcasts-{}-progress.json")
+SOURCE_FILES = ("local-{}-favourites.json", "steam-{}-favourites.json", "podcasts-{}-progress.json",
+                "local-{}-plays.json", "local-{}-ratings.json")
+# in the settings folder: smart playlists, and the stats page's listening history (stats.py), one listen a line
+SMART_FILE = "smart-playlists.json"
+HISTORY_FILE = "plays.jsonl"
 SHARED_FILES = ("recents.json",)
 ART_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
@@ -44,7 +48,7 @@ def _without(config: dict[str, Any], secret_keys: Iterable[str]) -> dict[str, An
 
 
 def build(settings: dict[str, Any], playlists: list[dict[str, Any]], art_dir: str, data_dir: str,
-          secret_keys: Iterable[str]) -> dict[str, Any]:
+          secret_keys: Iterable[str], settings_dir: str = "") -> dict[str, Any]:
     """Everything worth keeping, as one JSON-ready object, with no sign-ins in it."""
     secret_keys = set(secret_keys)
     sources = [{"id": s["id"], "type": s["type"], "name": s["name"], "config": _without(s["config"], secret_keys)}
@@ -66,8 +70,27 @@ def build(settings: dict[str, Any], playlists: list[dict[str, Any]], art_dir: st
                 files[name] = json.load(f)
         except (OSError, ValueError):
             pass
+    smart, history = [], []
+    if settings_dir:
+        try:
+            with open(os.path.join(settings_dir, SMART_FILE), encoding="utf-8") as f:
+                loaded = json.load(f)
+            smart = loaded if isinstance(loaded, list) else []
+        except (OSError, ValueError):
+            pass
+        try:
+            with open(os.path.join(settings_dir, HISTORY_FILE), encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        history.append(json.loads(line))
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
     return {
         "musicdeck_backup": FORMAT,
+        "smart_playlists": smart,
+        "history": history,
         "created": datetime.now().isoformat(timespec="seconds"),
         "settings": {**{k: settings.get(k) for k in PREFERENCES}, "active_service": settings.get("active_service"),
                      "game_music": settings.get("game_music") or [],
@@ -121,6 +144,30 @@ def art_bytes(entry: Any) -> tuple[str, bytes] | None:
 
 def count(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def merge_history(path: str, entries: Any) -> int:
+    """A backup's listens added to this device's history (those it hasn't: same time and song), oldest first."""
+    if not isinstance(entries, list):
+        return 0
+    have = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                    have.add((e.get("t"), e.get("id")))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    fresh = [e for e in entries if isinstance(e, dict) and isinstance(e.get("t"), int) and isinstance(e.get("id"), str)
+             and (e["t"], e["id"]) not in have]
+    if fresh:
+        fresh.sort(key=lambda e: e["t"])
+        with open(path, "a", encoding="utf-8") as f:
+            f.writelines(json.dumps(e, ensure_ascii=False) + "\n" for e in fresh)
+    return len(fresh)
 
 
 def file_names(source_ids: Iterable[str]) -> set[str]:

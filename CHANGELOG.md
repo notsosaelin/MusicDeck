@@ -3,6 +3,42 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.36.0
+
+What iTunes, MusicBee, foobar2000 and Winamp have that MusicDeck didn't:
+
+- **Rate songs**, 1 to 5 stars: in desktop Steam's track lists and big Now Playing, and from any song's menu
+  (Game Mode too). Ratings go into the files (MP3, FLAC, Ogg, Opus, M4A) where other players read them; MusicDeck
+  keeps the rest. **Skips** are counted (a song skipped after a moment, before 20 seconds), and smart playlists pick
+  and sort by rating and skips.
+- **Your stats** (desktop Steam, under Home): every song you listen to, from any source, adds up into listens,
+  hours, top artists, albums and songs, the hours and days you listen, and your days in a row, for the last week,
+  month, year or all time. The history starts with this version.
+- **Shuffle your way**: by song, by album (whole albums in random order, as Winamp and foobar2000 do), or smart
+  (better-rated songs sooner, never the same artist twice in a row). Right-click shuffle on desktop, or Settings.
+  **Save the queue** as a playlist (Up next, and Game Mode's queue).
+- **Library tools** (desktop Steam, Local files): a clean-up report with a fix beside each problem: duplicates
+  (keep the best copy), albums split in two (give them one album artist), albums without a cover (find them),
+  songs missing details, files gone (rescan).
+- **Tag tools** for many songs at once: tags from file names, Title or Sentence case, renumbering, find and replace.
+  **Organize files** into folders by their tags (`{albumartist}/{album}/{track} {title}`), lyrics and covers
+  along. Both show exactly what they'd change first, and both can be undone. From Library tools, an album's menu,
+  or several songs'.
+- **Loudness for every song**: songs without ReplayGain can be measured (ffmpeg) and given it, so volume
+  levelling evens them out too.
+- **Move in from iTunes or MusicBee**: their library file brings play counts, skips, last plays, ratings, loved
+  songs and playlists for the songs you have. **Export playlists** as .m3u8 for other players. Backups now keep
+  ratings, play counts, smart playlists and your listening history too.
+- **Column browser** (genre, artist, album, like iTunes's) and **search by field**: `artist:nirvana year:>1990
+  rating:>=4 genre:jazz plays:0 format:flac`. "The Beatles" sorts under B.
+- **CUE sheets**: an album ripped to one file with a .cue shows as its songs, and each plays on its own.
+- **Convert** songs or an album to MP3, AAC, Opus or FLAC (tags and cover kept), for a phone or a stick.
+- **Downloads, everywhere they belong**: Download was only on a MusicDeck playlist's page in Quick Access, opened
+  from your playlists. Now every playlist and album of a source that can download has it, wherever it's opened
+  (Quick Access from anywhere, the media center, desktop Steam, its "..." menu); one from another source is saved
+  to your playlists and downloaded there. A playlist you've saved shows Saved (opening yours) instead of Save,
+  wherever it's opened.
+
 ## 0.35.1
 
 - **Rokus found on Linux** (the Deck) too: their answers reach Linux in pieces, and MusicDeck read only the first

@@ -12,6 +12,7 @@ import {
   saveSession,
   playedStation,
   scrobble,
+  reportSkip,
   forgetStream,
   streamInfo,
   castStart,
@@ -48,9 +49,61 @@ export const hasFeature = (instanceId: string, feature: Feature) =>
     ?.services.find((s) => s.id === instanceId)
     ?.features?.includes(feature);
 
-/** Plays are reported when the source keeps its own play history, or ListenBrainz is linked. */
-const reportsPlays = (instanceId: string) =>
-  hasFeature(instanceId, "scrobble") || !!pluginState.get()?.listenbrainz?.user;
+/** Every listen is reported: the stats page keeps them all (stats.py); the backend passes one on to the source
+ *  only where it keeps play history, and to ListenBrainz or Last.fm when linked. */
+const reportsPlays = (_instanceId: string) => true;
+
+/** Fisher-Yates */
+function shuffled(indices: number[]): number[] {
+  const out = [...indices];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Album shuffle (Winamp's, foobar2000's): the queue's albums in random order, each played straight through; the
+ *  playing song's album first, from that song on (the rest of it at the end, so nothing is lost). */
+function albumOrder(queue: { track: Track }[], first: number): number[] {
+  const albums = new Map<string, number[]>();
+  queue.forEach(({ track }, i) => {
+    const key = track.album_id || `${track.album}\u0000${track.artist}`;
+    albums.set(key, [...(albums.get(key) ?? []), i]);
+  });
+  const groups = shuffled([...albums.values()].map((_, i) => i)).map((i) => [...albums.values()][i]);
+  if (first >= 0) {
+    const at = groups.findIndex((g) => g.includes(first));
+    const [group] = groups.splice(at, 1);
+    const from = group.indexOf(first);
+    groups.unshift(group.slice(from));
+    if (from > 0) groups.push(group.slice(0, from));
+  }
+  return groups.flat();
+}
+
+/** Smart shuffle: random, but a song's chance to come up soon grows with its stars (unrated counts as in between):
+ *  weighted random order, Efraimidis and Spirakis's way (each key random^(1/weight), largest first). */
+function smartOrder(queue: { track: Track }[]): number[] {
+  const weight = (t: Track) => (t.rating ? 1 + t.rating * 1.5 : 4);
+  return queue
+    .map(({ track }, i) => ({ i, key: Math.random() ** (1 / weight(track)) }))
+    .sort((a, b) => b.key - a.key)
+    .map((x) => x.i);
+}
+
+/** No artist twice in a row where it can be helped: a song by the same artist as the one before it swaps with the
+ *  nearest later song by someone else (the first, playing, song stays). */
+function spreadArtists(queue: { track: Track }[], order: number[]): number[] {
+  const out = [...order];
+  const artist = (n: number) => (queue[out[n]]?.track.artist ?? "").toLowerCase();
+  for (let n = 1; n < out.length; n++) {
+    if (!artist(n) || artist(n) !== artist(n - 1)) continue;
+    const swap = out.findIndex((_, m) => m > n && artist(m) !== artist(n - 1) && (m + 1 >= out.length || artist(m + 1) !== artist(n)));
+    if (swap > 0) [out[n], out[swap]] = [out[swap], out[n]];
+  }
+  return out;
+}
 
 export interface QueueItem {
   /** Service instance the track belongs to: always the live source (switching sources clears the queue). */
@@ -421,8 +474,10 @@ export class Player {
   }
 
   setPlayback(playback: PlaybackSettings) {
+    const restyled = (playback.shuffle_mode ?? "songs") !== (this.playback.shuffle_mode ?? "songs");
     this.playback = playback;
     this.applyLevelling();
+    if (restyled) this.reshuffle();
   }
 
   /** Put a saved queue back without starting playback, ready to resume where it left off. */
@@ -586,6 +641,10 @@ export class Player {
 
   next(auto = false) {
     dlog("next", { auto, from: this.state.get().index });
+    const skipped = this.current;
+    const at = this.audio.currentTime;
+    if (!auto && skipped && at > 2 && at < 20 && hasFeature(skipped.instanceId, "rate"))
+      reportSkip(skipped.instanceId, skipped.track.id).catch(() => {});
     const { queue, index, repeat } = this.state.get();
     if (!queue.length) return;
     const pos = this.order.indexOf(index);
@@ -813,16 +872,23 @@ export class Player {
   private buildOrder(length: number, first: number): number[] {
     const indices = Array.from({ length }, (_, i) => i);
     if (!this.state.get().shuffle) return indices;
-    // Fisher-Yates, then move `first` (the playing track) to the front so it isn't replayed
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
+    const queue = this.state.get().queue;
+    const mode = this.playback.shuffle_mode ?? "songs";
+    if (mode === "albums") return albumOrder(queue, first);
+    const order = mode === "smart" ? smartOrder(queue) : shuffled(indices);
+    // the playing track first, so it isn't played again
     if (first >= 0) {
-      indices.splice(indices.indexOf(first), 1);
-      indices.unshift(first);
+      order.splice(order.indexOf(first), 1);
+      order.unshift(first);
     }
-    return indices;
+    return mode === "smart" ? spreadArtists(queue, order) : order;
+  }
+
+  /** Shuffles the queue again in the chosen style (after the style changes), keeping what's playing first. */
+  reshuffle() {
+    if (!this.state.get().shuffle) return;
+    this.order = this.buildOrder(this.state.get().queue.length, this.state.get().index);
+    this.state.update({});
   }
 
   private load(index: number) {

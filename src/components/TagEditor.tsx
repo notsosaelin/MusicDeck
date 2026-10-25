@@ -521,9 +521,28 @@ export function artistManageItems(instanceId: string, artist: Collection): React
  * A local album's menu items for managing it: its tags, MusicBrainz, its picture. `info` (getTags) says
  * whether it has a picture of its own to take away.
  */
+/** Library-wide tools desktop Steam offers (its dialogs; unset in Game Mode): set by desktop/tagtools. */
+export const libraryTools: {
+  tagTools?: (instanceId: string, album: Collection) => void;
+  organize?: (instanceId: string, album: Collection) => void;
+  convert?: (instanceId: string, album: Collection) => void;
+} = {};
+
 export function albumManageItems(instanceId: string, album: Collection, info: TagInfo | null): ReactNode[] {
   const items: ReactNode[] = [];
   if (hasFeature(instanceId, "tags")) {
+    if (libraryTools.tagTools && libraryTools.organize)
+      items.push(
+        <MenuItem key="tagtools" onSelected={() => libraryTools.tagTools!(instanceId, album)}>
+          Tag tools…
+        </MenuItem>,
+        <MenuItem key="organize" onSelected={() => libraryTools.organize!(instanceId, album)}>
+          Organize files…
+        </MenuItem>,
+        <MenuItem key="convert" onSelected={() => libraryTools.convert?.(instanceId, album)}>
+          Convert…
+        </MenuItem>,
+      );
     items.push(
       <MenuItem key="tags" onSelected={() => editTags(instanceId, "album", album.id, album.title)}>
         Edit album tags

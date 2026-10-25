@@ -28,7 +28,10 @@ import shutil
 
 import aiohttp
 
-from .. import identify, lyrics, models, native, pictures, tagging
+from .. import cue, health, identify, lyrics, models, native, pictures, tagging
+from .. import query as query_syntax
+from ..query import has_fields as query_has_fields, holds as query_holds, parse as parse_query
+from .local_tools import LibraryTools
 from ..background import spawn
 from ..catalogues import Catalogues
 from ..musicbrainz import MusicBrainz
@@ -219,6 +222,32 @@ def convert_for_playback(path: str, t: dict[str, Any], cache: str) -> str:
     os.replace(part, target)
     _trim(cache, CONVERTED_MAX)
     return target
+
+
+def cut_for_playback(path: str, span: list[float], cache: str) -> str:
+    """A song of a CUE sheet (cue.py): its slice of the album's file, as FLAC (nothing lost), made once by ffmpeg and
+    kept with the converted files."""
+    start, end = span
+    os.makedirs(cache, exist_ok=True)
+    key = _hash(f"{path}|{os.path.getmtime(path)}|{start:.3f}|{end:.3f}")
+    out = os.path.join(cache, key + ".flac")
+    if os.path.exists(out):
+        os.utime(out)
+        return out
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise ServiceError("Playing a song of a CUE sheet needs ffmpeg, which isn't installed")
+    tmp = out + ".part.flac"
+    result = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
+                             "-i", path, "-map", "0:a:0", "-c:a", "flac", "-map_metadata", "-1", tmp],
+                            capture_output=True, text=True, timeout=600, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if result.returncode != 0 or not os.path.exists(tmp):
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise ServiceError(f"Couldn't cut the song out of {os.path.basename(path)}")
+    os.replace(tmp, out)
+    _trim(cache, CONVERTED_MAX)
+    return out
 
 
 def _trim(folder: str, limit: int) -> None:
@@ -557,7 +586,7 @@ def find_folder_cover(directory: str) -> Optional[str]:
     return None
 
 
-class LocalService(MusicService):
+class LocalService(LibraryTools, MusicService):
     """Recursively scans one or more folders and indexes their tags.
 
     config: {"paths": ["/home/deck/Music", ...], plus what happens when new music arrives: DEFAULTS}
@@ -567,7 +596,7 @@ class LocalService(MusicService):
     display_name = "Local files"
     # scrobble: plays counted on the Deck (Most played, Recently played), when "Report plays" is on
     # tags: edited in the files, and looked up on MusicBrainz; artwork: albums' own pictures, set or found
-    features = frozenset({"star", "lyrics", "radio", "scrobble", "tags", "artwork"})
+    features = frozenset({"star", "lyrics", "radio", "scrobble", "tags", "artwork", "rate"})
     #: its folders watched for new music (not a phone's mirror, which MusicDeck itself fills)
     watches = True
 
@@ -583,6 +612,9 @@ class LocalService(MusicService):
         # {track id: {"count", "last"}}: kept apart from the index, as favourites are
         self.plays_path = os.path.join(runtime_dir, f"local-{instance_id}-plays.json")
         self.plays: dict[str, dict[str, Any]] = {}
+        # ratings of songs whose kind of file can't hold one (WMA, AIFF without ID3...): {track id: 0-5}
+        self.ratings_path = os.path.join(runtime_dir, f"local-{instance_id}-ratings.json")
+        self.ratings: dict[str, int] = {}
         # the tracks grouped into albums, made again when the tracks change
         self._albums_cache: Optional[dict[str, list[tuple[str, dict[str, Any]]]]] = None
         self.folder_covers: dict[str, Optional[str]] = {}
@@ -601,6 +633,12 @@ class LocalService(MusicService):
         self.art_progress = {"running": False, "done": 0, "total": 0, "found": 0}
         self.lyrics_task: Optional[asyncio.Task[None]] = None
         self.lyrics_progress = {"running": False, "done": 0, "total": 0, "found": 0}
+        # measuring loudness for songs without ReplayGain (local_tools.py)
+        self.loudness_task: Optional[asyncio.Task[None]] = None
+        self.loudness_progress = {"running": False, "done": 0, "total": 0, "written": 0}
+        # converting songs to another format (local_tools.py)
+        self.convert_task: Optional[asyncio.Task[None]] = None
+        self.convert_progress = {"running": False, "done": 0, "total": 0, "failed": 0, "folder": "", "error": ""}
         # Browse's tiles (counts, covers), made again when the library or its pictures change
         self._browse_cache: Optional[list[dict[str, Any]]] = None
         # lyrics kept in MusicDeck rather than beside the songs: <track id>.lrc
@@ -655,6 +693,13 @@ class LocalService(MusicService):
         except (FileNotFoundError, json.JSONDecodeError):
             self.plays = {}
         try:
+            with open(self.ratings_path, "r", encoding="utf-8") as f:
+                ratings = json.load(f)
+            self.ratings = {k: int(v) for k, v in ratings.items() if isinstance(v, int) and 0 <= v <= 5} \
+                if isinstance(ratings, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.ratings = {}
+        try:
             with open(self.history_path, "r", encoding="utf-8") as f:
                 history = json.load(f)
             self.history = history if isinstance(history, dict) else {}
@@ -688,7 +733,7 @@ class LocalService(MusicService):
     async def stop(self) -> None:
         if self.watcher:
             self.watcher.stop()
-        for task in (self.scan_task, self.art_task, self.lyrics_task, self.import_task, self.recheck):
+        for task in (self.scan_task, self.art_task, self.lyrics_task, self.import_task, self.recheck, self.loudness_task, self.convert_task):
             if task:
                 task.cancel()
         if self.http:
@@ -755,15 +800,20 @@ class LocalService(MusicService):
                     yield path, st.st_size, st.st_mtime
 
     def _scan_blocking(self) -> None:
-        previous = {t["path"]: t for t in self.tracks.values()}
+        # (a CUE sheet's songs share their album's path: the file itself is read again, then split again)
+        previous = {t["path"]: t for t in self.tracks.values() if not t.get("cue")}
         # a library's very first scan is all "new": only what arrives after it is new music
         first = not previous
         tracks: dict[str, dict[str, Any]] = {}
         playlist_files: list[str] = []
+        cue_files: list[str] = []
         for path, size, mtime in self._listing(previous):
             ext = os.path.splitext(path)[1].lower()
             if ext in PLAYLIST_EXTENSIONS:
                 playlist_files.append(path)
+                continue
+            if ext == ".cue":
+                cue_files.append(path)
                 continue
             if ext not in AUDIO_EXTENSIONS:
                 continue
@@ -783,6 +833,7 @@ class LocalService(MusicService):
                 record["audio_only"] = True
             tracks[_hash(path)] = record
             self.scan_progress["found"] = len(tracks)
+        self._split_by_cue(tracks, cue_files)
         by_path = {t["path"]: tid for tid, t in tracks.items()}
         playlists = {}
         for path in playlist_files:
@@ -798,6 +849,40 @@ class LocalService(MusicService):
         self._changed()
         self.folder_covers = {}
         self._save_index()
+
+    @staticmethod
+    def _split_by_cue(tracks: dict[str, dict[str, Any]], cue_files: list[str]) -> None:
+        """A whole-album file with a .cue becomes the sheet's songs (cue.py): each its own id ("<path>#<n>"), with
+        its slice of the file ("cue": [start, end]); the file itself leaves the index."""
+        by_path = {os.path.normcase(t["path"]): tid for tid, t in tracks.items()}
+        for sheet_path in cue_files:
+            sheet = cue.read(sheet_path)
+            if not sheet:
+                continue
+            for entry in sheet["files"]:
+                tid = by_path.get(os.path.normcase(os.path.normpath(entry["file"])))
+                # an audio file named in the sheet but with another extension (a .wav rip later made .flac)
+                if not tid:
+                    stem = os.path.normcase(os.path.splitext(os.path.normpath(entry["file"]))[0])
+                    tid = next((i for p, i in by_path.items() if os.path.splitext(p)[0] == stem), None)
+                if not tid or tid not in tracks:
+                    continue
+                whole = tracks[tid]
+                parts = cue.songs({**sheet, "files": [{**entry, "file": whole["path"]}]}, whole["path"], whole.get("duration") or 0)
+                if len(parts) < 2:
+                    continue
+                del tracks[tid]
+                for part in parts:
+                    performer = part["performer"] or sheet["performer"] or whole.get("artist", "")
+                    tracks[_hash(f"{whole['path']}#{part['n']}")] = {
+                        **whole, "title": part["title"] or f"Track {part['n']}", "artist": performer,
+                        "albumartist": sheet["performer"] or whole.get("albumartist", ""),
+                        "album": sheet["title"] or whole.get("album", ""), "track": part["n"],
+                        "year": (sheet.get("date") or whole.get("year") or "")[:4],
+                        "genre": sheet.get("genre") or whole.get("genre", ""),
+                        "genres": [sheet["genre"]] if sheet.get("genre") else whole.get("genres", []),
+                        "duration": round(part["end"] - part["start"], 3), "cue": [part["start"], part["end"]],
+                        "rg": whole.get("rg"), "cue_sheet": sheet_path}
 
     # --- new music ---
 
@@ -1036,7 +1121,11 @@ class LocalService(MusicService):
         return models.track(tid, t["title"], t["artist"] or t["albumartist"], t["album"], t["duration"],
                             art=self._art_id(tid, t), album_id=self._album_key(t),
                             artist_id=_hash((t["albumartist"] or t["artist"] or "Unknown artist").lower()),
-                            starred=tid in self.favourites, gain=t.get("rg"))
+                            starred=tid in self.favourites, gain=t.get("rg"), rating=self._stars_of(tid, t))
+
+    def _stars_of(self, tid: str, t: dict[str, Any]) -> int:
+        """A song's rating: the file's, or the one MusicDeck keeps for a file that can't hold it."""
+        return self.ratings.get(tid, t.get("rating", 0))
 
     def _album_collection(self, key: str, items: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
         tid, t = items[0]
@@ -1162,7 +1251,7 @@ class LocalService(MusicService):
                 unplayed.sort(key=lambda v: max(t.get("added", t["mtime"]) for _, t in v), reverse=True)
                 add("unplayed", "Not played yet", "listening", "Albums you haven't played",
                     [self._art_id(*unplayed[0][0])])
-        rated = [(tid, t) for tid, t in self.tracks.items() if t.get("rating", 0) >= 4]
+        rated = [(tid, t) for tid, t in self.tracks.items() if self._stars_of(tid, t) >= 4]
         if rated:
             add("toprated", "Top rated", "listening", "Four stars and up", covers(rated, 1))
 
@@ -1288,12 +1377,12 @@ class LocalService(MusicService):
 
     def _open_list(self, id: str) -> dict[str, Any]:
         if id == "albums":
-            albums = sorted(self._albums().items(), key=lambda kv: (kv[1][0][1]["album"] or "~").lower())
+            albums = sorted(self._albums().items(), key=lambda kv: query_syntax.sort_name(kv[1][0][1]["album"] or "~"))
             return models.page("Albums", collections=self._album_collections(albums))
         if id == "artists":
             return models.page("Artists", collections=[
                 models.collection(k, "artist", name, models.count(n, "album"), art=self._artist_art_id(k))
-                for k, (name, n) in sorted(self._artist_index().items(), key=lambda kv: kv[1][0].lower())])
+                for k, (name, n) in sorted(self._artist_index().items(), key=lambda kv: query_syntax.sort_name(kv[1][0]))])
         if id == "genres":
             counts: dict[str, list[Any]] = {}
             for t in self.tracks.values():
@@ -1346,8 +1435,8 @@ class LocalService(MusicService):
                             key=lambda tid: (-self.plays[tid]["count"], -self.plays[tid].get("last", 0)))[:LIST_MAX]
             return models.page("Most played", tracks=[self._track(tid, self.tracks[tid]) for tid in played])
         if id == "toprated":
-            rated = [(tid, t) for tid, t in self.tracks.items() if t.get("rating", 0) >= 4]
-            rated.sort(key=lambda kv: (-kv[1]["rating"], kv[1]["artist"].lower(), kv[1]["title"].lower()))
+            rated = [(tid, t) for tid, t in self.tracks.items() if self._stars_of(tid, t) >= 4]
+            rated.sort(key=lambda kv: (-self._stars_of(*kv), kv[1]["artist"].lower(), kv[1]["title"].lower()))
             return models.page("Top rated", tracks=[self._track(tid, t) for tid, t in rated[:LIST_MAX]])
         if id == "favourites":
             favs = [(tid, self.tracks[tid]) for tid in self.favourites if tid in self.tracks]
@@ -1393,10 +1482,30 @@ class LocalService(MusicService):
                                         for d in sorted(subdirs, key=str.lower)],
                            tracks=[self._track(tid, t) for tid, t in tracks])
 
+    def _query_values(self, tid: str, t: dict[str, Any]) -> dict[str, Any]:
+        """A song's fields as query.py looks at them."""
+        return {"title": t["title"], "artist": t["artist"], "albumartist": t["albumartist"], "album": t["album"],
+                "genre": t.get("genres") or [t.get("genre", "")], "composer": t.get("composer", ""), "label": t.get("label", ""),
+                "format": t.get("format", ""), "path": t["path"], "year": int(t["year"]) if str(t.get("year", "")).isdigit() else 0,
+                "rating": self._stars_of(tid, t), "plays": self.plays.get(tid, {}).get("count", 0),
+                "skips": self.plays.get(tid, {}).get("skips", 0), "duration": t.get("duration") or 0,
+                "bitrate": round((t.get("bitrate") or 0) / 1000), "track": t.get("track") or 0, "disc": t.get("disc") or 0}
+
     async def search(self, query: str) -> dict[str, Any]:
         q = query.strip().lower()
         if not q:
             return models.page("Search")
+        if query_has_fields(query):
+            # field searches (artist:x year:>1990 rating:>=4): the songs that hold, the albums they make up
+            conditions, words = parse_query(query)
+            picked = [(tid, t) for tid, t in self.tracks.items() if query_holds(self._query_values(tid, t), conditions, words)]
+            picked.sort(key=lambda kv: (query_syntax.sort_name(kv[1]["albumartist"] or kv[1]["artist"]), kv[1]["album"].lower(),
+                                        kv[1]["disc"], kv[1]["track"]))
+            keys = list(dict.fromkeys(self._album_key(t) for _, t in picked))
+            albums = self._albums()
+            return models.page(f"Results for “{query}”", subtitle=models.count(len(picked), "song"),
+                               collections=self._album_collections([(k, albums[k]) for k in keys[:30] if k in albums]),
+                               tracks=[self._track(tid, t) for tid, t in picked[:500]])
 
         def matches(t: dict[str, Any]) -> bool:
             return (q in t["title"].lower() or q in t["artist"].lower() or q in t["album"].lower()
@@ -1423,7 +1532,7 @@ class LocalService(MusicService):
             ["Composer", t["composer"]],
             ["Label", t["label"]],
             ["Track", f"{t['track']}" + (f" · disc {t['disc']}" if t["disc"] > 1 else "") if t["track"] else ""],
-            ["Rating", "★" * t["rating"] + "☆" * (5 - t["rating"]) if t.get("rating") else ""],
+            ["Rating", "★" * self._stars_of(track["id"], t) + "☆" * (5 - self._stars_of(track["id"], t)) if self._stars_of(track["id"], t) else ""],
             ["Plays", (models.count(played["count"], "play")
                        + f", last {time.strftime('%d %b %Y', time.localtime(played['last']))}")
              if played.get("count") else "Not played yet"],
@@ -1501,6 +1610,8 @@ class LocalService(MusicService):
         album's picture follow."""
         if self.scan_progress["scanning"]:
             raise ServiceError("The library is being scanned; try again when it's done")
+        if any(self.tracks.get(tid, {}).get("cue") for tid, _ in edits):
+            raise ServiceError("These songs are one file with a .cue sheet: change their names in the .cue")
         async with self.edit_lock:
             old_albums = {self._album_key(self.tracks[tid]) for tid, _ in edits if tid in self.tracks}
             changed, errors = 0, []
@@ -1924,6 +2035,9 @@ class LocalService(MusicService):
         t = self.tracks.get(track_id)
         if not t or not os.path.isfile(t["path"]):
             raise ServiceError("Track not found")
+        if t.get("cue"):
+            cache = os.path.join(self.runtime_dir, "converted")
+            return StreamSource(path=await asyncio.to_thread(cut_for_playback, t["path"], t["cue"], cache))
         if needs_converting(t["path"], t):
             # a format Steam can't play (WMA, AIFF, Apple Lossless...): as one it can, made once
             cache = os.path.join(self.runtime_dir, "converted")
@@ -1933,7 +2047,7 @@ class LocalService(MusicService):
     # --- smart playlists (desktop Steam's Music section) ---
 
     SMART_FIELDS = {"title", "artist", "album", "albumartist", "genre", "year", "plays", "added_days",
-                    "played_days", "starred", "duration"}
+                    "played_days", "starred", "duration", "rating", "skips"}
     SMART_LIMIT = 5000
 
     def smart(self, rules: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1950,6 +2064,10 @@ class LocalService(MusicService):
                 return [g.lower() for g in t.get("genres") or [t.get("genre", "")]]
             if field == "plays":
                 return self.plays.get(tid, {}).get("count", 0)
+            if field == "skips":
+                return self.plays.get(tid, {}).get("skips", 0)
+            if field == "rating":
+                return self._stars_of(tid, t)
             if field == "added_days":
                 return (now - t.get("added", t.get("mtime", now))) / 86400
             if field == "played_days":
@@ -1992,6 +2110,7 @@ class LocalService(MusicService):
             keys = {"added": lambda it: -it[1].get("added", it[1].get("mtime", 0)),
                     "plays": lambda it: -self.plays.get(it[0], {}).get("count", 0),
                     "played": lambda it: -self.plays.get(it[0], {}).get("last", 0),
+                    "rating": lambda it: -self._stars_of(*it),
                     "title": lambda it: (it[1]["title"] or "").lower(),
                     "artist": lambda it: ((it[1]["albumartist"] or it[1]["artist"] or "").lower(), it[1]["album"].lower(),
                                           it[1]["disc"], it[1]["track"]),
@@ -2000,6 +2119,56 @@ class LocalService(MusicService):
         limit = rules.get("limit") or self.SMART_LIMIT
         limit = min(int(limit), self.SMART_LIMIT) if str(limit).isdigit() else self.SMART_LIMIT
         return [self._track(tid, t) for tid, t in picked[:limit]]
+
+    # --- Library tools: the clean-up report (health.py) ---
+
+    HEALTH_LIST = 300  # of each kind, shown (the counts are whole)
+
+    def _health_track(self, tid: str) -> dict[str, Any]:
+        t = self.tracks[tid]
+        return {**self._track(tid, t), "folder": self._shown_folder(os.path.dirname(t["path"])),
+                "file": os.path.basename(t["path"]), "quality": _quality_line(t, short=True), "size": _size(t.get("size") or 0)}
+
+    async def health(self) -> dict[str, Any]:
+        """What's untidy in the library: duplicates (best copy first), albums split in several, albums without a
+        cover, songs missing details, files gone. Each kind listed (up to HEALTH_LIST) and counted."""
+        dupes = health.duplicates(self.tracks)
+        split = health.split_albums(self.tracks, self._album_key, self._album_folder)
+        untagged = health.untagged(self.tracks)
+        gone = await asyncio.to_thread(health.missing_files, self.tracks)
+        albums = self._albums()
+        checks = await asyncio.gather(*(self._has_art(key) for key in albums))
+        no_art = [key for key, has in zip(albums, checks) if not has and albums[key][0][1].get("album")]
+        return {
+            "tracks": len(self.tracks),
+            "duplicates": [[self._health_track(tid) for tid in group] for group in dupes[: self.HEALTH_LIST]],
+            "duplicate_count": len(dupes),
+            "split": [{"album": s["album"], "folder": self._shown_folder(s["folder"]), "path": s["folder"],
+                       "suggest": s["suggest"], "parts": s["parts"]} for s in split[: self.HEALTH_LIST]],
+            "split_count": len(split),
+            "no_art": [self._album_collection(key, albums[key]) for key in no_art[: self.HEALTH_LIST]],
+            "no_art_count": len(no_art),
+            "untagged": [{**self._health_track(tid), "missing": missing} for tid, missing in untagged[: self.HEALTH_LIST]],
+            "untagged_count": len(untagged),
+            "missing_files": len(gone),
+            "no_gain": self.gain_missing(),
+            "loudness": dict(self.loudness_progress),
+        }
+
+    async def fix_split(self, folder: str, album: str, albumartist: str) -> dict[str, Any]:
+        """One album again: every file of `album` in `folder` given the one album artist (an edit, so it can be
+        undone like any other)."""
+        split = next((s for s in health.split_albums(self.tracks, self._album_key, self._album_folder)
+                      if s["folder"] == folder and s["album"].lower() == album.lower()), None)
+        if not split:
+            raise ServiceError("That album isn't split any more")
+        try:
+            changes = tagging.clean({"albumartist": albumartist}, ("albumartist",))
+        except tagging.TagError as e:
+            raise ServiceError(str(e))
+        if not changes.get("albumartist"):
+            raise ServiceError("Give the album an album artist")
+        return await self._write_tags([(tid, changes) for tid in split["ids"]])
 
     # --- files dropped onto desktop Steam's Music section ---
 
@@ -2078,13 +2247,54 @@ class LocalService(MusicService):
         if not submission or track_id not in self.tracks:
             return
         played = self.plays.get(track_id) or {}
-        self.plays[track_id] = {"count": played.get("count", 0) + 1, "last": time.time()}
+        self.plays[track_id] = {**played, "count": played.get("count", 0) + 1, "last": time.time()}
+        self._save_plays()
+
+    def _save_plays(self) -> None:
         self._browse_cache = None
         self.forget_browse_info()
         tmp = self.plays_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.plays, f)
         os.replace(tmp, self.plays_path)
+
+    async def skip(self, track_id: str) -> None:
+        """A song skipped early (after a moment, before 20 seconds, as iTunes counts them): for smart playlists."""
+        if track_id not in self.tracks:
+            return
+        played = self.plays.get(track_id) or {}
+        self.plays[track_id] = {**played, "skips": played.get("skips", 0) + 1, "skipped": time.time()}
+        self._save_plays()
+
+    async def set_rating(self, track_id: str, stars: int) -> int:
+        """Rates a song 0-5 stars, in its file where the kind of file holds one (other players see it there), else
+        kept by MusicDeck. Returns the rating."""
+        t = self.tracks.get(track_id)
+        if not t:
+            raise ServiceError("That song isn't in the library any more")
+        stars = max(0, min(5, int(stars)))
+        if self.scan_progress["scanning"]:
+            raise ServiceError("The library is being scanned; try again when it's done")
+        async with self.edit_lock:
+            try:
+                if t.get("cue"):
+                    raise tagging.TagError("This kind of file can't hold a rating")  # one file: the whole album's
+                await asyncio.to_thread(tagging.write_rating, t["path"], stars)
+                await asyncio.to_thread(self._reread, track_id)
+                kept = self.ratings.pop(track_id, None) is not None
+            except tagging.TagError as e:
+                if "can't hold a rating" not in str(e) and "can't write tags to this kind" not in str(e):
+                    raise ServiceError(str(e))
+                self.ratings[track_id] = stars
+                kept = True
+            if kept:
+                tmp = self.ratings_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(self.ratings, f)
+                os.replace(tmp, self.ratings_path)
+            self._changed()
+            await asyncio.to_thread(self._save_index)
+        return self._stars_of(track_id, self.tracks[track_id])
 
     async def lyrics(self, track: dict[str, Any]) -> Optional[dict[str, Any]]:
         """The song's own (an .lrc beside it, then its tags), then those MusicDeck kept for it."""

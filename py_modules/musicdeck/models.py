@@ -31,11 +31,14 @@ EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 def track(id: str, title: str, artist: str = "", album: str = "", duration: float = 0,
           art: Optional[str] = None, album_id: Optional[str] = None, artist_id: Optional[str] = None,
-          starred: bool = False, gain: Optional[dict[str, float]] = None, live: bool = False) -> dict[str, Any]:
+          starred: bool = False, gain: Optional[dict[str, float]] = None, live: bool = False,
+          rating: Optional[int] = None) -> dict[str, Any]:
     t = {"id": id, "title": title, "artist": artist, "album": album, "duration": duration, "art": art,
          "album_id": album_id, "artist_id": artist_id, "starred": starred, "gain": gain}
     if live:
         t["live"] = True
+    if rating is not None:  # 0-5 stars, from sources that keep ratings (feature "rate")
+        t["rating"] = rating
     return t
 
 

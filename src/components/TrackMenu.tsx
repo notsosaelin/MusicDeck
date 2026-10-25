@@ -30,6 +30,8 @@ import {
   burnPlan,
   burnCd,
   openCollection,
+  collectionOffline,
+  savedCopy,
 } from "../api";
 import { invalidateBrowserCache, navigation, openInLibrary, popView } from "../nav";
 import { notify } from "../notify";
@@ -38,6 +40,8 @@ import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../game
 import { hasFeature, player } from "../player";
 import { pluginState } from "../store";
 import { NameModal } from "./NameModal";
+import { canRate, rateTrack, starText } from "../ratings";
+import { confirmRemove, downloadable, setDownload } from "../download";
 import { albumManageItems, artistManageItems, editTags, saveTrackLyrics } from "./TagEditor";
 
 type Item = { instanceId: string; track: Track };
@@ -63,6 +67,24 @@ export async function toggleStar(instanceId: string, track: Track) {
   // lists showing this track (and the Favourites list) are now stale
   invalidateBrowserCache();
   notify(starred ? words.added : words.removed, track.title, { instanceId, track });
+}
+
+/** One to five stars for a song, or none. */
+function showRateMenu(instanceId: string, track: Track, parent: EventTarget) {
+  showContextMenu(
+    <Menu label={`Rate ${track.title}`}>
+      {[5, 4, 3, 2, 1].map((n) => (
+        <MenuItem key={n} onSelected={() => rateTrack(instanceId, { ...track, rating: 0 }, n)}>
+          {starText(n)}
+          {track.rating === n ? "  ✓" : ""}
+        </MenuItem>
+      ))}
+      {!!track.rating && (
+        <MenuItem onSelected={() => rateTrack(instanceId, { ...track, rating: track.rating }, track.rating!)}>No rating</MenuItem>
+      )}
+    </Menu>,
+    parent,
+  );
 }
 
 /** A new playlist with the tracks in it: on the source when it keeps playlists, else MusicDeck's own. */
@@ -135,6 +157,33 @@ export async function pickPlaylistFor(instanceId: string, tracks: Track[], what:
     </Menu>,
     parent,
   );
+}
+
+/** The menu's download entry for a playlist or album: Download for offline, or Remove download. */
+async function downloadItems(instanceId: string, c: Collection): Promise<ReactNode[]> {
+  if (!downloadable(instanceId, c)) return [];
+  const state = await collectionOffline(instanceId, c.kind, c.id).catch(() => null);
+  if (state?.on)
+    return [
+      <MenuItem key="offline" onSelected={() => confirmRemove(instanceId, c)}>
+        {state.saved < state.total ? `Downloaded ${state.saved} of ${state.total} · Remove download` : "Remove download"}
+      </MenuItem>,
+    ];
+  return [
+    <MenuItem key="offline" onSelected={() => setDownload(instanceId, c, true)}>
+      Download for offline
+    </MenuItem>,
+  ];
+}
+
+/** The queue (what's playing and what's next, in the order it'll play) into a playlist, new or one of yours. */
+export function saveQueue(target: EventTarget) {
+  const { queue, index } = player.state.get();
+  const order = player.playOrder;
+  const at = order.indexOf(index);
+  const tracks = (at >= 0 ? order.slice(at) : order).map((i) => queue[i]?.track).filter((t): t is Track => !!t);
+  const instanceId = queue[index]?.instanceId ?? queue[0]?.instanceId;
+  if (instanceId && tracks.length) pickPlaylistFor(instanceId, tracks, `${tracks.length} songs from the queue`, target);
 }
 
 /** What anything you can play (an album, a playlist) offers whatever the source: its songs after this one, at
@@ -480,6 +529,11 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
           {track.starred ? likeWords(instanceId).remove : likeWords(instanceId).add}
         </MenuItem>
       )}
+      {canRate(instanceId) && (
+        <MenuItem onSelected={() => showRateMenu(instanceId, track, target)}>
+          {track.rating ? `Rating ${starText(track.rating)}` : "Rate…"}
+        </MenuItem>
+      )}
       <MenuItem onSelected={() => showPlaylistPicker(item, target)}>Add to playlist</MenuItem>
       {copyItems(instanceId, "track", track.id)}
       {deleteItems(instanceId, "track", track.id, track.title)}
@@ -585,7 +639,7 @@ function gameMusicItem(instanceId: string, c: Collection) {
 }
 
 /** Options for a collection row: save remote playlists, manage MusicDeck playlists, play with a game. */
-export function showCollectionMenu(instanceId: string, c: Collection, parent?: EventTarget | null) {
+export async function showCollectionMenu(instanceId: string, c: Collection, parent?: EventTarget | null) {
   const target = parent ?? window;
   if (c.kind === "device") {
     deviceMenu(c, target);
@@ -596,9 +650,11 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
     return;
   }
   if (isLocalPlaylist(c.id)) {
+    const offline = await downloadItems(instanceId, c);
     showContextMenu(
       <Menu label={c.title}>
         {playItems(instanceId, c, target)}
+        {offline}
         <MenuSeparator />
         {gameMusicItem(instanceId, c)}
         <MenuItem
@@ -675,11 +731,14 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
     return;
   }
   if (c.kind === "playlist" || c.kind === "album") {
+    const offline = await downloadItems(instanceId, c);
+    // saved already (from wherever it's opened): no "Save to your playlists" again
+    const saved = hasFeature(instanceId, "playlists") ? null : await savedCopy(instanceId, c.kind, c.id).catch(() => null);
     const show = (manage: ReactNode[]) => {
       // the rest, each only where it applies; a separator only between what's there
       const more = [
         gameMusicItem(instanceId, c),
-        !hasFeature(instanceId, "playlists") && (
+        !hasFeature(instanceId, "playlists") && !saved && (
           <MenuItem key="save" onSelected={() => saveCollection(instanceId, c)}>Save to your playlists</MenuItem>
         ),
         ...[copyItems(instanceId, c.kind, c.id), burnItems(instanceId, c.kind, c.id)].flat(),
@@ -687,6 +746,7 @@ export function showCollectionMenu(instanceId: string, c: Collection, parent?: E
       showContextMenu(
         <Menu label={c.title}>
           {playItems(instanceId, c, target)}
+          {offline}
           {more.length > 0 && <MenuSeparator />}
           {more}
           {manage.length > 0 && <MenuSeparator />}

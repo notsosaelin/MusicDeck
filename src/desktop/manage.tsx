@@ -16,6 +16,7 @@ import { notify } from "../notify";
 import { invalidateBrowserCache, playFrom } from "../nav";
 import { player } from "../player";
 import { Store, pluginState } from "../store";
+import { showConvert, showOrganize, showTagTools } from "./tagtools";
 
 // --- several songs ------------------------------------------------------------------------------------
 
@@ -33,6 +34,13 @@ export function showSelectionMenu(instanceId: string, tracks: Track[], from: Col
         </MenuItem>
       ))}
       {canTag(instanceId) && <MenuItem onSelected={() => bulkInfo(instanceId, tracks)}>Get Info…</MenuItem>}
+      {canTag(instanceId) && (
+        <MenuItem onSelected={() => showTagTools(instanceId, tracks.map((t) => t.id), `${tracks.length} songs`)}>Tag tools…</MenuItem>
+      )}
+      {canTag(instanceId) && (
+        <MenuItem onSelected={() => showOrganize(instanceId, tracks.map((t) => t.id), `${tracks.length} songs`)}>Organize files…</MenuItem>
+      )}
+      {canTag(instanceId) && <MenuItem onSelected={() => showConvert(instanceId, tracks.map((t) => t.id), target)}>Convert…</MenuItem>}
     </Menu>,
     target,
   );
@@ -158,7 +166,9 @@ const FIELDS: [SmartRule["field"], string, "text" | "number" | "flag"][] = [
   ["title", "Title", "text"],
   ["genre", "Genre", "text"],
   ["year", "Year", "number"],
+  ["rating", "Rating (stars)", "number"],
   ["plays", "Plays", "number"],
+  ["skips", "Skips", "number"],
   ["added_days", "Days since added", "number"],
   ["played_days", "Days since played", "number"],
   ["duration", "Length (seconds)", "number"],
@@ -173,6 +183,7 @@ const SORTS: [string, string][] = [
   ["added", "Recently added"],
   ["played", "Recently played"],
   ["plays", "Most played"],
+  ["rating", "Highest rated"],
   ["artist", "Artist"],
   ["title", "Title"],
   ["year", "Newest first"],

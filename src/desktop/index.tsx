@@ -11,6 +11,7 @@ import { mediaUrl } from "../store";
 import { player } from "../player";
 import { Place, desktopActions, go, goBack, goForward } from "./data";
 import { followDialogs } from "./dialog";
+import { installTagTools, showOrganize, showTagTools } from "./tagtools";
 import { installDesktopLookup } from "./identify";
 import { catchDrops, loadSmart } from "./manage";
 import { SoundtrackButton, TabMenu, currentRoute, shortcuts, showEqualizer, showSettings } from "./polish";
@@ -378,6 +379,7 @@ class Desktop {
   private miniByHand = false;
   private stopDialogs = followDialogs();
   private stopLookup = installDesktopLookup();
+  private stopTagTools = installTagTools();
   private timer = window.setInterval(() => this.check(), CHECK_MS);
   private stopKeys = mediaKeys();
   private unsubscribe = player.state.subscribe(() => this.followPlayer());
@@ -453,6 +455,7 @@ class Desktop {
     window.clearInterval(this.timer);
     this.stopDialogs();
     this.stopLookup();
+    this.stopTagTools();
     desktopActions.toggleMini = () => {};
     this.unsubscribe();
     this.stopKeys();
@@ -469,6 +472,9 @@ class Desktop {
     closeMini: () => this.mini.close(),
     reloadSmart: () => loadSmart(),
     showSettings: () => showSettings(),
+    showTools: (source?: string) => go({ type: "tools", source }),
+    tagTools: (source: string, ids: string[]) => showTagTools(source, ids, `${ids.length} songs`),
+    organize: (source: string, ids?: string[]) => showOrganize(source, ids, ids ? `${ids.length} songs` : "Every song"),
     showEqualizer: () => showEqualizer(),
     mini: () => this.mini.window,
     state: () => ({ tab: !!this.music?.connected, musicShowing: !!this.music?.active, miniOpen: this.mini.isOpen,

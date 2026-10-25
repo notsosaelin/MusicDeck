@@ -19,16 +19,18 @@ export const SIZES = {
   smart: { title: "Smart playlist", width: 760, height: 600 },
   info: { title: "Get Info", width: 620, height: 560 },
   name: { title: "MusicDeck", width: 480, height: 260 },
+  tools: { title: "Tag tools", width: 900, height: 700 },
 } satisfies Record<string, DialogSize>;
 
 const RESIZABLE = 16;
 /** Decky's name for a dialog opened without a title (code shared with Game Mode: the tag editor, confirmations) */
 const UNTITLED = "Decky Dialog";
-/** our dialogs' window names (Steam names a dialog's window by its title): their smallest sizes */
-const ours = new Map<string, { width: number; height: number }>([[UNTITLED, { width: 420, height: 240 }]]);
+/** our dialogs' window names (Steam names a dialog's window by its title): their smallest sizes, and their own
+ *  styles (a dialog is a window of its own: the main window's styles don't reach it) */
+const ours = new Map<string, { width: number; height: number; css?: string }>([[UNTITLED, { width: 420, height: 240 }]]);
 
-export function desktopDialog(node: ReactNode, size: DialogSize) {
-  ours.set(size.title, { width: Math.min(size.width, 460), height: Math.min(size.height, 260) });
+export function desktopDialog(node: ReactNode, size: DialogSize, css?: string) {
+  ours.set(size.title, { width: Math.min(size.width, 460), height: Math.min(size.height, 260), css });
   return showModal(node, window, { strTitle: size.title, popupWidth: size.width, popupHeight: size.height });
 }
 
@@ -60,7 +62,7 @@ export function followDialogs(): () => void {
     const win: Window | undefined = popup.window;
     if (!win || win.closed) return;
     const style = win.document.createElement("style");
-    style.textContent = FILL_CSS;
+    style.textContent = FILL_CSS + (ours.get(popup.m_strName)?.css ?? "");
     win.document.head.appendChild(style);
     // its document gets its title once Decky has rendered into it
     window.setTimeout(() => {

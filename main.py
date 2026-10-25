@@ -12,7 +12,7 @@ import aiohttp
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import backup, burn, cd, debuglog, lyrics, models, native
+from musicdeck import backup, burn, cd, debuglog, lyrics, migrate, models, native, stats
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
 from musicdeck import version
@@ -128,6 +128,8 @@ class Plugin:
         self.settings = Settings(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.playlists = PlaylistStore(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.recents = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)
+        # every listen, from every source, for the stats page (a user's own history: kept with the settings)
+        self.play_log = stats.PlayLog(os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "plays.jsonl"))
         debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(self.settings.get("debug_log")))
         self.instances = {}
         self.lifecycle = asyncio.Lock()
@@ -949,6 +951,12 @@ class Plugin:
 
         token = self.settings.get("listenbrainz").get("token")
         instance = self.instances.get(instance_id)
+        # the stats page's history: music only (podcast episodes and books aren't listening stats)
+        if submission and track and instance and "progress" not in instance.features:
+            try:
+                self.play_log.add(instance_id, models.clean_track({**track, "id": track_id}))
+            except OSError as e:
+                debuglog.debug("stats", "couldn't log a listen", error=str(e))
         # ListenBrainz keeps music listening history; podcast episodes (feature "progress") aren't that
         if token and track and instance and "progress" not in instance.features:
             report = self.listenbrainz.listen if submission else self.listenbrainz.now_playing
@@ -1081,6 +1089,163 @@ class Plugin:
                 raise ServiceError("Not supported by this source")
             return await work(instance)
         return await _result(run())
+
+    @_when_ready
+    async def set_rating(self, instance_id: str, track_id: str, stars: int) -> dict[str, Any]:
+        """Rates a song 0-5 stars (sources with feature "rate"); returns the rating it now has."""
+        if not isinstance(stars, int) or not 0 <= stars <= 5:
+            return {"ok": False, "error": "A rating is 0 to 5 stars"}
+        result = await self._managed(instance_id, "rate", lambda s: s.set_rating(track_id, stars))
+        if result["ok"]:
+            await _announce_change()
+        return result
+
+    @_when_ready
+    async def report_skip(self, instance_id: str, track_id: str) -> dict[str, Any]:
+        """A song skipped in its first seconds (for smart playlists' "skips")."""
+        instance = self.instances.get(instance_id)
+        if not instance or "rate" not in instance.features:
+            return {"ok": True, "data": None}
+        return await _result(instance.skip(track_id))
+
+    @_when_ready
+    async def library_health(self, instance_id: str) -> dict[str, Any]:
+        """Library tools' clean-up report for Local files (health.py)."""
+        return await self._managed(instance_id, "tags", lambda s: s.health())
+
+    @_when_ready
+    async def fix_split_album(self, instance_id: str, folder: str, album: str, albumartist: str) -> dict[str, Any]:
+        if not all(isinstance(x, str) for x in (folder, album, albumartist)):
+            return {"ok": False, "error": "Bad request"}
+        result = await self._managed(instance_id, "tags", lambda s: s.fix_split(folder, album, albumartist))
+        if result["ok"]:
+            await _announce_change()
+        return result
+
+    @_when_ready
+    async def scan_loudness(self, instance_id: str) -> dict[str, Any]:
+        """Starts measuring loudness for Local files' songs without ReplayGain (in the background: the clean-up
+        report's "loudness" says how far it's got)."""
+        async def start(s):
+            s.scan_loudness()
+        return await self._managed(instance_id, "tags", start)
+
+    @_when_ready
+    async def loudness_status(self, instance_id: str) -> dict[str, Any]:
+        """How far measuring has got, and how many songs still lack loudness info (cheap: for polling)."""
+        async def status(s):
+            return {**s.loudness_progress, "no_gain": s.gain_missing()}
+        return await self._managed(instance_id, "tags", status)
+
+    @_when_ready
+    async def import_library(self, instance_id: str, path: str) -> dict[str, Any]:
+        """iTunes' or MusicBee's library file into Local files (migrate.py): plays, ratings, loves, and its playlists
+        as MusicDeck playlists (one of the same name already here is left alone). Returns what came across."""
+        async def work(s):
+            got = await s.import_library(str(path))
+            names = {p["name"] for p in self.playlists.playlists if p["instance_id"] == instance_id}
+            made = 0
+            for name, tracks in got.pop("playlists"):
+                if name not in names:
+                    self.playlists.create(instance_id, name, tracks)
+                    made += 1
+            return {**got, "playlists": made}
+        result = await self._managed(instance_id, "tags", work)
+        if result["ok"]:
+            await _announce_change()
+        return result
+
+    @_when_ready
+    async def export_playlists(self, instance_id: str) -> dict[str, Any]:
+        """Local files' MusicDeck playlists as .m3u8 files (other players open them), in Documents (or home)
+        > MusicDeck playlists. Returns {"folder", "count"}."""
+        async def work(s):
+            documents = os.path.join(decky.DECKY_USER_HOME, "Documents")
+            folder = os.path.join(documents if os.path.isdir(documents) else decky.DECKY_USER_HOME, "MusicDeck playlists")
+            ours = [p for p in self.playlists.playlists if p["instance_id"] == instance_id]
+            if not ours:
+                raise ServiceError("No playlists of yours to export yet")
+            os.makedirs(folder, exist_ok=True)
+            count = 0
+            for p in ours:
+                entries = s.playlist_entries([t["id"] for t in p["tracks"]])
+                if entries:
+                    with open(os.path.join(folder, migrate.safe_name(p["name"]) + ".m3u8"), "w", encoding="utf-8") as f:
+                        f.write(migrate.m3u8(entries))
+                    count += 1
+            return {"folder": folder, "count": count}
+        return await self._managed(instance_id, "tags", work)
+
+    @_when_ready
+    async def library_columns(self, instance_id: str, genre: str = "", artist: str = "", album: str = "") -> dict[str, Any]:
+        """The column browser's lists for Local files: genres, artists, albums, each narrowed by those to its left."""
+        if not all(isinstance(x, str) for x in (genre, artist, album)):
+            return {"ok": False, "error": "Bad request"}
+        return await self._managed(instance_id, "tags", lambda s: s.columns(genre, artist, album))
+
+    @_when_ready
+    async def convert_songs(self, instance_id: str, ids: list[str], fmt: str) -> dict[str, Any]:
+        """Converts Local files' songs (convert.py) into Documents (or home) > MusicDeck converted; returns how many and
+        where. Runs in the background: convert_status says how far."""
+        if not isinstance(ids, list):
+            return {"ok": False, "error": "Bad request"}
+        documents = os.path.join(decky.DECKY_USER_HOME, "Documents")
+        root = os.path.join(documents if os.path.isdir(documents) else decky.DECKY_USER_HOME, "MusicDeck converted")
+        async def start(s):
+            return {"count": s.convert_songs(ids, str(fmt), root), "folder": root}
+        return await self._managed(instance_id, "tags", start)
+
+    @_when_ready
+    async def convert_status(self, instance_id: str) -> dict[str, Any]:
+        async def status(s):
+            return dict(s.convert_progress)
+        return await self._managed(instance_id, "tags", status)
+
+    @_when_ready
+    async def retag_preview(self, instance_id: str, ids: list[str], op: str, args: dict[str, Any]) -> dict[str, Any]:
+        """What a tag tool (retag.py: from_names, case, renumber, replace) would change in these songs."""
+        if not isinstance(ids, list) or not isinstance(args, dict):
+            return {"ok": False, "error": "Bad request"}
+        return await self._managed(instance_id, "tags", lambda s: s.retag_preview(ids, str(op), args))
+
+    @_when_ready
+    async def retag_apply(self, instance_id: str, ids: list[str], op: str, args: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(ids, list) or not isinstance(args, dict):
+            return {"ok": False, "error": "Bad request"}
+        result = await self._managed(instance_id, "tags", lambda s: s.retag_apply(ids, str(op), args))
+        if result["ok"]:
+            await _announce_change()
+        return result
+
+    @_when_ready
+    async def organize_preview(self, instance_id: str, pattern: str, ids: Optional[list[str]] = None) -> dict[str, Any]:
+        """Where Local files' songs (all, or `ids`) would go if moved by `pattern` (organize.py)."""
+        ids = [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else None
+        return await self._managed(instance_id, "tags", lambda s: s.organize_preview(str(pattern), ids))
+
+    @_when_ready
+    async def organize_apply(self, instance_id: str, pattern: str, ids: Optional[list[str]] = None) -> dict[str, Any]:
+        ids = [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else None
+        return await self._organized(instance_id, lambda s: s.organize_apply(str(pattern), ids))
+
+    @_when_ready
+    async def organize_undo(self, instance_id: str) -> dict[str, Any]:
+        return await self._organized(instance_id, lambda s: s.organize_undo())
+
+    async def _organized(self, instance_id: str, work) -> dict[str, Any]:
+        """Files moved: MusicDeck's playlists know their songs by the new ids too."""
+        result = await self._managed(instance_id, "tags", work)
+        if result["ok"]:
+            self.playlists.retarget(instance_id, result["data"].pop("ids", {}))
+            await _announce_change()
+        return result
+
+    async def listening_stats(self, period: str = "month") -> dict[str, Any]:
+        """Your listening for the last week, month or year, or all time: totals, top artists, albums and songs,
+        hours of the day and days of the week (stats.py)."""
+        if period not in stats.PERIODS:
+            return {"ok": False, "error": "Unknown period"}
+        return await _result(asyncio.to_thread(self.play_log.summary, period))
 
     @_when_ready
     async def get_tags(self, instance_id: str, kind: str, item_id: str) -> dict[str, Any]:
@@ -1372,6 +1537,59 @@ class Plugin:
         return self._offline_state(instance_id, playlist_id, p["tracks"]) if p else None
 
     @_when_ready
+    async def saved_copy(self, instance_id: str, kind: str, collection_id: str) -> Optional[dict[str, Any]]:
+        """The MusicDeck playlist saved from a source's playlist or album (its collection), or None: so a page opened
+        from anywhere knows it's saved."""
+        if not isinstance(collection_id, str) or self.playlists.is_ours(collection_id):
+            return None
+        copy = self.playlists.find_copy(instance_id, {"kind": kind, "id": collection_id})
+        return self.playlists._collection(copy) if copy else None
+
+    @_when_ready
+    async def collection_offline(self, instance_id: str, kind: str, collection_id: str) -> Optional[dict[str, Any]]:
+        """Any playlist's or album's download state, for its Download button wherever it's opened: a MusicDeck
+        playlist's own, or that of the copy saved from it ({"copy": its id}); None where the source can't download.
+        Nothing saved from it yet: not on, nothing saved."""
+        instance = self.instances.get(instance_id)
+        if not instance or not instance.downloadable or not isinstance(collection_id, str):
+            return None
+        if self.playlists.is_ours(collection_id):
+            p = self.playlists.find(collection_id)
+            return {**self._offline_state(instance_id, collection_id, p["tracks"]), "copy": collection_id} if p else None
+        copy = self.playlists.find_copy(instance_id, {"kind": kind, "id": collection_id})
+        if not copy:
+            return {"on": False, "total": 0, "saved": 0, "copy": None}
+        copy_id = "md:" + copy["id"]
+        return {**self._offline_state(instance_id, copy_id, copy["tracks"]), "copy": copy_id}
+
+    @_when_ready
+    async def download_collection(self, instance_id: str, kind: str, collection_id: str, on: bool) -> dict[str, Any]:
+        """Downloads (or stops downloading) a playlist or album: a MusicDeck playlist itself; anything else as the
+        playlist saved from it, saved now when it hasn't been (so it's in the library too). Returns its state."""
+        async def work():
+            instance = self._instance(instance_id)
+            if not instance.downloadable:
+                raise ServiceError(f"{instance.display_name} can't be downloaded")
+            if self.playlists.is_ours(collection_id):
+                copy_id = collection_id
+            else:
+                source = {"kind": kind, "id": collection_id}
+                copy = self.playlists.find_copy(instance_id, source)
+                if not copy and not on:
+                    raise ServiceError("It isn't downloaded")
+                if not copy:
+                    page = await instance.open(kind, collection_id)
+                    copy = self.playlists.find_copy(instance_id, source) or \
+                        self.playlists.create(instance_id, page["title"], page["tracks"], source=source)
+                copy_id = copy["id"] if str(copy["id"]).startswith("md:") else "md:" + copy["id"]
+            if not self.playlists.set_offline(copy_id, bool(on)):
+                raise ServiceError("That playlist was deleted")
+            self._sync_offline()
+            await _announce_change()
+            return await self.collection_offline(instance_id, kind, collection_id)
+        return await _result(work())
+
+    @_when_ready
     async def retry_downloads(self) -> None:
         self.offline.retry(self._resolve_for_offline)
         await _announce_change()
@@ -1391,7 +1609,7 @@ class Plugin:
         """Writes a backup (no sign-ins in it) to Documents, or home; returns where."""
         async def work():
             data = backup.build(self.settings.data, self.playlists.playlists, self.playlists.art_dir,
-                                decky.DECKY_PLUGIN_RUNTIME_DIR, SECRET_KEYS)
+                                decky.DECKY_PLUGIN_RUNTIME_DIR, SECRET_KEYS, decky.DECKY_PLUGIN_SETTINGS_DIR)
             for source, stored in zip(data["sources"], self.settings.services()):
                 source["signed_in"] = any(k in SECRET_KEYS for k in stored["config"])
             documents = os.path.join(decky.DECKY_USER_HOME, "Documents")
@@ -1450,6 +1668,15 @@ class Plugin:
                               and isinstance(m.get("collection"), dict) and (m["instance_id"], m["appid"]) not in games]
             if restored_games:
                 self.settings.set("game_music", self.settings.get("game_music") + restored_games)
+            # smart playlists this device hasn't (by id), and the listens it hasn't
+            smart = data.get("smart_playlists")
+            if isinstance(smart, list):
+                have_smart = {p.get("id") for p in self._smart_read()}
+                fresh_smart = [p for p in smart if isinstance(p, dict) and isinstance(p.get("id"), str) and p["id"] not in have_smart
+                               and p.get("source") in sources and isinstance(p.get("rules"), dict)]
+                if fresh_smart:
+                    self._smart_write(self._smart_read() + fresh_smart)
+            backup.merge_history(os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, backup.HISTORY_FILE), data.get("history"))
             self._sync_offline()  # downloaded playlists download again
             await _announce_change()
             summary = f"{backup.count(len(added), 'source')} and {backup.count(playlists, 'playlist')} restored"
@@ -1576,6 +1803,8 @@ def _valid_setting(key: str, value: Any) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
     if key == "qam_mode":
         return value in ("replace", "separate")
+    if key == "playback" and isinstance(value, dict) and value.get("shuffle_mode", "songs") not in ("songs", "albums", "smart"):
+        return False
     if key == "center" and isinstance(value, dict):
         if any(k in CENTER_CHOICES and (not isinstance(value[k], (str, int)) or value[k] not in CENTER_CHOICES[k])
                for k in value):

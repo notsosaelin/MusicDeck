@@ -13,7 +13,10 @@ export type Place =
   | { type: "tab"; id: string; title: string }
   | { type: "collection"; collection: Collection }
   | { type: "search"; query: string }
-  | { type: "smart"; playlist: SmartPlaylist };
+  | { type: "smart"; playlist: SmartPlaylist }
+  | { type: "stats" }
+  | { type: "tools"; source?: string }
+  | { type: "columns" };
 
 export const places = new Store<{ back: Place[]; current: Place; forward: Place[] }>({
   back: [],

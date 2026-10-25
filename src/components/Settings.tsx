@@ -78,6 +78,28 @@ import { ACCENT, DialogActions } from "./common";
 import { browseThenReturn, linkLastfm, readClipboard } from "../signIn";
 import { ServiceModal } from "./ServiceModal";
 
+/** How shuffle orders the queue (player.ts: buildOrder) */
+export const SHUFFLE_MODES: [NonNullable<PlaybackSettings["shuffle_mode"]>, string][] = [
+  ["songs", "Songs"],
+  ["albums", "Albums"],
+  ["smart", "Smart"],
+];
+/** Changes playback settings from anywhere (the desktop player's shuffle menu too): the player, the state, saved. */
+export async function updatePlayback(patch: Partial<PlaybackSettings>) {
+  const state = pluginState.get();
+  if (!state) return;
+  const playback = { ...state.playback, ...patch };
+  pluginState.set({ ...state, playback });
+  player.setPlayback(playback);
+  await setSetting("playback", playback);
+}
+
+export const SHUFFLE_NOTES: Record<NonNullable<PlaybackSettings["shuffle_mode"]>, string> = {
+  songs: "Song by song",
+  albums: "Whole albums, in random order",
+  smart: "Your better-rated songs sooner, never the same artist twice in a row",
+};
+
 const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,
   steam: <FaSteam />,
@@ -686,12 +708,7 @@ export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }
   state,
   Section = PanelSection,
 }) => {
-  const setPlayback = async (patch: Partial<PlaybackSettings>) => {
-    const playback = { ...state.playback, ...patch };
-    pluginState.set({ ...state, playback });
-    player.setPlayback(playback);
-    await setSetting("playback", playback);
-  };
+  const setPlayback = updatePlayback;
   const has = (feature: Feature) => state.services.some((s) => s.features.includes(feature));
   return (
     <>
@@ -714,6 +731,15 @@ export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }
             rgOptions={[0, 2, 4, 6, 8, 12].map((s) => ({ data: s, label: s ? `${s} s` : "Off" }))}
             selectedOption={state.playback.crossfade ?? 0}
             onChange={(o) => setPlayback({ crossfade: o.data })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <DropdownItem
+            label="Shuffle"
+            description={SHUFFLE_NOTES[state.playback.shuffle_mode ?? "songs"]}
+            rgOptions={SHUFFLE_MODES.map(([data, label]) => ({ data, label }))}
+            selectedOption={state.playback.shuffle_mode ?? "songs"}
+            onChange={(o) => setPlayback({ shuffle_mode: o.data })}
           />
         </PanelSectionRow>
         <PanelSectionRow>

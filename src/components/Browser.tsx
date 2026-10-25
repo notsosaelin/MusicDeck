@@ -1,5 +1,4 @@
 import {
-  ConfirmModal,
   DialogButton,
   Field,
   Focusable,
@@ -8,7 +7,6 @@ import {
   PanelSectionRow,
   Spinner,
   TextField,
-  showModal,
 } from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -29,7 +27,6 @@ import {
 import {
   Collection,
   CollectionKind,
-  OfflineState,
   Page,
   Result,
   SaveState,
@@ -40,12 +37,9 @@ import {
   getHome,
   isLocalPlaylist,
   openCollection,
-  playlistOffline,
-  retryDownloads,
   saveToLibrary,
   search,
   searchHistory,
-  setPlaylistOffline,
 } from "../api";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
 import { hasFeature, player } from "../player";
@@ -62,7 +56,7 @@ import {
   setStack,
 } from "../nav";
 import { notify } from "../notify";
-import { MenuContext, canCopy, canDelete, saveCollection, showCollectionMenu, showTrackMenu } from "./TrackMenu";
+import { MenuContext, canCopy, canDelete, showCollectionMenu, showTrackMenu } from "./TrackMenu";
 import {
   Art,
   ButtonRow,
@@ -75,6 +69,7 @@ import {
   TrackNumber,
   TrackRow,
 } from "./common";
+import { useDownload, useSavedCopy } from "../download";
 
 /**
  * A view's data, cached per key so going back doesn't refetch (shared with the media center). With `revalidate` (the home view, whose
@@ -479,57 +474,14 @@ export const runAction = (url: string) => {
   else Navigation.NavigateToExternalWeb(url);
 };
 
-/**
- * A MusicDeck playlist's Download button. While tracks download it counts them (each finished one
- * refreshes the plugin state, which asks for the count again); when some couldn't be saved, it
- * offers to try again. Removing a download asks first: the files go, the playlist stays.
- */
-const DownloadButton: FC<{ instanceId: string; playlist: Collection; initial: OfflineState }> = ({
-  instanceId,
-  playlist,
-  initial,
-}) => {
-  const [state, setState] = useState(initial);
-  const downloads = useStore(pluginState)?.offline;
-  useEffect(() => {
-    playlistOffline(instanceId, playlist.id)
-      .then((s) => s && setState(s))
-      .catch(() => {});
-  }, [downloads?.tracks, downloads?.current, downloads?.failed]);
-  const busy = !!downloads && (downloads.current !== null || downloads.pending > 0);
-  const missing = state.on && state.saved < state.total;
-
-  const change = async (on: boolean) => {
-    const done = await setPlaylistOffline(playlist.id, on);
-    if (!done.ok) return notify(playlist.title, done.error);
-    setState({ ...state, on });
-  };
-  const onClick = () => {
-    if (!state.on) change(true);
-    else if (missing && !busy) retryDownloads();
-    else
-      showModal(
-        <ConfirmModal
-          strTitle={`Remove the download of ${playlist.title}?`}
-          strDescription="Its songs are deleted from this Deck. The playlist stays."
-          strOKButtonText="Remove"
-          bDestructiveWarning
-          onOK={() => change(false)}
-        />,
-      );
-  };
-
-  const label = !state.on
-    ? "Download"
-    : !missing
-      ? "Downloaded"
-      : busy
-        ? `Downloading ${state.saved} of ${state.total}`
-        : `${state.saved} of ${state.total} downloaded · Retry`;
+/** A playlist's or album's Download button (download.tsx: wherever it's opened, any source that can download). */
+const DownloadButton: FC<{ instanceId: string; collection: Collection }> = ({ instanceId, collection }) => {
+  const download = useDownload(instanceId, collection);
+  if (!download) return null;
   return (
     <ButtonRow>
-      <IconButton active={state.on && !missing} onClick={onClick} label={state.on ? "Remove download" : "Download"}>
-        {state.on && !missing ? <FaCheck /> : <FaDownload />} {label}
+      <IconButton active={download.on} onClick={download.act}>
+        <FaDownload /> {download.label}
       </IconButton>
     </ButtonRow>
   );
@@ -548,6 +500,7 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
   useStore(pluginState); // the game music choices
   const withGame = !!game && musicFor(game.appid, instanceId)?.collection.id === collection.id;
   const saved = useLibrarySave(instanceId, collection, page);
+  const copy = useSavedCopy(instanceId, collection);
   const playable = !!page && page.tracks.length > 0;
   return (
     <>
@@ -570,11 +523,18 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
                 <FaRandom /> Shuffle
               </IconButton>
             )}
-            {canSave(instanceId, collection) && (
-              <IconButton label="Save playlist" grow={0.45} onClick={() => saveCollection(instanceId, collection)}>
-                <FaPlus />
-              </IconButton>
-            )}
+            {canSave(instanceId, collection) &&
+              (copy.copy ? (
+                // saved already (from wherever this was opened): it opens your copy
+                <IconButton label="Saved · open yours" active grow={0.45}
+                            onClick={() => pushView(stack, { type: "collection", collection: copy.copy! })}>
+                  <FaCheck />
+                </IconButton>
+              ) : (
+                <IconButton label="Save playlist" grow={0.45} onClick={copy.save}>
+                  <FaPlus />
+                </IconButton>
+              ))}
             {saved && (
               <IconButton label={saved.label} active={saved.on} grow={0.45} onClick={saved.toggle}>
                 {saved.icon}
@@ -601,9 +561,7 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
             </IconButton>
           </ButtonRow>
         )}
-        {page?.offline && page.tracks.length > 0 && (
-          <DownloadButton instanceId={instanceId} playlist={collection} initial={page.offline} />
-        )}
+        {page && page.tracks.length > 0 && <DownloadButton instanceId={instanceId} collection={collection} />}
         {page?.action && (
           <ButtonRow>
             <IconButton
