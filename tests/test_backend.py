@@ -4306,6 +4306,136 @@ async def run():
         check(one_home["ok"], f"the one library's Home: {one_home.get('error')}")
         check(not (await plugin.library_tab("nonsense"))["ok"], "a part the one library doesn't have is refused")
 
+        print("endpoints")
+        api_ts = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "api.ts"), encoding="utf-8").read()
+        import re as _re
+        names = set(_re.findall(r'callable<[\s\S]*?>\("([a-z_]+)"\)', api_ts))
+        hidden = sorted(n for n in names if not callable(getattr(plugin, n, None)))
+        check(len(names) > 80 and not hidden, f"every endpoint the frontend calls is a method of the running backend: {hidden}")
+        devices_now = await plugin.my_devices()
+        check(devices_now["ok"] and "paired" in devices_now["data"], "this device and the others are listed")
+
+        print("your devices")
+        from aiohttp import web as pweb
+        from musicdeck import peers as peermod, stats as statsmod, x25519 as xmod
+        check(xmod.x25519(bytes.fromhex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
+                          bytes.fromhex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")).hex()
+              == "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552", "X25519 gives RFC 7748's answer")
+        check(peermod._home("192.168.1.155") and peermod._home("127.0.0.1") and not peermod._home("8.8.8.8"),
+              "only the home network is answered")
+        events = {"a": [], "b": []}
+        logs = {}
+        devs = {}
+
+        async def served(request, kind, instance, item_id):
+            return pweb.Response(text=f"{kind}:{instance}:{item_id}")
+        for who in ("a", "b"):
+            folder = os.path.join(tmp, f"peer-{who}")
+            os.makedirs(folder, exist_ok=True)
+            logs[who] = statsmod.PlayLog(os.path.join(folder, "plays.jsonl"))
+
+            async def emit(name, payload, who=who):
+                events[who].append((name, payload))
+            devs[who] = peermod.Peers(folder, f"Device {who.upper()}", logging.getLogger("peers-" + who), emit,
+                                      lambda who=who: {"queue": [{"instanceId": "loc", "track": {"id": "t1", "title": "Song", "duration": 200}}],
+                                                       "index": 0, "position": 42, "saved_at": time.time(), "playing": True},
+                                      lambda: [{"id": "loc", "type": "local", "name": "Local files"},
+                                               {"id": "qz", "type": "qobuz", "name": "Qobuz"}],
+                                      logs[who], served, plugin.http)
+            await devs[who].start()
+        A, B = devs["a"], devs["b"]
+        try:
+            # as each would hear the other's hello on the home network
+            A._heard(json.dumps({"musicdeck": 1, "id": B.me["id"], "name": "Device B", "port": B.port}).encode(), "127.0.0.1")
+            B._heard(json.dumps({"musicdeck": 1, "id": A.me["id"], "name": "Device A", "port": A.port}).encode(), "127.0.0.1")
+            # (the real devices on this network may be heard too)
+            check("Device B" in [d["name"] for d in A.listing()["nearby"]], "a device saying hello is nearby")
+            try:
+                await A.pair(B.me["id"])
+                closed = False
+            except peermod.PeerError as e:
+                closed = "Settings" in str(e)
+            check(closed and not events["b"], "a device whose Your devices isn't open takes no pairing requests")
+            B.pairable_until = time.time() + 60
+            asked = await A.pair(B.me["id"])
+            prompt = next(p for n, p in events["b"] if n == "peer_pair_request")
+            check(asked["code"] == prompt["code"] and len(asked["code"]) == 6, "both devices show the same six digits")
+            check(not A.paired and not B.paired, "nothing is paired before the person accepts")
+            check(await B.answer(prompt["rid"], True) and A.me["id"] in B.paired, "accepted on the device asked")
+            for _ in range(40):
+                if B.me["id"] in A.paired:
+                    break
+                await asyncio.sleep(0.25)
+            check(B.me["id"] in A.paired and A.paired[B.me["id"]]["key"] == B.paired[A.me["id"]]["key"],
+                  "the asking device learns it was accepted; both hold the same key")
+            hello = await A.call(B.me["id"], "GET", "/p/hello")
+            check(hello["name"] == "Device B", "a signed request is answered")
+            session = await A.call(B.me["id"], "GET", "/p/session")
+            check(session["session"]["position"] == 42 and session["session"]["playing"], "what's playing there, and where")
+            # a replayed or altered request is refused
+            body = b""
+            headers = A._headers(B.me["id"], "GET", "/p/hello", body)
+            base = f"http://127.0.0.1:{B.port}"
+            async with plugin.http.get(base + "/p/hello", headers=headers) as r1:
+                first = r1.status
+            async with plugin.http.get(base + "/p/hello", headers=headers) as r2:
+                again = r2.status
+            forged = {**A._headers(B.me["id"], "GET", "/p/hello", body), "X-MD-Sig": "0" * 64}
+            async with plugin.http.get(base + "/p/hello", headers=forged) as r3:
+                bad = r3.status
+            async with plugin.http.get(base + "/p/session") as r4:
+                anonymous = r4.status
+            check(first == 200 and again == 401 and bad == 401 and anonymous == 401,
+                  "a request seen before, a wrong signature or none at all is refused")
+            link = A.link(B.me["id"], "stream", "loc", "t1")
+            async with plugin.http.get(link) as r5:
+                streamed = await r5.text()
+            async with plugin.http.get(link.replace("t1", "t2")) as r6:
+                other = r6.status
+            check(streamed == "stream:loc:t1" and other == 401, "a song link plays that song only")
+            # listens: each one's own go to the other, not back again
+            logs["b"].add("qz", {"id": "s1", "title": "Heard on B", "artist": "X", "duration": 180}, when=time.time() - 60)
+            added = await A.sync_plays(B.me["id"])
+            again_added = await A.sync_plays(B.me["id"])
+            back = await B.sync_plays(A.me["id"])
+            got = logs["a"].read()
+            check(added == 1 and again_added == 0 and back == 0 and got[0]["dev"] == B.me["id"]
+                  and got[0]["src"] == f"peer~{B.me['id']}~qz",
+                  "B's listens count on A once (their pictures from B); they don't come back to B")
+            src = peermod.peer_source(A, f"peer~{B.me['id']}~loc")
+            check(src is not None and peermod.peer_source(A, "peer~stranger~loc") is None,
+                  "a paired device's songs play through it; an unknown device's don't")
+            check([t["name"] for t in A.targets()] == ["Device B"] and A.targets()[0]["kind"] == "musicdeck",
+                  "a paired device that's on is somewhere to play")
+            handed_to_b = []
+
+            async def on_play(peer_id, payload):
+                handed_to_b.append((peer_id, payload))
+            B.on_play = on_play
+            await A.call(B.me["id"], "POST", "/p/play", {"session": {"queue": [], "index": 0, "position": 3}, "services": []})
+            check(handed_to_b and handed_to_b[0][0] == A.me["id"] and handed_to_b[0][1]["session"]["position"] == 3,
+                  "Play on another device hands it the queue and where it was")
+            await A.unpair(B.me["id"])
+            check(not A.paired and not B.paired, "unpairing forgets on both")
+        finally:
+            await A.stop()
+            await B.stop()
+        # the backend's side: another device's queue, its streaming songs from the same service here
+        own_peers, plugin.peers = plugin.peers, A
+        A.paired["pp"] = {"name": "PC", "key": "00" * 32}
+        qobuz_here = next((s["id"] for s in plugin.settings.services() if s["type"] == "qobuz"), None)
+        handed = plugin._handed_over("pp", {"services": [{"id": "loc", "type": "local", "name": "Local files"},
+                                                          {"id": "theirs", "type": "radio", "name": "Internet radio"}],
+                                            "session": {"queue": [{"instanceId": "loc", "track": {"id": "a"}},
+                                                                  {"instanceId": "peer~x~y", "track": {"id": "b"}}],
+                                                        "index": 0, "position": 10}})
+        back_home = plugin._handed_over("pp", {"services": [], "session": {
+            "queue": [{"instanceId": f"peer~{A.me['id']}~mine", "track": {"id": "c"}}], "index": 0, "position": 0}})
+        check([q["instanceId"] for q in back_home["queue"]] == ["mine"], "this device's own songs, handed back, play from here")
+        check([q["instanceId"] for q in handed["queue"]] == ["peer~pp~loc"] and handed["position"] == 10,
+              f"Local files' songs stream from the device they're on; songs it had from a third device are left out ({qobuz_here})")
+        plugin.peers = own_peers
+
         print("backups")
         sub_id = saved["data"]["id"]
         mix = await plugin.create_playlist(sub_id, "Road trip", [{"id": "s1", "title": "One", "artist": "A"}])

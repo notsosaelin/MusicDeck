@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Collection, Page, ServiceInfo, Track, search } from "./api";
+import { Collection, Page, Section, ServiceInfo, Track, search } from "./api";
 import { pluginState, useStore } from "./store";
 
 /**
@@ -94,4 +94,47 @@ export function useLibrarySearch(query: string, rememberIn?: string): { page: Pa
     page: answered.length ? mergeSearch(query, answered) : null,
     waiting: services.filter((s) => !(s.id in pages)).length,
   };
+}
+
+/** How the one library's Your music pages can be ordered. */
+export type LibrarySort = "title" | "artist" | "source";
+export const LIBRARY_SORTS: [LibrarySort, string][] = [
+  ["title", "Title"],
+  ["artist", "Artist"],
+  ["source", "Source"],
+];
+
+const sortName = (s: string) => s.replace(/^(the|a|an)\s+/i, "").toLocaleLowerCase();
+/** An artist to sort by; a line that names none ("26 tracks", a soundtrack's) goes last. */
+const artistName = (s: string) => (/^\d/.test(s) || !s ? "\uffff" : sortName(s.split(" · ")[0]));
+
+/** The sources a page of the one library has something from, in the library's order. */
+export function sourcesIn(sections: Section[], services: ServiceInfo[]): ServiceInfo[] {
+  const have = new Set<string>();
+  for (const s of sections) {
+    s.items.forEach((c) => c.source && have.add(c.source));
+    (s.tracks ?? []).forEach((t) => t.source && have.add(t.source));
+  }
+  return librarySources(services).filter((s) => have.has(s.id));
+}
+
+/** A Your music page with only one source's (`source`, or every one's: "") and in the order chosen. */
+export function filterLibrary(sections: Section[], source: string, sort: LibrarySort, services: ServiceInfo[]): Section[] {
+  const rank = new Map(librarySources(services).map((s, i) => [s.id, i]));
+  const keep = <T extends { source?: string }>(list: T[]) => (source ? list.filter((x) => x.source === source) : list);
+  const by = <T extends { source?: string }>(list: T[], title: (x: T) => string, artist: (x: T) => string) =>
+    [...list].sort((a, b) => {
+      const key = (x: T): [number | string, string] =>
+        sort === "source"
+          ? [rank.get(x.source ?? "") ?? 99, sortName(title(x))]
+          : [sort === "artist" ? artistName(artist(x)) : sortName(title(x)), sortName(title(x))];
+      const [a1, a2] = key(a);
+      const [b1, b2] = key(b);
+      return a1 < b1 ? -1 : a1 > b1 ? 1 : a2.localeCompare(b2);
+    });
+  return sections.map((s) => ({
+    ...s,
+    items: by(keep(s.items), (c) => c.title, (c) => c.subtitle),
+    tracks: s.tracks ? by(keep(s.tracks), (t) => t.title, (t) => t.artist) : s.tracks,
+  }));
 }

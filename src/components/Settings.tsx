@@ -70,6 +70,7 @@ import {
 } from "../api";
 import { notify } from "../notify";
 import { installUpdate, lookForUpdate } from "../update";
+import { DeviceRows } from "../devices";
 import { deleteSource, switchSource } from "../sources";
 import { player } from "../player";
 import { syncLibraryEntry } from "../libraryEntry";
@@ -954,6 +955,7 @@ export const Settings: FC = () => {
           />
         </PanelSectionRow>
         <BackupRows />
+        <DeviceRows />
         <PanelSectionRow>
           <ToggleField
             label="Debug log"

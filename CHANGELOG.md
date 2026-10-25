@@ -3,6 +3,28 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.38.0
+
+- **Your devices**: MusicDeck on your PC and your Deck (or any two Steams on your home network) pair once and then
+  keep up with each other.
+  - **Pair** in Settings → Your devices: a six-digit code shows on both; accept it on the other if it matches. A
+    device only takes pairing requests while its Your devices is open (nobody on a café's Wi-Fi can make one pop up).
+  - **Continue listening**, on Home (desktop and the media center): what the other device was playing, picked up
+    here from where it was; the other one stops.
+  - **Play on another device**: the cast button lists your other devices that are on, above speakers and TVs; pick
+    one and the queue plays on there from the same second, and stops here. The device it went to has the ✓ in Play
+    on (and the cast button stays lit); **This Deck** (or **This PC**) brings it back from there, from where it's got to.
+  - Songs from a streaming service play from the same service on the other device; songs from Local files stream
+    from the device they're on (covers too). Handing them back and forth works.
+  - **Your stats** count both: each device's listens are added to the other's.
+  - On Windows, **Let your devices reach this PC** in Settings opens MusicDeck's two ports to the home network only
+    (Windows asks for an administrator's yes first), replacing a block Windows saved if its prompt was turned down.
+  - Paired devices sign every request; see docs/SECURITY.md.
+- **Your music, by source and order**: Playlists, Albums, Artists and Songs can show one source's only (All, Local
+  files, Qobuz...) and be ordered by title, artist or source: pills and a menu beside the title on desktop, two
+  buttons above the grid in the media center.
+- A queue of several sources is picked up again after a restart (before, only a queue from one source was).
+
 ## 0.37.0
 
 - **One library**: every source's music together, as Steam's library is every game whatever store it came from.

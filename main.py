@@ -1,8 +1,10 @@
 import asyncio
+import contextlib
 import functools
 import json
 import os
 import secrets
+import socket
 import time
 from datetime import datetime
 from typing import Any, Awaitable, Optional
@@ -15,7 +17,7 @@ import decky
 from musicdeck import backup, burn, cd, debuglog, library, lyrics, migrate, models, native, stats
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
-from musicdeck import updates, version
+from musicdeck import firewall, peers as peermod, updates, version
 from musicdeck.cast import CastManager
 from musicdeck.lastfm import Lastfm, LastfmError
 from musicdeck.listenbrainz import ListenBrainz
@@ -114,6 +116,10 @@ class Plugin:
         self.device_watcher: Optional[DeviceWatcher] = None
         # new versions on GitHub (updates.py); installed through Decky's own installer
         self.updates: Optional[updates.Watcher] = None
+        # the user's other devices running MusicDeck (peers.py): paired, they share listens and pick up each other's
+        # music
+        self.peers: Optional[peermod.Peers] = None
+        self.last_peer_sync = 0.0
 
     # --- lifecycle ---
 
@@ -136,7 +142,7 @@ class Plugin:
         self.instances = {}
         self.lifecycle = asyncio.Lock()
         self.offline = OfflineStore(decky.DECKY_PLUGIN_RUNTIME_DIR, _announce_change)
-        self.server = StreamServer(self.instances.get, decky.logger, local_art=self.playlists.art_path,
+        self.server = StreamServer(self._lookup, decky.logger, local_art=self.playlists.art_path,
                                    offline=self.offline)
         self.http = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=tls()),
@@ -167,6 +173,16 @@ class Plugin:
             self.device_watcher.start()
             self.updates = updates.Watcher(self.http, _announce_change, decky.logger)
             self.updates.start()
+            try:
+                self.peers = peermod.Peers(
+                    decky.DECKY_PLUGIN_SETTINGS_DIR, _device_name(), decky.logger, decky.emit, self._session_for_peer,
+                    lambda: [{"id": s["id"], "type": s["type"], "name": s["name"]} for s in self.settings.services()],
+                    self.play_log, self.server.for_peer, self.http, version.current())
+                self.peers.on_play = self._played_here
+                await self.peers.start()
+            except OSError as e:
+                decky.logger.warning(f"Your devices: couldn't start ({e})")
+                self.peers = None
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
@@ -175,6 +191,8 @@ class Plugin:
         await cancel_all()
         if self.updates:
             self.updates.stop()
+        if self.peers:
+            await self.peers.stop()
         if self.output_watcher:
             await self.output_watcher.stop()
         if self.device_watcher:
@@ -908,8 +926,41 @@ class Plugin:
 
     @_when_ready
     async def cast_devices(self) -> dict[str, Any]:
-        """Speakers and TVs on the network: [{"id", "name", "model", "kind"}]."""
-        return await _result(self.cast.search())
+        """Speakers and TVs on the network: [{"id", "name", "model", "kind"}], after the user's other devices that are
+        on ("musicdeck": playing there hands the music over, sent by send_to_device)."""
+        async def work():
+            devices = self.peers.targets() if self.peers else []
+            try:
+                return devices + await self.cast.search()
+            except ServiceError:
+                if devices:
+                    return devices
+                raise
+        return await _result(work())
+
+    @_when_ready
+    async def send_to_device(self, peer_id: str, session: dict[str, Any]) -> dict[str, Any]:
+        """Plays this queue on another of the user's devices, from where it is here (Play on)."""
+        async def work():
+            if not self.peers or not isinstance(peer_id, str) or peer_id not in self.peers.paired:
+                raise ServiceError("That device isn't paired")
+            clean = _clean_session(session)
+            if not clean["queue"]:
+                raise ServiceError("Nothing to play")
+            services = [{"id": s["id"], "type": s["type"], "name": s["name"]} for s in self.settings.services()]
+            try:
+                await self.peers.call(peer_id, "POST", "/p/play", {"session": clean, "services": services}, timeout=10)
+            except peermod.PeerError as e:
+                raise ServiceError(str(e))
+            return True
+        return await _result(work())
+
+    async def _played_here(self, peer_id: str, payload: dict[str, Any]) -> None:
+        """Another device handed its music here: the frontend plays it ("peer_play")."""
+        session = self._handed_over(peer_id, payload)
+        if session["queue"]:
+            name = self.peers.paired.get(peer_id, {}).get("name", "") if self.peers else ""
+            await decky.emit("peer_play", {"name": name, "session": session})
 
     @_when_ready
     async def cast_start(self, device_id: str) -> dict[str, Any]:
@@ -1331,6 +1382,11 @@ class Plugin:
         hours of the day and days of the week (stats.py)."""
         if period not in stats.PERIODS:
             return {"ok": False, "error": "Unknown period"}
+        # what was listened to on the other devices lately counts too (a few seconds at most for it)
+        if self.peers and self.peers.paired and time.time() - self.last_peer_sync > 120:
+            self.last_peer_sync = time.time()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.gather(*[self.peers.sync_plays(p) for p in list(self.peers.paired)]), 4)
         return await _result(asyncio.to_thread(self.play_log.summary, period))
 
     @_when_ready
@@ -1465,12 +1521,120 @@ class Plugin:
                     return {"queue": [{"instanceId": active.instance_id, "track": t} for t in remote["tracks"]],
                             "index": remote["index"], "position": remote["position"],
                             "from_device": remote.get("changed_by")}
-        # resume a queue of one source that's still here (no mixing sources): the live one's, or another's
-        # played while looking at it in the media center (a restart mustn't lose what was playing)
+        # resume a queue whose sources are all still here (the one library's mix several; another device's
+        # songs while it's still paired)
         sources = {item["instanceId"] for item in local["queue"]} if local else set()
-        if not local or not local["queue"] or len(sources) != 1 or next(iter(sources)) not in self.instances:
+        if not local or not local["queue"] or any(self._lookup(s) is None for s in sources):
             return None
         return local
+
+    # --- your other devices (peers.py) ---
+
+    def _lookup(self, instance_id: str):
+        """A source by its id: one of these, or a paired device's ("peer~<device>~<its source>")."""
+        return self.instances.get(instance_id) or peermod.peer_source(self.peers, instance_id)
+
+    def _session_for_peer(self) -> dict[str, Any]:
+        try:
+            with open(self._session_path(), "r", encoding="utf-8") as f:
+                return _clean_session(json.load(f))
+        except (OSError, ValueError):
+            return {}
+
+    @_when_ready
+    async def my_devices(self) -> dict[str, Any]:
+        """This device, the ones paired with it ("online" when they're on now) and the ones nearby to pair."""
+        if not self.peers:
+            return {"ok": False, "error": "Your devices aren't available here"}
+        await self.peers.announce(ask=True)
+        # Your devices is showing: another device may ask to pair for a while
+        self.peers.pairable_until = time.time() + peermod.PAIRABLE_FOR
+        # Windows: whether its firewall lets the others reach this PC ("blocked": Settings offers to allow it)
+        return {"ok": True, "data": {**self.peers.listing(), "firewall": await firewall.state()}}
+
+    @_when_ready
+    async def allow_firewall(self) -> bool:
+        """Windows: lets the user's devices reach this PC (Windows asks for an administrator's yes first)."""
+        return await firewall.allow()
+
+    @_when_ready
+    async def pair_device(self, peer_id: str) -> dict[str, Any]:
+        """Asks a device nearby to pair: the code to show here (the other shows it too, and is accepted there)."""
+        async def work():
+            if not self.peers or not isinstance(peer_id, str):
+                raise ServiceError("Your devices aren't available here")
+            try:
+                return await self.peers.pair(peer_id)
+            except peermod.PeerError as e:
+                raise ServiceError(str(e))
+        return await _result(work())
+
+    @_when_ready
+    async def answer_pairing(self, request_id: str, accept: bool) -> bool:
+        return bool(self.peers and isinstance(request_id, str) and await self.peers.answer(request_id, bool(accept)))
+
+    @_when_ready
+    async def unpair_device(self, peer_id: str) -> None:
+        if self.peers and isinstance(peer_id, str):
+            await self.peers.unpair(peer_id)
+
+    def _handed_over(self, peer_id: str, found: dict[str, Any]) -> dict[str, Any]:
+        """Another device's queue as one to play here: its streaming services' songs from the same service here
+        (their ids are the service's own), the rest (Local files, a server only it knows) streamed from it."""
+        theirs = {s.get("id"): s for s in found.get("services") or [] if isinstance(s, dict)}
+        mine = self.settings.services()
+        me = f"peer~{self.peers.me['id']}~" if self.peers else "\0"
+
+        def here(their_instance: str) -> str:
+            if their_instance.startswith(me):  # one of this device's own songs, coming back
+                return their_instance[len(me):]
+            service = theirs.get(their_instance) or {}
+            if service.get("type") in CATALOGUE_TYPES:
+                same = [s for s in mine if s["type"] == service["type"] and s["id"] in self.instances]
+                pick = next((s for s in same if s["name"] == service.get("name")), same[0] if same else None)
+                if pick:
+                    return pick["id"]
+            return f"peer~{peer_id}~{their_instance}"
+        session = _clean_session(found.get("session"))
+        # songs it had from a third device are left out (a device streams only its own)
+        queue = [{"instanceId": here(item["instanceId"]), "track": item["track"]} for item in session["queue"]
+                 if not item["instanceId"].startswith("peer~") or item["instanceId"].startswith(me)]
+        return {**session, "queue": queue}
+
+    @_when_ready
+    async def other_sessions(self) -> dict[str, Any]:
+        """What the paired devices that are on were playing lately, to continue here: {"peer", "name", "track",
+        "instanceId" (where the track plays from here), "playing", "position", "saved_at"} each."""
+        if not self.peers or not self.peers.paired:
+            return {"ok": True, "data": []}
+        out = []
+        for found in await self.peers.sessions():
+            session = self._handed_over(found["peer"], found)
+            if not session["queue"] or time.time() - session.get("saved_at", 0) > HANDOFF_FRESH:
+                continue
+            item = session["queue"][session["index"]]
+            out.append({"peer": found["peer"], "name": found["name"], "track": item["track"],
+                        "instanceId": item["instanceId"], "playing": bool(session.get("playing")),
+                        "position": session["position"], "saved_at": session["saved_at"]})
+        return {"ok": True, "data": out}
+
+    @_when_ready
+    async def take_over(self, peer_id: str) -> dict[str, Any]:
+        """Another device's queue, to play here from where it was; that device pauses."""
+        async def work():
+            if not self.peers or peer_id not in self.peers.paired:
+                raise ServiceError("That device isn't paired")
+            try:
+                found = await self.peers.call(peer_id, "GET", "/p/session")
+                session = self._handed_over(peer_id, found)
+                if not session["queue"]:
+                    raise ServiceError("Nothing's playing there")
+                with contextlib.suppress(peermod.PeerError):
+                    await self.peers.call(peer_id, "POST", "/p/took-over", {}, timeout=4)
+            except peermod.PeerError as e:
+                raise ServiceError(str(e))
+            return session
+        return await _result(work())
 
     # --- MusicDeck playlists (stored on the device, per source) ---
 
@@ -1861,6 +2025,17 @@ class Plugin:
         if len(kept) != len(entries):
             self.settings.set("game_music", kept)
         return len(kept) != len(entries)
+
+
+#: services whose songs have the same ids for everyone: another device's are played from the same service here
+CATALOGUE_TYPES = {"qobuz", "tidal", "spotify", "youtube", "soundcloud", "bandcamp", "radio", "podcasts", "livemusic"}
+#: another device's music is offered to continue here for this long after it was last played
+HANDOFF_FRESH = 12 * 3600
+
+
+def _device_name() -> str:
+    """What this device is called to the user's others: its computer name."""
+    return (socket.gethostname() or "This device").split(".")[0][:80]
 
 
 def _clean_session(session: Any) -> dict[str, Any]:

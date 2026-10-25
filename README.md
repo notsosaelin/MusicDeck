@@ -8,10 +8,16 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 - **Eighteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
   Audiobookshelf, SoulSync, SoundCloud, YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live
   Music Archive, Qobuz, TIDAL, Spotify and Soulseek.
+- **Your devices:** MusicDeck on your PC and your Deck, paired once (Settings → Your devices: a code shows on both,
+  accept it on the other), keep up with each other: each one's listening counts in the other's stats, and **Continue
+  listening** on Home picks up what the other was playing, from where it was (the other stops), and **Play on**
+  (the cast button) lists the other devices that are on, to send the music there (This Deck brings it back). Songs from a
+  streaming service play from the same service here; songs from Local files stream from the device they're on. On
+  Windows, Settings first offers **Let your devices reach this PC** (Windows' firewall asks for an administrator's yes).
 - **One library:** every source's music together, as Steam's library is every game whatever store it came from.
   Home has what you played lately and your playlists from all of them, then a little of each source's own Home;
   **Your music** (Playlists, Albums, Artists, Songs) puts every source's together, each card saying where it's
-  from; **Search** asks every source at once, each one's results showing as they come. A queue can mix sources.
+  from, filtered to one source or ordered by title, artist or source; **Search** asks every source at once, each one's results showing as they come. A queue can mix sources.
   Each source's own parts (Qobuz's picks, Local files' folders and tools) stay under its name. On desktop Steam
   and in the media center; the Quick Access panel still browses the live source.
 - **Desktop Steam too:** a **Music** tab beside Store, Library and Community, as if Steam always had one.

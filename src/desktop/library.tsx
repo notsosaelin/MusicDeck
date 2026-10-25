@@ -37,7 +37,8 @@ import { StatsPage } from "./stats";
 import { ToolsPage } from "./tools";
 import { ColumnsPage } from "./columns";
 import { useDownload } from "../download";
-import { useLibrarySearch } from "../library";
+import { LIBRARY_SORTS, LibrarySort, filterLibrary, sourcesIn, useLibrarySearch } from "../library";
+import { continueFrom, useOtherSessions } from "../devices";
 
 /** Where a right-click was, for a menu to open there: Steam's menus take the mouse event itself in place of an
  *  element (Decky's typings say only EventTarget). */
@@ -458,12 +459,68 @@ const SectionsPage: FC<{ id: string; title: string; what: string; fetch: () => P
   fetch,
 }) => {
   const result = useResult(`${id}:desktop:${what}`, fetch);
+  // the one library's Your music: one source's or every one's, in the order chosen
+  const merged = what.startsWith("library:tab:");
+  const services = useStore(pluginState)?.services ?? [];
+  const [only, setOnly] = useState("");
+  const [sort, setSort] = useState<LibrarySort>("title");
+  useEffect(() => setOnly(""), [what]);
+  const sources = merged && result?.ok ? sourcesIn(result.data, services) : [];
+  const shown = result?.ok ? (merged ? filterLibrary(result.data, only, sort, services) : result.data) : [];
   return (
     <>
-      <h1 className="md-title">{title}</h1>
+      <div className="md-page-head">
+        <h1 className="md-title">{title}</h1>
+        {merged && sources.length > 0 && (
+          <div className="md-page-tools">
+            {sources.length > 1 && (
+              <div className="st-periods" role="tablist">
+                {[{ id: "", name: "All" }, ...sources].map((x) => (
+                  <button key={x.id} role="tab" aria-selected={only === x.id} data-on={only === x.id ? "" : undefined} onClick={() => setOnly(x.id)}>
+                    {x.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <select className="md-select md-sort" value={sort} onChange={(e) => setSort(e.target.value as LibrarySort)} aria-label="Sort by">
+              {LIBRARY_SORTS.map(([v, label]) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      {what === "library:home" && <ContinueRow />}
       <Loading result={result} />
-      {result?.ok && result.data.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home" || what === "library:home"} />)}
+      {shown.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home" || what === "library:home"} />)}
     </>
+  );
+};
+
+/** What the user's other devices were playing: a card each, played here from where it was (the other stops). */
+const ContinueRow: FC = () => {
+  const sessions = useOtherSessions();
+  if (!sessions.length) return null;
+  return (
+    <section className="md-section">
+      <h2 className="md-heading">Continue listening</h2>
+      <div className="md-shelf">
+        {sessions.map((s) => (
+          <div key={s.peer} className="md-card" title={`${s.track.title} · ${s.name}`} onClick={() => continueFrom(s)}>
+            <div className="md-card-art" style={{ borderRadius: 3 }}>
+              <ArtOrIcon url={art(s.instanceId, s.track.art)} />
+              <button className="md-card-play" aria-label={`Play ${s.track.title} here`}>
+                <FaPlay />
+              </button>
+            </div>
+            <div className="md-card-title">{s.track.title}</div>
+            <div className="md-card-sub">{[s.track.artist, s.name].filter(Boolean).join(" · ")}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 };
 
@@ -906,6 +963,9 @@ export const LIBRARY_CSS = `
 .md-nav-item[data-over] { background: rgba(26,159,255,0.3); color: #fff; }
 .md-nav-add { color: #8b929a; font-size: 13px; }
 .md-nav-sub { padding-left: 30px; font-size: 13px; }
+.md-page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.md-page-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 24px 0 12px; }
+.md-sort { width: auto !important; margin: 0 !important; height: 36px !important; }
 .md-sidebar { scrollbar-width: none; }
 .md-sidebar::-webkit-scrollbar { display: none; }
 .md-nav-twisty { border: none; background: none; color: #8b929a; width: 22px; height: 22px; margin: -4px -6px -4px 0; padding: 0;

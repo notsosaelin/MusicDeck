@@ -11,7 +11,7 @@
 import { FC, useEffect, useRef, useState } from "react";
 import { FaBroadcastTower, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp } from "react-icons/fa";
 import { CastDevice, Result } from "../api";
-import { canCast, castChoices, chooseCast, prepareCastMenu, thisDevice } from "../components/CastMenu";
+import { canCast, castChoices, chooseCast, handedTo, playingOn, prepareCastMenu, thisDevice } from "../components/CastMenu";
 import { player } from "../player";
 import { pluginState, useStore } from "../store";
 import { setVolume } from "./bar";
@@ -129,13 +129,14 @@ const Transport: FC<{ play: number; ends: boolean; gap: number; span?: number }>
 /** Play on a speaker or TV: the main player's devices, listed in the mini player's own window (Steam's menus open
  *  in the main window). */
 const Cast: FC<{ onList: (at: [number, number], list: Result<CastDevice[]> | null) => void }> = ({ onList }) => {
-  const state = useStore(player.state);
+  useStore(player.state);
+  useStore(handedTo);
   if (!canCast(player.current?.instanceId ?? pluginState.get()?.active_service ?? "")) return null;
   return (
     <button
       className="md-ctl"
-      data-on={state.castingTo ? "" : undefined}
-      title={state.castingTo ? `Playing on ${state.castingTo.name}` : "Play on a speaker or TV"}
+      data-on={playingOn() ? "" : undefined}
+      title={playingOn() ? `Playing on ${playingOn()}` : "Play on a speaker or TV"}
       aria-label="Play on"
       onMouseEnter={() => prepareCastMenu()}
       onClick={async (e) => {
@@ -161,7 +162,10 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
   const [menu, setMenu] = useState<[number, number] | null>(null);
   // the cast list: where, and the devices (null while they're looked for)
   const [devices, setDevices] = useState<{ at: [number, number]; list: Result<CastDevice[]> | null } | null>(null);
-  const castingTo = useStore(player.state).castingTo;
+  useStore(player.state);
+  useStore(handedTo);
+  // a speaker or TV it's cast to, or another device it was handed to
+  const where = playingOn();
   const [volume, setVolumeOpen] = useState(false);
   // the strip's volume, open in place of its controls: closed by a press outside both
   const stripEnd = useRef<HTMLDivElement>(null);
@@ -284,11 +288,11 @@ export const MiniPlayer: FC<{ onClose: () => void; onOpenMusic: () => void; onTo
 
       {devices && (
         <div className="mm-menu" style={{ left: devices.at[0], top: devices.at[1], maxHeight: h - devices.at[1] - 4, overflowY: "auto" }}>
-          <div onClick={() => { setDevices(null); chooseCast(null); }}>{castingTo ? "" : "✓ "}{thisDevice()}</div>
+          <div onClick={() => { setDevices(null); chooseCast(null); }}>{where ? "" : "✓ "}{thisDevice()}</div>
           {!devices.list && <div className="mm-menu-note">Looking for speakers and TVs…</div>}
           {devices.list?.ok && devices.list.data.map((d) => (
             <div key={d.id} onClick={() => { setDevices(null); chooseCast(d); }}>
-              {castingTo?.name === d.name ? "✓ " : ""}{d.name}
+              {where === d.name ? "✓ " : ""}{d.name}
             </div>
           ))}
           {devices.list?.ok && !devices.list.data.length && <div className="mm-menu-note">No speakers or TVs found</div>}

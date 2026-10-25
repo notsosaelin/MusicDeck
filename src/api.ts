@@ -67,6 +67,8 @@ export interface Session {
   index: number;
   position: number;
   from_device?: string | null;
+  /** playing when it was saved (another device offers to continue it) */
+  playing?: boolean;
 }
 
 /** device: a player, phone or stick plugged in, in Local files' Devices tab (services/shelf.py) */
@@ -452,6 +454,35 @@ export const organizeUndo = callable<[id: string], Result<{ moved: number; faile
 export const libraryHome = callable<[], Result<Section[]>>("library_home");
 export const libraryTab = callable<[tabId: string], Result<Section[]>>("library_tab");
 export const checkUpdate = callable<[], Result<Update | null>>("check_update");
+
+/** The user's other devices running MusicDeck (peers.py). */
+export interface Devices {
+  me: { id: string; name: string };
+  paired: { id: string; name: string; online: boolean }[];
+  /** nearby, not paired yet */
+  nearby: { id: string; name: string }[];
+  /** Windows: "blocked" while its firewall keeps the others from reaching this PC */
+  firewall: "" | "ok" | "blocked";
+}
+/** What another device was playing, to continue here. */
+export interface OtherSession {
+  peer: string;
+  name: string;
+  track: Track;
+  /** where the track plays from here: the same service, or streamed from that device ("peer~...") */
+  instanceId: string;
+  playing: boolean;
+  position: number;
+  saved_at: number;
+}
+export const devices = callable<[], Result<Devices>>("my_devices");
+export const pairDevice = callable<[peerId: string], Result<{ code: string; name: string }>>("pair_device");
+export const answerPairing = callable<[requestId: string, accept: boolean], boolean>("answer_pairing");
+export const unpairDevice = callable<[peerId: string], void>("unpair_device");
+export const allowFirewall = callable<[], boolean>("allow_firewall");
+export const otherSessions = callable<[], Result<OtherSession[]>>("other_sessions");
+export const takeOver = callable<[peerId: string], Result<Session>>("take_over");
+export const sendToDevice = callable<[peerId: string, session: Session], Result<boolean>>("send_to_device");
 export const listeningStats = callable<[period: ListeningStats["period"]], Result<ListeningStats>>("listening_stats");
 export const getRadio = callable<[id: string, track: Track], Result<Track[]>>("radio");
 export const getUserPlaylists = callable<[id: string], Result<Collection[]>>("user_playlists");
@@ -675,7 +706,8 @@ export interface CastDevice {
   id: string;
   name: string;
   model: string;
-  kind: "chromecast" | "upnp" | "roku";
+  /** musicdeck: another of the user's devices (peers.py): playing there hands the music over */
+  kind: "chromecast" | "upnp" | "roku" | "musicdeck";
 }
 
 export interface CastSession {

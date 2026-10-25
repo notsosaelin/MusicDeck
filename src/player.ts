@@ -482,7 +482,7 @@ export class Player {
   }
 
   /** Put a saved queue back without starting playback, ready to resume where it left off. */
-  restore(session: Session) {
+  restore(session: Session, play = false) {
     if (!session.queue?.length || this.state.get().queue.length) return;
     const index = Math.min(Math.max(session.index, 0), session.queue.length - 1);
     this.state.update({ queue: session.queue, index });
@@ -495,7 +495,14 @@ export class Player {
     this.prefetched = false;
     const position = item.track.live ? 0 : session.position || 0;
     this.position.set({ current: position, duration: item.track.duration || 0 });
-    void this.prepare(index, false, position);
+    void this.prepare(index, play, position);
+  }
+
+  /** Another of the user's devices' queue (handed over: devices.tsx), playing on from where it was there. */
+  takeOver(session: Session) {
+    if (!session.queue?.length) return;
+    this.clear();
+    this.restore(session, true);
   }
 
   /** Patch a track everywhere it appears in the queue (e.g. after starring it). */
@@ -1195,7 +1202,8 @@ export class Player {
   private persistSession() {
     const { queue, index } = this.state.get();
     if (!queue.length || this.destroyed) return;
-    saveSession({ queue, index, position: this.heldAt }).catch(() => {});
+    // playing or not: another device offers to continue what's playing here (peers.py)
+    saveSession({ queue, index, position: this.heldAt, playing: this.state.get().playing }).catch(() => {});
   }
 
   /** Append tracks similar to the current one. `advance` moves on to the first of them. */

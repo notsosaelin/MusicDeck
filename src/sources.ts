@@ -40,7 +40,9 @@ export function followState(): () => void {
     const sources = new Set(state.services.map((s) => s.id));
     const switched = live !== undefined && state.active_service !== live;
     live = state.active_service;
-    if (switched || player.state.get().queue.some((q) => !sources.has(q.instanceId))) player.clear();
+    // another device's songs ("peer~...", handed over) aren't a source here, and stay
+    const gone = (id: string) => !sources.has(id) && !id.startsWith("peer~");
+    if (switched || player.state.get().queue.some((q) => gone(q.instanceId))) player.clear();
     if (switched) invalidateBrowserCache();
     player.setPlayback(state.playback);
     const now = `${state.eq_per_output}:${state.output?.id ?? ""}`;

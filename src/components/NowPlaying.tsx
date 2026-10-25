@@ -19,7 +19,7 @@ import { MdRepeatOne } from "react-icons/md";
 import { OnAir, onAir, setSetting } from "../api";
 import { QueueItem, hasFeature, player } from "../player";
 import { showPlaylistPicker, showTrackMenu, toggleStar } from "./TrackMenu";
-import { canCast, prepareCastMenu, showCastMenu } from "./CastMenu";
+import { canCast, handedTo, playingOn, prepareCastMenu, showCastMenu } from "./CastMenu";
 import { useStore } from "../store";
 import { ACCENT, Art, ButtonRow, IconButton, RowText, formatTime, scrollPanelToTop } from "./common";
 
@@ -105,6 +105,7 @@ const PLAY = { fontSize: 18 };
 /** The Now Playing tab: the cover and title, seek bar, transport and volume (lyrics follow it). */
 export const NowPlaying: FC<{ cover?: number }> = ({ cover = 76 }) => {
   const state = useStore(player.state);
+  useStore(handedTo);
   const item = state.queue[state.index];
   const song = useOnAir(item, state.playing);
   const volumeIcon = state.volume === 0 ? <FaVolumeMute /> : state.volume < 0.5 ? <FaVolumeDown /> : <FaVolumeUp />;
@@ -136,7 +137,7 @@ export const NowPlaying: FC<{ cover?: number }> = ({ cover = 76 }) => {
             <RowText
               size="large"
               scroll="always"
-              {...cardText(item, song, state.castingTo?.name ?? null)}
+              {...cardText(item, song, playingOn())}
               badge={item?.track.starred && <FaHeart style={{ color: ACCENT, fontSize: 12, flexShrink: 0 }} />}
             />
           </div>
@@ -220,6 +221,7 @@ export const NowPlaying: FC<{ cover?: number }> = ({ cover = 76 }) => {
  */
 const RadioButtons: FC = () => {
   const state = useStore(player.state);
+  useStore(handedTo);
   const item = state.queue[state.index];
   const at = player.playOrder.indexOf(state.index);
   if (!item) return null;
@@ -281,10 +283,11 @@ const MiniProgress: FC = () => {
  */
 export const MiniPlayer: FC<{ onOpen: () => void }> = ({ onOpen }) => {
   const state = useStore(player.state);
+  useStore(handedTo);
   const item = state.queue[state.index];
   const song = useOnAir(item, state.playing);
   if (!item) return null;
-  const { title, subtitle } = cardText(item, song, state.castingTo?.name ?? null);
+  const { title, subtitle } = cardText(item, song, playingOn());
   return (
     <PanelSection>
       <PanelSectionRow>

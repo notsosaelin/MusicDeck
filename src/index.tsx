@@ -8,6 +8,7 @@ import { showTrackMenu } from "./components/TrackMenu";
 import { lookupOpener } from "./components/TagEditor";
 import { notify, releaseToastHooks } from "./notify";
 import { watchForUpdates } from "./update";
+import { watchDevices } from "./devices";
 import { followState, switchSource } from "./sources";
 import {
   PLAYER_ROUTE,
@@ -70,6 +71,8 @@ export default definePlugin(() => {
   const unwatchLibraryEntry = watchLibraryEntry();
   // a new version on GitHub: told once, installed from Settings
   const unwatchUpdates = watchForUpdates();
+  // the user's other devices: pairing prompts, and one taking over the music
+  const unwatchDevices = watchDevices();
   // desktop Steam: the Music tab, the mini player and media keys (src/desktop)
   const stopDesktop = startDesktop();
   // a source's own news (local files: what new albums got): a toast, and lists that show it again
@@ -141,6 +144,7 @@ export default definePlugin(() => {
       unwatchCast();
       unwatchLibraryEntry();
       unwatchUpdates();
+      unwatchDevices();
       stopDesktop();
       removeEventListener("source_note", sourceNote);
       setSleepTimer(null);

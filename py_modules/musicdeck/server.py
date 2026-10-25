@@ -27,7 +27,7 @@ import secrets
 import socket
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.parse import quote, urljoin, urlparse
 
 import aiohttp
@@ -115,7 +115,7 @@ class StreamServer:
             requote_redirect_url=False)
         app = web.Application()
         app.router.add_get("/stream/{instance}/{id:.+}", self._handle_stream)
-        app.router.add_get("/art/{instance}/{id:.+}", self._handler(lambda s, i: s.art(i)))
+        app.router.add_get("/art/{instance}/{id:.+}", self._handle_art)
         app.router.add_get("/fetch", self._handle_fetch)
         app.router.add_post("/import/{instance}", self._handle_import)
         self.runner = web.AppRunner(app, access_log=None)
@@ -334,6 +334,23 @@ class StreamServer:
         service.rescan()
         return web.json_response({"ok": True, "name": name}, headers=cors)
 
+    async def for_peer(self, request: web.Request, kind: str, instance: str, item_id: str) -> web.StreamResponse:
+        """A song or picture for a paired device (peers.py checked who asks): as for the player here, but never an
+        HLS stream (its pieces are fetched through this machine's own address)."""
+        if kind == "art":
+            return await self._art(request, instance, item_id)
+        try:
+            source = await self.resolve_stream(instance, item_id)
+        except (ServiceError, NotImplementedError) as e:
+            raise web.HTTPNotFound(text=str(e))
+        if source.path:
+            return self._file(source)
+        if source.reader is not None:
+            return await self._read(request, source.reader)
+        if source.hls or source.playlist is not None or not source.url:
+            raise web.HTTPNotFound(text="Streamed in pieces: play it there")
+        return await self._proxy(request, source)
+
     async def _handle_stream(self, request: web.Request) -> web.StreamResponse:
         self._check_key(request)
         instance, track_id = request.match_info["instance"], request.match_info["id"]
@@ -365,29 +382,30 @@ class StreamServer:
             self.forget(instance, track_id)
         return response
 
-    def _handler(self, resolve: Callable[[MusicService, str], Awaitable[StreamSource]]):
-        async def handle(request: web.Request) -> web.StreamResponse:
-            self._check_key(request)
-            local = self.local_art(request.match_info["id"]) if self.local_art else None
-            if local:
-                return self._file(StreamSource(path=local))
-            kept = self.offline.picture(request.match_info["instance"], request.match_info["id"]) if self.offline else None
-            if kept:
-                return self._file(kept)
-            service = self.lookup(request.match_info["instance"])
-            if service is None:
-                raise web.HTTPNotFound(text="Unknown service")
-            try:
-                source = await resolve(service, request.match_info["id"])
-            except ServiceError as e:
-                raise web.HTTPNotFound(text=str(e), headers=CORS)
-            except NotImplementedError:
-                raise web.HTTPNotFound(headers=CORS)
-            if source.path:
-                return self._file(source)
-            assert source.url
-            return await self._proxy(request, source)
-        return handle
+    async def _handle_art(self, request: web.Request) -> web.StreamResponse:
+        self._check_key(request)
+        return await self._art(request, request.match_info["instance"], request.match_info["id"])
+
+    async def _art(self, request: web.Request, instance: str, art_id: str) -> web.StreamResponse:
+        local = self.local_art(art_id) if self.local_art else None
+        if local:
+            return self._file(StreamSource(path=local))
+        kept = self.offline.picture(instance, art_id) if self.offline else None
+        if kept:
+            return self._file(kept)
+        service = self.lookup(instance)
+        if service is None:
+            raise web.HTTPNotFound(text="Unknown service")
+        try:
+            source = await service.art(art_id)
+        except ServiceError as e:
+            raise web.HTTPNotFound(text=str(e), headers=CORS)
+        except NotImplementedError:
+            raise web.HTTPNotFound(headers=CORS)
+        if source.path:
+            return self._file(source)
+        assert source.url
+        return await self._proxy(request, source)
 
     async def _handle_fetch(self, request: web.Request) -> web.StreamResponse:
         """Proxies an HLS playlist or segment referenced from a rewritten playlist."""

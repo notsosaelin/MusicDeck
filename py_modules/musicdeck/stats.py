@@ -4,7 +4,7 @@ ListenBrainz) is a line in plays.jsonl, and the stats page sums them for a time:
 albums and songs, when in the day and week you listen, the days in a row.
 
 A line: {"t" (seconds since 1970), "src" (the source's id), "id", "title", "artist", "album", "album_id",
-"artist_id", "art", "dur" (seconds)}. The log keeps the last MAX_LINES listens (years of them): when it grows
+"artist_id", "art", "dur" (seconds)}, and "dev" for a listen on another of the user's devices (peers.py). The log keeps the last MAX_LINES listens (years of them): when it grows
 past that, the oldest go.
 """
 import json
@@ -25,12 +25,14 @@ class PlayLog:
         # the log's length, counted from the file the first time a listen is added
         self.lines: Optional[int] = None
 
-    def add(self, source_id: str, track: dict[str, Any], when: Optional[float] = None) -> None:
+    def add(self, source_id: str, track: dict[str, Any], when: Optional[float] = None, device: str = "") -> None:
         entry = {"t": int(when or time.time()), "src": source_id, "id": str(track.get("id") or ""),
                  "title": str(track.get("title") or "")[:300], "artist": str(track.get("artist") or "")[:300],
                  "album": str(track.get("album") or "")[:300], "album_id": track.get("album_id") or "",
                  "artist_id": track.get("artist_id") or "", "art": track.get("art") or "",
-                 "dur": round(float(track.get("duration") or 0))}
+                 "dur": round(float(track.get("duration") or track.get("dur") or 0))}
+        if device:
+            entry["dev"] = device
         if self.lines is None:
             try:
                 with open(self.path, "rb") as f:

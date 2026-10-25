@@ -7,7 +7,7 @@
 import { Menu, MenuItem, showContextMenu } from "@decky/ui";
 import { FC, useEffect, useRef, useState } from "react";
 import { FaBroadcastTower, FaCompress, FaEllipsisH, FaExpand, FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaVolumeDown, FaVolumeMute, FaVolumeUp, FaWindowRestore } from "react-icons/fa";
-import { canCast, prepareCastMenu, showCastMenu } from "../components/CastMenu";
+import { canCast, handedTo, playingOn, prepareCastMenu, showCastMenu } from "../components/CastMenu";
 import { Lyrics, getLyrics, setSetting } from "../api";
 import { SHUFFLE_MODES, SHUFFLE_NOTES, updatePlayback } from "../components/Settings";
 import { saveQueue } from "../components/TrackMenu";
@@ -81,6 +81,7 @@ const showMore = (target: EventTarget) =>
 
 export const PlayerBar: FC = () => {
   const state = useStore(player.state);
+  useStore(handedTo);
   const view = useStore(panel);
   const item = player.current;
   const t = item?.track;
@@ -137,8 +138,8 @@ export const PlayerBar: FC = () => {
         {castable && (
           <button
             className="md-ctl"
-            data-on={state.castingTo ? "" : undefined}
-            title={state.castingTo ? `Playing on ${state.castingTo.name}` : "Play on a speaker or TV"}
+            data-on={playingOn() ? "" : undefined}
+            title={playingOn() ? `Playing on ${playingOn()}` : "Play on a speaker or TV"}
             aria-label="Play on"
             onMouseEnter={() => prepareCastMenu()}
             onClick={(e) => showCastMenu(e.currentTarget)}

@@ -31,6 +31,7 @@ How MusicDeck protects the accounts and data it handles, what an audit of every 
 | --- | --- |
 | Stream server (`/stream`, `/art`, `/fetch`) | Bound to 127.0.0.1 on a random port; every request needs the per-session key (constant-time compare). Credentials for upstream requests are added as headers here, never put in URLs the UI sees. |
 | Casting site (while casting only) | Bound to the address on the home network that reaches the device, on a random port; answers only the device's own address; each track gets a fresh random link (four kept); its HLS relay only fetches hosts that track's own playlists named. Closed when casting stops. The Deck-only routes and key aren't on it. |
+| Your devices (`peers.py`, port 41378 TCP, 41377 UDP) | Answers home-network addresses only. Pairing requests only while the user has Your devices open (2 minutes), one prompt per address per 10 s, and only accepted by the person (X25519 and a six-digit code on both screens: a passive listener learns nothing, a device in the middle makes the codes differ). After pairing, every request is HMAC-SHA256 signed with the pair's key over method, path, time, nonce and body, refused outside 5 minutes or when seen before; song and picture links are signed per item and expire in 6 hours, and a device never relays another device's songs. Handed-over queues are reshaped like saved sessions. On Windows the firewall rule MusicDeck asks for allows its two ports from the local subnet only. |
 | Cast and UPnP devices | Devices are found on the local network and are untrusted: replies are size-limited, XML with entity declarations is refused, UPnP descriptions must live on the device that answered, Cast messages over 1 MB end the connection. Spotify is never cast (it would mean handing decrypted audio to another device). |
 | Spotify helper's audio server | Bound to 127.0.0.1; every request needs a per-start key, sent as the `X-MusicDeck-Key` header (fixed in this audit; before, any local program could play through the account). |
 | Sign-in listeners (Qobuz, Spotify) | Bound to 127.0.0.1, only while a sign-in is open, closed after it. Spotify checks a random `state` and uses PKCE. Pages they answer with echo nothing from the request. |
@@ -75,6 +76,9 @@ How MusicDeck protects the accounts and data it handles, what an audit of every 
   the Cast connection is encrypted but not authenticated (as for every Cast sender); UPnP control and
   the casting site are plain HTTP, as the protocols are. Someone on the same network could see what's
   playing and, from the device's address, fetch the current track while casting lasts.
+- **Your devices talk in plain HTTP** on the home network (signed, not encrypted: Decky's Python has no fast
+  cipher). Someone on the same network could see which songs pass between them and what's in a listening
+  history being synced, but not change anything or ask for anything.
 - **Plex servers' plain-HTTP local addresses** are tried with the server token, as Plex's own apps
   do on a home network.
 

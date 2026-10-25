@@ -1,4 +1,4 @@
-import { Focusable, TextField } from "@decky/ui";
+import { Focusable, Menu, MenuItem, TextField, showContextMenu } from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import {
   FaCalendarAlt,
@@ -54,7 +54,8 @@ import {
   openCollection,
   searchHistory,
 } from "../../api";
-import { bySource, librarySources, splitPage, useLibrarySearch } from "../../library";
+import { LIBRARY_SORTS, LibrarySort, bySource, filterLibrary, librarySources, sourcesIn, splitPage, useLibrarySearch } from "../../library";
+import { continueFrom, useOtherSessions } from "../../devices";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
 import { View, centerTab, playFrom, resultCache, setOpenInCenter } from "../../nav";
 import { notify } from "../../notify";
@@ -511,19 +512,83 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }
     () => (ours === "home" ? libraryHome() : ours ? libraryTab(ours) : getCenterTab(instanceId, tab)),
     true,
   );
+  const services = useStore(pluginState)?.services ?? [];
+  const [only, setOnly] = useState("");
+  const [sort, setSort] = useState<LibrarySort>("title");
   if (!result?.ok) return <Loading result={result} />;
-  const sections = result.data.filter((s) => s.items.length || s.tracks?.length);
+  // the one library's Your music: one source's or every one's, in the order chosen
+  const merged = !!ours && ours !== "home";
+  const sources = merged ? sourcesIn(result.data, services) : [];
+  // a merged page's one grid is named as the page is ("Albums", its count beside it)
+  const named = pluginState.get()?.library_tabs.find((t) => t.id === ours)?.title ?? "";
+  const sections = (merged ? filterLibrary(result.data, only, sort, services).map((s) => ({ ...s, title: s.title || named })) : result.data).filter(
+    (s) => s.items.length || s.tracks?.length,
+  );
+  const home = ours === "home" ? <ContinueShelf /> : merged && sources.length > 0 && (
+    <Focusable flow-children="row" style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+      {sources.length > 1 && (
+        <PageButton
+          label="Source"
+          onClick={() =>
+            showContextMenu(
+              <Menu label="Source">
+                {[{ id: "", name: "All sources" }, ...sources].map((x) => (
+                  <MenuItem key={x.id} onSelected={() => setOnly(x.id)}>
+                    {only === x.id ? "✓ " : ""}
+                    {x.name}
+                  </MenuItem>
+                ))}
+              </Menu>,
+            )
+          }
+        >
+          {sources.find((x) => x.id === only)?.name ?? "All sources"}
+        </PageButton>
+      )}
+      <PageButton
+        label="Sort"
+        onClick={() =>
+          showContextMenu(
+            <Menu label="Sort by">
+              {LIBRARY_SORTS.map(([v, name]) => (
+                <MenuItem key={v} onSelected={() => setSort(v)}>
+                  {sort === v ? "✓ " : ""}
+                  {name}
+                </MenuItem>
+              ))}
+            </Menu>,
+          )
+        }
+      >
+        {LIBRARY_SORTS.find(([v]) => v === sort)?.[1]}
+      </PageButton>
+    </Focusable>
+  );
   const notes = result.data.filter((s) => s.notice);
   if (!sections.length)
-    return notes.length ? <Notice>{notes.map((s) => s.notice).join(" ")}</Notice> : null;
+    return notes.length ? <Notice>{notes.map((s) => s.notice).join(" ")}</Notice> : home || null;
   // a tab of several groups of rows names each group
   const headed = sections.filter((s) => s.display === "rows").length > 1;
   return (
     <>
+      {home}
       {sections.map((s) => (
         <SectionView key={s.title} instanceId={instanceId} stack={stack} section={s} headed={headed} />
       ))}
     </>
+  );
+};
+
+/** What the user's other devices were playing: a card each, played here from where it was (the other stops). */
+const ContinueShelf: FC = () => {
+  const sessions = useOtherSessions();
+  if (!sessions.length) return null;
+  return (
+    <Shelf title="Continue listening">
+      {sessions.map((s) => (
+        <TrackCard key={s.peer} instanceId={s.instanceId} track={{ ...s.track, artist: s.name }} onPlay={() => continueFrom(s)} />
+      ))}
+    </Shelf>
   );
 };
 
