@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.36.1
+
+- **The mini player takes over when Steam's window goes**: minimized, or closed to the tray (Steam and the music
+  still running), the mini player opens at once; music started from the tray or media keys while the window's
+  away opens it too. Back in the window on Music, it gives way again (unless you opened it yourself).
+- Windows: the log no longer fills with harmless "connection reset" errors from looking for speakers and the router.
+
 ## 0.36.0
 
 What iTunes, MusicBee, foobar2000 and Winamp have that MusicDeck didn't:

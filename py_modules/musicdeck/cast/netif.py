@@ -34,6 +34,16 @@ def local_addresses() -> list[str]:
     return sorted(usable)
 
 
+def quiet_resets(sock: socket.socket) -> None:
+    """Windows reports a query that bounced off a closed port (ICMP "unreachable") as the UDP socket's connection
+    being reset, which asyncio then logs as an error: harmless, and turned off here (SIO_UDP_CONNRESET)."""
+    if hasattr(sock, "ioctl"):
+        try:
+            sock.ioctl(getattr(socket, "SIO_UDP_CONNRESET", 0x9800000C), False)
+        except (OSError, ValueError):
+            pass
+
+
 async def send_everywhere(protocol: Callable[[], asyncio.DatagramProtocol], payload: bytes, target: tuple[str, int],
                           times: int, seconds: float, ttl: int) -> asyncio.DatagramProtocol:
     """Sends `payload` to `target` `times` times over `seconds`, from the default socket and from every
@@ -43,6 +53,7 @@ async def send_everywhere(protocol: Callable[[], asyncio.DatagramProtocol], payl
     transports = []
     for local in ["0.0.0.0", *local_addresses()]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        quiet_resets(sock)
         try:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
             if local != "0.0.0.0":

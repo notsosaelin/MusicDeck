@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
+from .cast import netif
 from .cast.upnp import SSDP, UpnpError, _local, _Searcher, _xml, read_all
 
 IGD = "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
@@ -25,6 +26,7 @@ MAX_DESCRIPTION = 256 * 1024
 async def _search(seconds: float = 2.0) -> dict[str, str]:
     loop = asyncio.get_running_loop()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    netif.quiet_resets(sock)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     sock.bind(("0.0.0.0", 0))
     transport, searcher = await loop.create_datagram_endpoint(_Searcher, sock=sock)

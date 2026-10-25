@@ -385,6 +385,8 @@ class Desktop {
   private unsubscribe = player.state.subscribe(() => this.followPlayer());
   /** the mini player was closed by hand: it stays closed until Music is left again */
   private miniDismissed = false;
+  /** Steam's window minimized, or closed to the tray (Steam still running, the music too) */
+  private away = false;
 
   constructor() {
     desktopActions.toggleMini = () => this.toggleMini();
@@ -397,8 +399,10 @@ class Desktop {
     return player.state.get().index >= 0 && player.state.get().playing;
   }
 
-  /** The tab put in (again) whenever the main window shows its navigation without it. */
+  /** The tab put in (again) whenever the main window shows its navigation without it; and whether the window is
+   *  away (minimized, or closed to the tray), which hands the music to the mini player. */
   private check() {
+    void this.checkAway();
     if (this.music?.connected) return;
     this.music?.remove();
     this.music = null;
@@ -409,6 +413,30 @@ class Desktop {
       this.music = new MusicTab(win, nav, () => this.left(), () => this.shown());
     } catch (e) {
       console.warn("[MusicDeck] Couldn't add the Music tab", e);
+    }
+  }
+
+  /** A window closed to the tray stays, with no size (0 x 0); a minimized one says so. A window only covered by
+   *  others keeps its size: that's not away (it's still on the screen, behind). */
+  private async checkAway() {
+    const win = mainWindow();
+    let away = !win || win.outerWidth === 0 || win.outerHeight === 0;
+    // on Linux a covered window isn't "hidden" to the page (on Windows it is): there, hidden means closed or minimized
+    if (!away && /linux/i.test(navigator.platform) && win?.document.visibilityState === "hidden") away = true;
+    if (!away) {
+      try {
+        away = !!(await (win as any).SteamClient?.Window?.IsWindowMinimized?.());
+      } catch {}
+    }
+    if (away === this.away) return;
+    this.away = away;
+    if (away) {
+      // the window went while music plays: the mini player takes over at once
+      this.miniDismissed = false;
+      if (this.playing && !this.mini.isOpen) this.mini.open(this.music?.win.document ?? mainWindow()?.document ?? null);
+    } else if (this.music?.active && !this.miniByHand) {
+      // back to the window, showing Music: the mini player gives way, as when Music is opened
+      this.mini.close();
     }
   }
 
@@ -445,8 +473,9 @@ class Desktop {
     if (player.state.get().index < 0 && !this.miniByHand) {
       this.mini.close();
       this.miniDismissed = false;
-    } else if (this.playing && !this.miniDismissed && !this.mini.isOpen && !this.music?.active) {
-      // playback started from elsewhere (the Quick Access Menu, media keys) while Music isn't showing
+    } else if (this.playing && !this.miniDismissed && !this.mini.isOpen && (!this.music?.active || this.away)) {
+      // playback started from elsewhere (the Quick Access Menu, media keys, the tray) while Music isn't showing, or
+      // while Steam's window is minimized or closed
       this.mini.open(this.music?.win.document ?? mainWindow()?.document ?? null);
     }
   }
