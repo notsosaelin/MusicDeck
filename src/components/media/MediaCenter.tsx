@@ -914,8 +914,8 @@ const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }>
         tab === BROWSE.id && sections.length !== 1 ? (
           <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
         ) : (
-          // Browse with one section is that section
-          <TabPage instanceId={instanceId} tab={tab === BROWSE.id ? sections[0].id : tab} stack={stack} />
+          // Browse with one section is that section; Home is the one library's, every source's
+          <TabPage instanceId={instanceId} tab={tab === BROWSE.id ? sections[0].id : tab === "home" ? "library:home" : tab} stack={stack} />
         )
       ) : view.type === "section" ? (
         <TabPage key={view.tab} instanceId={instanceId} tab={view.tab} stack={stack} />
@@ -933,7 +933,8 @@ const Browse: FC<{ instanceId: string; tab: string; sections: CenterTabInfo[] }>
       ) : (
         <CollectionPage
           key={view.collection.kind + view.collection.id}
-          instanceId={instanceId}
+          // one from the one library's lists is its own source's
+          instanceId={view.collection.source ?? instanceId}
           stack={stack}
           collection={view.collection}
         />
@@ -948,9 +949,17 @@ const BROWSE: CenterTabInfo = { id: "browse", title: "Browse" };
 const SEARCH: CenterTabInfo = { id: "search", title: "Search" };
 const SETTINGS: CenterTabInfo = { id: "settings", title: "Settings" };
 
-/** A source's own sections past its Home (albums, genres, charts... see MusicService.center_tabs): in Browse. */
-const browseSections = (source: ServiceInfo | undefined): CenterTabInfo[] =>
-  (source?.tabs ?? []).filter((t) => ![PLAYING.id, "home", SEARCH.id, SETTINGS.id].includes(t.id));
+/** The one library's tabs a source's own go into (py_modules/musicdeck/library.py's MERGED). */
+const MERGED_TABS = ["playlists", "musicdeck-playlists", "albums", "soundtracks", "artists", "composers", "songs", "liked"];
+
+/** Browse: the one library's Your music (every source's playlists, albums, artists, songs: "library:..."), then the
+ *  source's own sections past its Home (genres, charts... see MusicService.center_tabs). */
+const browseSections = (source: ServiceInfo | undefined): CenterTabInfo[] => [
+  ...(pluginState.get()?.library_tabs ?? []).map((t): CenterTabInfo => ({ id: `library:${t.id}`, title: t.title, group: "yours" })),
+  ...(source?.tabs ?? []).filter(
+    (t) => ![PLAYING.id, "home", SEARCH.id, SETTINGS.id].includes(t.id) && !((t.group ?? "yours") === "yours" && MERGED_TABS.includes(t.id)),
+  ),
+];
 
 /**
  * Always the same five, whatever the source: Now Playing, its Home, Browse (its other sections), Search,

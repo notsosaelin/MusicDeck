@@ -190,7 +190,7 @@ export const ToolsPage: FC<{ id: string }> = ({ id }) => {
           >
             <div className="tl-covers">
               {r.no_art.slice(0, 24).map((a) => (
-                <div key={a.id} className="tl-cover" onClick={() => go({ type: "collection", collection: a })} title={`${a.title} · ${a.subtitle}`}>
+                <div key={a.id} className="tl-cover" onClick={() => go({ type: "collection", collection: a, source: id })} title={`${a.title} · ${a.subtitle}`}>
                   <ArtOrIcon url="" />
                   <span>{a.title}</span>
                 </div>

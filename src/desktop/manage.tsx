@@ -360,11 +360,14 @@ export async function dropOnDevice(d: Dragged, deviceId: string, name: string) {
 const MUSIC_FILE = /\.(mp3|flac|ogg|opus|m4a|aac|wav|aiff?|wma|alac|ape|wv|mpc|m3u8?|pls)$/i;
 
 /** Files dragged in from the desktop: into Local files (its Imported folder), through the stream server. */
+/** Local files, where music dropped on Music goes (whatever source is live). */
+const localSource = () => pluginState.get()?.services.find((s) => s.type === "local")?.id ?? "";
+
 export async function importFiles(instanceId: string, files: File[]) {
   const state = pluginState.get();
   const source = state?.services.find((s) => s.id === instanceId);
   if (!state || source?.type !== "local") {
-    notify("MusicDeck", "Choose Local files first: dropped music goes into your own library");
+    notify("MusicDeck", "Dropped music goes into Local files: add it as a source first");
     return;
   }
   const music = files.filter((f) => MUSIC_FILE.test(f.name));
@@ -438,7 +441,7 @@ export function catchDrops(win: Window, host: HTMLElement, active: () => boolean
     const target = what === "music" ? targetOf(e) : null;
     mark(null);
     fileDrag.set({ over: false });
-    if (what === "files") importFiles(pluginState.get()?.active_service ?? "", [...(e.dataTransfer?.files ?? [])]);
+    if (what === "files") importFiles(localSource(), [...(e.dataTransfer?.files ?? [])]);
     else if (target) {
       const d = dragData(e);
       if (d) dropTargets.get(target)?.(d);
@@ -466,7 +469,7 @@ export function pickFiles(doc: Document) {
   input.accept = "audio/*,.flac,.m4a,.opus,.ogg,.wv,.ape,.m3u,.m3u8,.pls";
   input.style.display = "none";
   input.addEventListener("change", () => {
-    importFiles(pluginState.get()?.active_service ?? "", [...(input.files ?? [])]);
+    importFiles(localSource(), [...(input.files ?? [])]);
     input.remove();
   });
   doc.body.appendChild(input);

@@ -89,13 +89,13 @@ export const PlayerBar: FC = () => {
   const toAlbum = t?.album_id
     ? () => {
         toggleFull(false);
-        go({ type: "collection", collection: { id: t.album_id!, kind: "album", title: t.album, subtitle: t.artist, art: t.art } });
+        go({ type: "collection", collection: { id: t.album_id!, kind: "album", title: t.album, subtitle: t.artist, art: t.art }, source: item!.instanceId });
       }
     : undefined;
   const toArtist = t?.artist_id
     ? () => {
         toggleFull(false);
-        go({ type: "collection", collection: { id: t.artist_id!, kind: "artist", title: t.artist, subtitle: "", art: null } });
+        go({ type: "collection", collection: { id: t.artist_id!, kind: "artist", title: t.artist, subtitle: "", art: null }, source: item!.instanceId });
       }
     : undefined;
   const castable = canCast(item?.instanceId ?? pluginState.get()?.active_service ?? "");

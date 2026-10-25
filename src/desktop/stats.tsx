@@ -1,6 +1,6 @@
 /**
  * Your listening (stats.py's play log, every source's): for the last week, month or year, or all time. The
- * totals as tiles, top artists and albums as cards (those from the live source open), top songs as a list, and
+ * totals as tiles, top artists and albums as cards (each opens in its source), top songs as a list, and
  * when you listen: by hour of the day and day of the week, as plain bar charts (one series, one blue; each bar
  * says its number under the mouse).
  */
@@ -63,13 +63,16 @@ const Bars: FC<{ values: number[]; labels: string[]; every: number; title: strin
 
 const Card: FC<{ item: StatsItem; kind: "artist" | "album"; live: string }> = ({ item, kind, live }) => {
   const art = (item.art && item.src && mediaUrl("art", item.src, item.art)) || "";
-  const opens = item.src === live && !!item.id;
+  // one from any source still set up opens, in its source (the live one's when it didn't say)
+  const services = useStore(pluginState)?.services ?? [];
+  const from = item.src || live;
+  const opens = !!item.id && services.some((s) => s.id === from);
   return (
     <div
       className="md-card st-card"
       data-opens={opens ? "" : undefined}
       onClick={() =>
-        opens && go({ type: "collection", collection: { id: item.id!, kind, title: item.name, subtitle: item.artist ?? "", art: item.art ?? null } })
+        opens && go({ type: "collection", collection: { id: item.id!, kind, title: item.name, subtitle: item.artist ?? "", art: item.art ?? null }, source: from })
       }
     >
       <div className="md-card-art" style={{ borderRadius: kind === "artist" ? "50%" : 4 }}>

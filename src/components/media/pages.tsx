@@ -1,5 +1,5 @@
 import { Focusable, TextField } from "@decky/ui";
-import { FC, ReactNode, useEffect, useRef, useState } from "react";
+import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import {
   FaCalendarAlt,
   FaChartLine,
@@ -49,10 +49,12 @@ import {
   getBrowseInfo,
   getCenterTab,
   isLocalPlaylist,
+  libraryHome,
+  libraryTab,
   openCollection,
-  search,
   searchHistory,
 } from "../../api";
+import { bySource, librarySources, splitPage, useLibrarySearch } from "../../library";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
 import { View, centerTab, playFrom, resultCache, setOpenInCenter } from "../../nav";
 import { notify } from "../../notify";
@@ -196,18 +198,20 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
   );
 };
 
-const collectionCard = (instanceId: string, stack: CenterStack, c: Collection) => (
-  <Card
-    key={c.kind + c.id}
-    instanceId={instanceId}
-    c={c}
-    onOpen={() => pushCenter(stack, { type: "collection", collection: c })}
-    onPlay={c.kind === "album" || c.kind === "playlist" ? () => playCollection(instanceId, c) : undefined}
-    onOptions={
-      hasCollectionMenu(instanceId, c) ? (e) => showCollectionMenu(instanceId, c, e?.currentTarget) : undefined
-    }
-  />
-);
+/** A card for an album, artist or playlist; one from the one library's lists is its own source's. */
+const collectionCard = (instanceId: string, stack: CenterStack, c: Collection) => {
+  const id = c.source ?? instanceId;
+  return (
+    <Card
+      key={`${c.source ?? ""}${c.kind}${c.id}`}
+      instanceId={id}
+      c={c}
+      onOpen={() => pushCenter(stack, { type: "collection", collection: c.source ? c : { ...c, source: id } })}
+      onPlay={c.kind === "album" || c.kind === "playlist" ? () => playCollection(id, c) : undefined}
+      onOptions={hasCollectionMenu(id, c) ? (e) => showCollectionMenu(id, c, e?.currentTarget) : undefined}
+    />
+  );
+};
 
 /**
  * One of the source's own tabs (MusicService.tab): its sections, each shown as it asks: shelves of
@@ -292,10 +296,10 @@ const MosaicPicture: FC<{ url?: string; onMissing: () => void }> = ({ url, onMis
 };
 
 /** A section's covers as one square picture: four in a 2 by 2, or one filling it when it has fewer. */
-const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) => {
+const Mosaic: FC<{ urls: string[] }> = ({ urls }) => {
   const [, setFailed] = useState<string[]>([]);
   // known missing ones left out from the start, so the square doesn't rearrange (art.ts)
-  const shown = art.filter((a) => !isMissingArt(mediaUrl("art", instanceId, a)));
+  const shown = urls.filter((a) => a && !isMissingArt(a));
   const four = shown.length >= 4 ? shown.slice(0, 4) : shown.slice(0, 1);
   if (!four.length) return null;
   return (
@@ -309,7 +313,7 @@ const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) 
       }}
     >
       {four.map((a) => (
-        <MosaicPicture key={a} url={mediaUrl("art", instanceId, a)} onMissing={() => setFailed((f) => [...f, a])} />
+        <MosaicPicture key={a} url={a} onMissing={() => setFailed((f) => [...f, a])} />
       ))}
     </div>
   );
@@ -321,6 +325,23 @@ const Mosaic: FC<{ instanceId: string; art: string[] }> = ({ instanceId, art }) 
  */
 const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }> = ({ instanceId, t, open }) => {
   const size = useCardSize();
+  // the one library's (every source's albums...): its covers and count from the tab itself, fetched for the tile (and
+  // so there at once when it's opened); a source's own come with Browse's info
+  const ours = t.id.startsWith("library:") ? t.id.slice(8) : null;
+  const tab = useResult<Section[]>(
+    ours ? `library:tab:${ours}` : "library:tab:none",
+    () => (ours ? libraryTab(ours) : Promise.resolve({ ok: true as const, data: [] })),
+    !!ours,
+  );
+  const merged = ours && tab?.ok ? tab.data[0] : undefined;
+  const count = merged ? merged.items.length || merged.tracks?.length || 0 : 0;
+  const subtitle = merged ? (count ? `${count.toLocaleString()} ${merged.items.length ? t.title.toLowerCase() : "songs"}` : "") : t.subtitle;
+  const urls = merged
+    ? [...merged.items.map((c) => c.art && mediaUrl("art", c.source ?? instanceId, c.art)),
+       ...(merged.tracks ?? []).map((x) => x.art && mediaUrl("art", x.source ?? instanceId, x.art))]
+        .filter((u): u is string => !!u)
+        .slice(0, 12)
+    : (t.art ?? []).map((a) => mediaUrl("art", instanceId, a) ?? "");
   return (
     <Focusable
       className="mc-card"
@@ -347,11 +368,11 @@ const LibraryTile: FC<{ instanceId: string; t: CenterTabInfo; open: () => void }
           color: "rgba(255, 255, 255, 0.45)",
         }}
       >
-        {t.art?.length ? <Mosaic instanceId={instanceId} art={t.art} /> : iconFor(t.id)}
+        {urls.length ? <Mosaic urls={urls} /> : iconFor(ours ?? t.id)}
       </div>
       <div style={{ marginTop: 10 }}>
         <div style={{ ...ONE_LINE, fontSize: 14, fontWeight: 600, color: "#ffffff" }}>{t.title}</div>
-        {t.subtitle && <div style={{ ...ONE_LINE, fontSize: 12, opacity: 0.6, marginTop: 2 }}>{t.subtitle}</div>}
+        {subtitle && <div style={{ ...ONE_LINE, fontSize: 12, opacity: 0.6, marginTop: 2 }}>{subtitle}</div>}
       </div>
     </Focusable>
   );
@@ -483,7 +504,13 @@ const BrowseRow: FC<{
 
 export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack }> = ({ instanceId, tab, stack }) => {
   useStore(runningGame); // cards get a menu (play with the game) while one runs
-  const result = useResult<Section[]>(`${instanceId}:tab:${tab}`, () => getCenterTab(instanceId, tab), true);
+  // the one library's Home and Your music ("library:..."), else the source's own tab
+  const ours = tab.startsWith("library:") ? tab.slice(8) : null;
+  const result = useResult<Section[]>(
+    ours ? `library:tab:${ours}` : `${instanceId}:tab:${tab}`,
+    () => (ours === "home" ? libraryHome() : ours ? libraryTab(ours) : getCenterTab(instanceId, tab)),
+    true,
+  );
   if (!result?.ok) return <Loading result={result} />;
   const sections = result.data.filter((s) => s.items.length || s.tracks?.length);
   const notes = result.data.filter((s) => s.notice);
@@ -506,6 +533,28 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
   section: s,
   headed,
 }) => {
+  // the one library's songs from several sources: a list for each, under its name (a list plays from one source)
+  const parts = bySource(s.tracks ?? [], instanceId);
+  if (parts.length > 1) {
+    const names = pluginState.get()?.services ?? [];
+    const name = (id: string) => names.find((x) => x.id === id)?.name ?? "";
+    return (
+      <>
+        {s.items.length > 0 && <SectionView instanceId={instanceId} stack={stack} section={{ ...s, tracks: [] }} headed={headed} />}
+        {parts.map((p) => (
+          <SectionView
+            key={p.source}
+            instanceId={p.source}
+            stack={stack}
+            section={{ ...s, title: [s.title, name(p.source)].filter(Boolean).join(" · "), items: [], tracks: p.list }}
+            headed={headed}
+          />
+        ))}
+      </>
+    );
+  }
+  if (parts.length === 1 && parts[0].source !== instanceId)
+    return <SectionView instanceId={parts[0].source} stack={stack} section={s} headed={headed} />;
   const tracks = s.tracks ?? [];
   const songs = tracks.length > 0 && (
     <div style={{ marginBottom: 28 }}>
@@ -1007,13 +1056,21 @@ export const SearchPage: FC<{ instanceId: string; stack: CenterStack; query: str
   );
 };
 
+/** Every source's results, each under its name as it answers (the live source's search history keeps the search). */
 const SearchResults: FC<{ instanceId: string; stack: CenterStack; query: string }> = ({ instanceId, stack, query }) => {
-  const result = useResult<Page>(`${instanceId}:search:${query}`, () => search(instanceId, query));
-  if (!result?.ok) return <Loading result={result} />;
+  const { page } = useLibrarySearch(query, instanceId);
+  const services = useStore(pluginState)?.services ?? [];
+  if (!page) return null;
+  const parts = splitPage(page, instanceId, librarySources(services).map((s) => s.id));
   return (
     // marked, so the controller lands on the first result rather than back in the search field
     <div className="mc-results">
-      <PageContent instanceId={instanceId} stack={stack} page={result.data} />
+      {parts.map((p) => (
+        <Fragment key={p.source}>
+          {parts.length > 1 && <GroupTitle>{services.find((s) => s.id === p.source)?.name ?? ""}</GroupTitle>}
+          <PageContent instanceId={p.source} stack={stack} page={p.page} />
+        </Fragment>
+      ))}
     </div>
   );
 };
@@ -1068,7 +1125,7 @@ export const QueueList: FC = () => {
       if (rows?.length) rows[Math.min(row, rows.length - 1)].focus();
     }, 50);
   };
-  if (!upcoming.length) return <Notice>Nothing after this track</Notice>;
+  if (!upcoming.length) return null;
   return (
     <>
       <Focusable

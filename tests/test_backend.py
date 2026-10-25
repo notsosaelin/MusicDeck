@@ -4205,6 +4205,107 @@ async def run():
         c.drop(lambda k: k in ("a", "d"))
         check("a" not in c and "d" not in c, "dropping what a change made stale")
 
+        print("updates")
+        from aiohttp import web as upweb
+        from musicdeck import updates as upmod
+        check(upmod.newer("v0.37.0", "0.36.2") and not upmod.newer("0.36.2", "0.36.2") and upmod.newer("0.36.10", "0.36.9")
+              and not upmod.newer("0.36.1", "0.36.2"), "versions compare as numbers, with or without a v")
+        check(upmod.zip_platform("windows-arm64") == "windows-x86_64" and upmod.zip_platform("linux-arm64") == "linux-arm64",
+              "Windows on Arm installs the x86_64 zip")
+        digest = "a" * 64
+        up_release = {"tag_name": "v99.0.0", "body": "What's new", "assets": [
+            {"name": "MusicDeck-99.0.0-linux-x86_64.zip", "browser_download_url": "http://x/linux.zip", "digest": f"sha256:{digest}"},
+            {"name": "MusicDeck-99.0.0-windows-x86_64.zip", "browser_download_url": "http://x/win.zip"},
+            {"name": "MusicDeck-99.0.0-windows-x86_64.zip.sha256", "browser_download_url": "SIDE"}]}
+        picked = upmod.pick(up_release, "linux-x86_64")
+        check(picked and picked["url"] == "http://x/linux.zip" and picked["sha256"] == digest and picked["version"] == "99.0.0",
+              "the release's zip for this platform, with GitHub's own SHA-256")
+        check(upmod.pick(up_release, "windows-x86_64").get("sha256_url") == "SIDE", "else the .sha256 file beside the zip")
+        check(upmod.pick(up_release, "macos-arm64") is None and upmod.pick({**up_release, "prerelease": True}, "linux-x86_64") is None,
+              "no zip for this platform, or a pre-release: no update")
+        up_state = {"release": up_release, "status": 200}
+
+        async def up_latest(request):
+            if up_state["status"] != 200:
+                return upweb.Response(status=up_state["status"])
+            release = json.loads(json.dumps(up_state["release"]))
+            base = f"http://{request.host}"
+            for a in release["assets"]:
+                if a["browser_download_url"] == "SIDE":
+                    a["browser_download_url"] = base + "/side"
+                a.pop("digest", None)
+            return upweb.json_response(release)
+
+        async def up_side(request):
+            return upweb.Response(text=f"{digest}  MusicDeck-99.0.0.zip\n")
+        up_app = upweb.Application()
+        up_app.router.add_get("/latest", up_latest)
+        up_app.router.add_get("/side", up_side)
+        up_runner = upweb.AppRunner(up_app)
+        await up_runner.setup()
+        up_site = upweb.TCPSite(up_runner, "127.0.0.1", 0)
+        await up_site.start()
+        upmod.LATEST = f"http://127.0.0.1:{up_site._server.sockets[0].getsockname()[1]}/latest"
+        real_platform = upmod.native.platform_id
+        upmod.native.platform_id = lambda: "windows-x86_64"
+        try:
+            found = await plugin.check_update()
+            state = await plugin.get_state()
+            check(found["ok"] and found["data"]["sha256"] == digest and state["update"]["version"] == "99.0.0",
+                  "a newer release is found, its hash read from the file beside it, and shown in the state")
+            up_state["release"] = {**up_release, "tag_name": "v0.0.1"}
+            found = await plugin.check_update()
+            check(found["ok"] and found["data"] is None and (await plugin.get_state())["update"] is None,
+                  "an older release isn't an update")
+            up_state["status"] = 404
+            check((await plugin.check_update())["data"] is None, "no release yet: nothing to update to")
+            up_state["status"] = 500
+            plugin.updates.checked = False
+            check(not (await plugin.check_update())["ok"], "GitHub not answering is said")
+        finally:
+            upmod.native.platform_id = real_platform
+            await up_runner.cleanup()
+
+        print("one library")
+        from musicdeck import library as libmod
+        tagged = libmod.tag([{"title": "S", "items": [{"id": "a", "kind": "album", "title": "A"}],
+                              "tracks": [{"id": "t", "title": "T"}]}], "src1")
+        check(tagged[0]["items"][0]["source"] == "src1" and tagged[0]["tracks"][0]["source"] == "src1"
+              and "source" not in tagged[0], "each collection and track says its source, not the section")
+        merged_tab = libmod.merge_tab("albums", [
+            ("one", [{"title": "", "items": [{"id": "1", "kind": "album", "title": "The Zebra"}, {"id": "2", "kind": "album", "title": "b"}]}]),
+            ("two", [{"title": "", "items": [{"id": "1", "kind": "album", "title": "Apple"}], "tracks": [{"id": "x", "title": "X"}]}]),
+            ("three", [{"title": "", "items": [], "notice": "Sign in"}])])
+        check([(c["source"], c["title"]) for c in merged_tab[0]["items"]] == [("two", "Apple"), ("one", "b"), ("one", "The Zebra")]
+              and merged_tab[0]["tracks"][0]["source"] == "two",
+              "every source's albums in one grid, by title (\"The\" aside); the same id from two sources kept apart")
+        home_merge = libmod.merge_home([{"id": "j", "kind": "album", "title": "J", "source": "one"}], [],
+                                       [("one", "One", [{"title": "Jump back in", "items": [{"id": "j", "kind": "album", "title": "J"}]},
+                                                        {"title": "New", "items": [{"id": f"n{i}", "kind": "album", "title": "N"} for i in range(3)]},
+                                                        {"title": "Empty", "items": []}])])
+        check([s["title"] for s in home_merge] == ["Jump back in", "New · One"] and home_merge[1]["items"][0]["source"] == "one",
+              "Home: what was played from every source, then each source's own rows under its name (theirs Jump back in left out)")
+        check([t["id"] for t in libmod.merged_tabs([{"tabs": [{"id": "albums", "group": "yours"}, {"id": "genres", "group": "explore"}]}])]
+              == ["playlists", "albums"], "Your music shows the parts some source has")
+
+        async def slow():
+            await asyncio.sleep(5)
+        async def fails():
+            raise RuntimeError("down")
+        async def quick():
+            return "ok"
+        started = time.monotonic()
+        got = await libmod.gather([("s", slow), ("f", fails), ("q", quick)], seconds=0.3)
+        check(got == [("q", "ok")] and time.monotonic() - started < 2, "a slow or failing source is left out, not waited for")
+        state = await plugin.get_state()
+        check(any(t["id"] == "albums" for t in state["library_tabs"]), f"the state lists the one library's parts: {state['library_tabs']}")
+        one_albums = await plugin.library_tab("albums")
+        check(one_albums["ok"] and one_albums["data"] and all(c.get("source") in plugin.instances for c in one_albums["data"][0]["items"]),
+              "the one library's albums come from the sources, each saying which")
+        one_home = await plugin.library_home()
+        check(one_home["ok"], f"the one library's Home: {one_home.get('error')}")
+        check(not (await plugin.library_tab("nonsense"))["ok"], "a part the one library doesn't have is refused")
+
         print("backups")
         sub_id = saved["data"]["id"]
         mix = await plugin.create_playlist(sub_id, "Road trip", [{"id": "s1", "title": "One", "artist": "A"}])

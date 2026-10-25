@@ -8,10 +8,12 @@ import { Collection, Result, SmartPlaylist } from "../api";
 import { dataVersion, resultCache } from "../nav";
 import { Store, pluginState, useStore } from "../store";
 
+/** A page of Music. `source`: one source's own (its Home, its tabs, its album); without, the one library's (Home,
+ *  search and Your music across every source). */
 export type Place =
-  | { type: "home" }
-  | { type: "tab"; id: string; title: string }
-  | { type: "collection"; collection: Collection }
+  | { type: "home"; source?: string }
+  | { type: "tab"; id: string; title: string; source?: string }
+  | { type: "collection"; collection: Collection; source?: string }
   | { type: "search"; query: string }
   | { type: "smart"; playlist: SmartPlaylist }
   | { type: "stats" }

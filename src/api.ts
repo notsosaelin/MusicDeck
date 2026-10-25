@@ -23,6 +23,8 @@ export interface Track {
   live?: boolean;
   /** 0-5 stars, from sources that keep ratings (feature "rate") */
   rating?: number;
+  /** in the one library (Home, search, Your music across sources): the source it's from */
+  source?: string;
 }
 
 export type Feature =
@@ -76,6 +78,8 @@ export interface Collection {
   title: string;
   subtitle: string;
   art: string | null;
+  /** in the one library: the source it's from */
+  source?: string;
 }
 
 export interface Page {
@@ -262,6 +266,17 @@ export interface PluginState {
   game_music: GameMusic[];
   offline: DownloadStatus;
   center: CenterSettings;
+  /** a newer MusicDeck on GitHub, installed through Decky's installer (src/update.ts) */
+  update: Update | null;
+  /** the one library's parts some source has something for: Playlists, Albums, Artists, Songs */
+  library_tabs: { id: string; title: string }[];
+}
+
+export interface Update {
+  version: string;
+  url: string;
+  sha256: string;
+  notes: string;
 }
 
 /** An album or playlist that plays when a game starts (for one source, while it's live). */
@@ -344,7 +359,8 @@ export interface TabInfo {
 export const openCollection = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Page>>(
   "open_collection",
 );
-export const search = callable<[id: string, query: string], Result<Page>>("search");
+/** remember: false for the one library's searches, which ask every source (not each one's recent searches) */
+export const search = callable<[id: string, query: string, remember?: boolean], Result<Page>>("search");
 
 export interface LikeWords {
   add: string;
@@ -433,6 +449,9 @@ export const organizeApply = callable<[id: string, pattern: string, ids: string[
   "organize_apply",
 );
 export const organizeUndo = callable<[id: string], Result<{ moved: number; failed: number; error: string }>>("organize_undo");
+export const libraryHome = callable<[], Result<Section[]>>("library_home");
+export const libraryTab = callable<[tabId: string], Result<Section[]>>("library_tab");
+export const checkUpdate = callable<[], Result<Update | null>>("check_update");
 export const listeningStats = callable<[period: ListeningStats["period"]], Result<ListeningStats>>("listening_stats");
 export const getRadio = callable<[id: string, track: Track], Result<Track[]>>("radio");
 export const getUserPlaylists = callable<[id: string], Result<Collection[]>>("user_playlists");

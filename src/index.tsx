@@ -7,6 +7,7 @@ import { MediaCenter } from "./components/media/MediaCenter";
 import { showTrackMenu } from "./components/TrackMenu";
 import { lookupOpener } from "./components/TagEditor";
 import { notify, releaseToastHooks } from "./notify";
+import { watchForUpdates } from "./update";
 import { followState, switchSource } from "./sources";
 import {
   PLAYER_ROUTE,
@@ -67,6 +68,8 @@ export default definePlugin(() => {
   const unwatchGames = watchGames();
   const unwatchCast = watchCastStatus();
   const unwatchLibraryEntry = watchLibraryEntry();
+  // a new version on GitHub: told once, installed from Settings
+  const unwatchUpdates = watchForUpdates();
   // desktop Steam: the Music tab, the mini player and media keys (src/desktop)
   const stopDesktop = startDesktop();
   // a source's own news (local files: what new albums got): a toast, and lists that show it again
@@ -137,6 +140,7 @@ export default definePlugin(() => {
       unwatchGames();
       unwatchCast();
       unwatchLibraryEntry();
+      unwatchUpdates();
       stopDesktop();
       removeEventListener("source_note", sourceNote);
       setSleepTimer(null);

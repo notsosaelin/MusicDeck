@@ -12,10 +12,10 @@ import aiohttp
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import backup, burn, cd, debuglog, lyrics, migrate, models, native, stats
+from musicdeck import backup, burn, cd, debuglog, library, lyrics, migrate, models, native, stats
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
-from musicdeck import version
+from musicdeck import updates, version
 from musicdeck.cast import CastManager
 from musicdeck.lastfm import Lastfm, LastfmError
 from musicdeck.listenbrainz import ListenBrainz
@@ -112,6 +112,8 @@ class Plugin:
         self.devices: dict[str, dict[str, Any]] = {}
         self.device_instances: dict[str, MusicService] = {}
         self.device_watcher: Optional[DeviceWatcher] = None
+        # new versions on GitHub (updates.py); installed through Decky's own installer
+        self.updates: Optional[updates.Watcher] = None
 
     # --- lifecycle ---
 
@@ -163,12 +165,16 @@ class Plugin:
             self.device_watcher = DeviceWatcher(self._devices_changed, decky.logger)
             self.device_watcher.on_note = self._device_note
             self.device_watcher.start()
+            self.updates = updates.Watcher(self.http, _announce_change, decky.logger)
+            self.updates.start()
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
 
     async def _unload(self):
         await cancel_all()
+        if self.updates:
+            self.updates.stop()
         if self.output_watcher:
             await self.output_watcher.stop()
         if self.device_watcher:
@@ -412,7 +418,21 @@ class Plugin:
             "offline": self.offline.status(),
             # only today's choices: one an older version saved (since renamed) would make saving fail
             "center": {k: self.settings.get("center").get(k, d) for k, d in DEFAULTS["center"].items()},
+            # a newer MusicDeck on GitHub: {"version", "url", "sha256", "notes"} (updates.py), else None
+            "update": self.updates.found if self.updates else None,
+            # the one library's tabs some source has something for (library.MERGED): {"id", "title"}
+            "library_tabs": self._library_tabs(),
         }
+
+    @_when_ready
+    async def check_update(self) -> dict[str, Any]:
+        """Looks for a new version now (Settings' "Check for updates"): the newer release, or None."""
+        if not self.updates:
+            return {"ok": False, "error": "Not started yet"}
+        found = await self.updates.check_now()
+        if not self.updates.checked:
+            return {"ok": False, "error": "Couldn't reach GitHub"}
+        return {"ok": True, "data": found}
 
     @_when_ready
     async def set_eq(self, eq: dict[str, Any], output_id: Optional[str] = None) -> None:
@@ -718,14 +738,78 @@ class Plugin:
         """One of a source's media center tabs (MusicService.tab): sections, each saying how to show it.
         Home gets what was played lately and MusicDeck's playlists, as home() does; a section of the
         user's playlists ("mine") gets MusicDeck's playlists too."""
+        return await _result(self._tab_sections(instance_id, tab_id))
+
+    async def _tab_sections(self, instance_id: str, tab_id: str) -> list[dict[str, Any]]:
+        if tab_id == OUR_PLAYLISTS:
+            return [models.section("Your playlists", self.playlists.for_instance(instance_id), display="grid")]
+        sections = self._liked(instance_id, await self._instance(instance_id).cached_tab(tab_id))
+        if tab_id == "home":
+            return self._with_ours(instance_id, sections)
+        ours = self.playlists.for_instance(instance_id)
+        return [{**s, "items": ours + s["items"]} if s.get("mine") and ours else s for s in sections]
+
+    # --- the one library (library.py): every source's music together ---
+
+    def _library_sources(self) -> list[dict[str, Any]]:
+        """The sources that are running: Local files first (the user's own), then as they're listed."""
+        running = [s for s in self.settings.services() if s["id"] in self.instances]
+        return sorted(running, key=lambda s: s["type"] != "local")
+
+    def _library_tabs(self) -> list[dict[str, str]]:
+        return library.merged_tabs([{"tabs": self._tabs(s["id"], self.instances[s["id"]])} for s in self._library_sources()])
+
+    @_when_ready
+    async def library_home(self) -> dict[str, Any]:
+        """Home for every source at once: what was played lately, the user's playlists, then a little of each
+        source's own Home."""
         async def work():
-            if tab_id == OUR_PLAYLISTS:
-                return [models.section("Your playlists", self.playlists.for_instance(instance_id), display="grid")]
-            sections = self._liked(instance_id, await self._instance(instance_id).cached_tab(tab_id))
-            if tab_id == "home":
-                return self._with_ours(instance_id, sections)
-            ours = self.playlists.for_instance(instance_id)
-            return [{**s, "items": ours + s["items"]} if s.get("mine") and ours else s for s in sections]
+            sources = self._library_sources()
+            played: list[dict[str, Any]] = []
+            playlists: list[dict[str, Any]] = []
+            for s in sources:
+                when = {c["id"]: c.get("at") or 0 for c in self.recents.for_instance(s["id"])}
+                for section in self._with_ours(s["id"], []):
+                    tagged = library.tag(section, s["id"])
+                    if section["title"] == "Jump back in":
+                        played.extend({**x, "_at": when.get(x["id"], 0)} for x in tagged["items"] + tagged.get("tracks", []))
+                    elif section["title"] == "Your playlists":
+                        playlists.extend(tagged["items"])
+            # newest first; an entry from before times were kept goes after, its source's order kept
+            played.sort(key=lambda x: -x["_at"])
+            played = [{k: v for k, v in x.items() if k != "_at"} for x in played][:library.JUMP_BACK]
+            names = {s["id"]: s["name"] for s in sources}
+
+            def home(sid: str):
+                async def get():
+                    return self._liked(sid, await self.instances[sid].cached_tab("home"))
+                return get
+            homes = await library.gather([(s["id"], home(s["id"])) for s in sources], log=decky.logger)
+            return library.merge_home(played, playlists, [(sid, names[sid], sections) for sid, sections in homes])
+        return await _result(work())
+
+    @_when_ready
+    async def library_tab(self, tab_id: str) -> dict[str, Any]:
+        """One of the one library's tabs (library.MERGED): every source's playlists, albums, artists or songs."""
+        async def work():
+            wanted = library.tabs_for(tab_id)
+            if not wanted:
+                raise ServiceError("No such part of the library")
+            calls = []
+            for s in self._library_sources():
+                instance = self.instances[s["id"]]
+                have = [t["id"] for t in self._tabs(s["id"], instance) if t["id"] in wanted and t.get("group", "yours") == "yours"]
+                if tab_id == "playlists" and not have and self.playlists.for_instance(s["id"]):
+                    have = [OUR_PLAYLISTS]
+
+                def fetch(sid: str = s["id"], ids: tuple = tuple(have)):
+                    async def get():
+                        return [section for t in ids for section in await self._tab_sections(sid, t)]
+                    return get
+                if have:
+                    calls.append((s["id"], fetch()))
+            parts = await library.gather(calls, log=decky.logger)
+            return library.merge_tab(tab_id, parts, sort=tab_id != "playlists")
         return await _result(work())
 
     @_when_ready
@@ -760,8 +844,10 @@ class Plugin:
         return await _result(work())
 
     @_when_ready
-    async def search(self, instance_id: str, query: str) -> dict[str, Any]:
-        if self._known(instance_id):
+    async def search(self, instance_id: str, query: str, remember: bool = True) -> dict[str, Any]:
+        """A source's search results. `remember`: kept in its recent searches (not the one library's searches,
+        which ask every source)."""
+        if remember and self._known(instance_id):
             self.recents.add_search(instance_id, query)
         async def work():
             return self._liked(instance_id, await self._instance(instance_id).search(query))

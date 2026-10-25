@@ -7,7 +7,13 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 
 - **Eighteen sources:** local files, your Steam soundtracks, Navidrome/Subsonic, Jellyfin, Emby, Plex,
   Audiobookshelf, SoulSync, SoundCloud, YouTube Music (plus regular YouTube), Bandcamp, internet radio, podcasts, the Live
-  Music Archive, Qobuz, TIDAL, Spotify and Soulseek. One source is live at a time, chosen in the plugin's Decky page.
+  Music Archive, Qobuz, TIDAL, Spotify and Soulseek.
+- **One library:** every source's music together, as Steam's library is every game whatever store it came from.
+  Home has what you played lately and your playlists from all of them, then a little of each source's own Home;
+  **Your music** (Playlists, Albums, Artists, Songs) puts every source's together, each card saying where it's
+  from; **Search** asks every source at once, each one's results showing as they come. A queue can mix sources.
+  Each source's own parts (Qobuz's picks, Local files' folders and tools) stay under its name. On desktop Steam
+  and in the media center; the Quick Access panel still browses the live source.
 - **Desktop Steam too:** a **Music** tab beside Store, Library and Community, as if Steam always had one.
   Your library on the left and its pages on the right, laid out as Steam's library is (an album headed by its
   art with a green Play), track lists with columns to sort, Ctrl/Shift to pick several, right-click for
@@ -227,7 +233,8 @@ top). The queue lists tracks in the order they'll play (shuffled or not); **Clea
 (after asking); **Y** on a queued track moves it (play next, up, down, to the end), and **Move** picks it up so
 the d-pad carries it until **A** or **B** puts it down.
 
-Switching the live source stops playback and clears the queue; nothing from the previous source stays queued.
+Switching the live source (in the Quick Access panel) stops playback and clears the queue; nothing from the
+previous source stays queued.
 
 **Media center:** **L1**/**R1** switch tabs (Now Playing, Home, Browse, Search, Settings); **A** opens a Browse tile, an
 album or playlist, **X** plays it straight away, **B** goes back a page, then up to the tabs, then back to the
@@ -266,7 +273,9 @@ browser first (Spotify's page also offers "Not you?").
 ## Install
 
 Until it's in the Decky store: enable Decky's developer mode, then **Decky → Settings → Developer → Install
-plugin from ZIP** with the zip for your system (its SHA-256 is in the `.sha256` file beside it):
+plugin from ZIP** with the zip for your system (its SHA-256 is in the `.sha256` file beside it). After that it
+updates itself: when a new version is out, a notification says so, and **Settings → Update to x.y.z** hands it to
+Decky's installer, which asks first and keeps your settings, playlists and downloads:
 
 | Zip | For |
 | --- | --- |

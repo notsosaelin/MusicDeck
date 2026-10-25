@@ -58,10 +58,10 @@ export const NowPlayingFull: FC = () => {
     open();
   };
   const toAlbum = t?.album_id
-    ? leaveFor(() => go({ type: "collection", collection: { id: t.album_id!, kind: "album", title: t.album, subtitle: t.artist, art: t.art } }))
+    ? leaveFor(() => go({ type: "collection", collection: { id: t.album_id!, kind: "album", title: t.album, subtitle: t.artist, art: t.art }, source: item!.instanceId }))
     : undefined;
   const toArtist = t?.artist_id
-    ? leaveFor(() => go({ type: "collection", collection: { id: t.artist_id!, kind: "artist", title: t.artist, subtitle: "", art: null } }))
+    ? leaveFor(() => go({ type: "collection", collection: { id: t.artist_id!, kind: "artist", title: t.artist, subtitle: "", art: null }, source: item!.instanceId }))
     : undefined;
   return (
     <div ref={box} className="md-np" data-pane={pane}>

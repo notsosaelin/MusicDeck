@@ -106,7 +106,8 @@ function spreadArtists(queue: { track: Track }[], order: number[]): number[] {
 }
 
 export interface QueueItem {
-  /** Service instance the track belongs to: always the live source (switching sources clears the queue). */
+  /** Service instance the track belongs to (switching the live source clears the queue; the one library's lists
+   *  mix sources, each track its own). */
   instanceId: string;
   track: Track;
 }
@@ -513,7 +514,8 @@ export class Player {
   /** Replace the queue and start playing at `start`. */
   playList(instanceId: string, tracks: Track[], start = 0, shuffle?: boolean) {
     if (!tracks.length) return;
-    const queue = tracks.map((track) => ({ instanceId, track }));
+    // a list from the one library mixes sources: each track plays from its own
+    const queue = tracks.map((track) => ({ instanceId: track.source ?? instanceId, track }));
     if (shuffle !== undefined) this.state.update({ shuffle });
     this.queueGeneration++;
     this.state.update({ queue });
@@ -530,7 +532,7 @@ export class Player {
   enqueue(instanceId: string, tracks: Track[], next = false) {
     if (!tracks.length) return;
     const { queue, index } = this.state.get();
-    const items = tracks.map((track) => ({ instanceId, track }));
+    const items = tracks.map((track) => ({ instanceId: track.source ?? instanceId, track }));
     const at = next && index >= 0 ? index + 1 : queue.length;
     const updated = [...queue.slice(0, at), ...items, ...queue.slice(at)];
     this.state.update({ queue: updated });

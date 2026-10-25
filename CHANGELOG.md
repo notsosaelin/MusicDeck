@@ -3,6 +3,26 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.37.0
+
+- **One library**: every source's music together, as Steam's library is every game whatever store it came from.
+  - **Home** has what you played lately and your playlists from every source, then a few rows of each source's own.
+  - **Your music** (Playlists, Albums, Artists, Songs) gathers every source's: Qobuz favourites, Local files' albums
+    and Steam soundtracks in one grid, in title order, each card saying where it's from.
+  - **Search** asks every source at once; each one's results show as they come instead of waiting for the slowest
+    (Local files first). On desktop the songs have a Source column; in the media center each source's results are
+    under its name.
+  - A queue can mix sources: play an album from Qobuz, then queue a song from your files.
+  - Desktop Steam's sidebar loses the source dropdown: Home, Your stats, Your music, then **Sources**, each opening to
+    its own parts (Qobuz's picks, Local files' folders, column browser and library tools), then every playlist.
+  - The media center's Home is the one library's, and Browse starts with Your music (its tiles showing covers from
+    every source). The Quick Access panel still browses the live source.
+- **Updates itself**: MusicDeck looks for a new version on GitHub; when there is one, a notification says so, and
+  Settings' **Update to x.y.z** hands it to Decky's own installer, which asks first, checks the download and keeps
+  your settings, playlists and downloads. **Check for updates** looks at once.
+- Desktop: the sidebar has no scrollbar showing.
+- Media center: the queue says nothing when nothing's after the song.
+
 ## 0.36.2
 
 - **Your stats keep up**: the page refreshes as songs change, and every half minute, instead of only when it's

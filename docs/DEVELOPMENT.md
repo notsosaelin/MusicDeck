@@ -290,4 +290,6 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`, with `bash scripts/build_cdrskin_windows.sh` and
    `bash scripts/build_mtp_helper.sh` run in MSYS2's UCRT64 shell before `package.py`
 5. Install the zip on a device and smoke-test every source you can sign in to.
-6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`.
+6. Commit as "Release <version>", tag `v<version>`, and attach the three `out/MusicDeck-<version>-<platform>.zip` and their `.sha256`
+   to the GitHub release `v<version>` of `updates.REPO` (`py_modules/musicdeck/updates.py`): installed copies find
+   it there and offer the update. A draft or pre-release isn't offered.

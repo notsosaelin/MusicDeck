@@ -69,6 +69,7 @@ import {
   youtubeUpdate,
 } from "../api";
 import { notify } from "../notify";
+import { installUpdate, lookForUpdate } from "../update";
 import { deleteSource, switchSource } from "../sources";
 import { player } from "../player";
 import { syncLibraryEntry } from "../libraryEntry";
@@ -966,10 +967,39 @@ export const Settings: FC = () => {
             }}
           />
         </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Version">{state.version}</Field>
-        </PanelSectionRow>
+        <VersionRow />
       </PanelSection>
     </>
+  );
+};
+
+/** The version, and the newer one when there is: installed through Decky's prompt, or looked for again. */
+const VersionRow: FC = () => {
+  const state = useStore(pluginState)!;
+  const [looking, setLooking] = useState(false);
+  const [note, setNote] = useState("");
+  const found = state.update;
+  return (
+    <PanelSectionRow>
+      <ButtonItem
+        layout="below"
+        label={`Version ${state.version}`}
+        description={note || (found ? `${found.version} is out` : undefined)}
+        disabled={looking}
+        onClick={async () => {
+          if (found) {
+            await installUpdate(found);
+            return;
+          }
+          setLooking(true);
+          setNote("");
+          const r = await lookForUpdate();
+          setLooking(false);
+          setNote(typeof r === "string" ? r : r ? "" : "Up to date");
+        }}
+      >
+        {found ? `Update to ${found.version}` : looking ? "Looking…" : "Check for updates"}
+      </ButtonItem>
+    </PanelSectionRow>
   );
 };

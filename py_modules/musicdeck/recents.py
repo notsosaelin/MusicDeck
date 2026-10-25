@@ -5,6 +5,7 @@ home, and the recent searches under an empty search field. Kept on the device in
 first. (The first version held only the collections, as {instance id: [...]}; that's read too.)
 """
 import os
+import time
 from typing import Any
 
 from .settings import load_json, save_json
@@ -43,6 +44,7 @@ class Recents:
         if not isinstance(collection, dict) or not collection.get("id") or not collection.get("kind"):
             return
         entry = {k: collection.get(k) for k in KEYS}
+        entry["at"] = int(time.time())  # when: the one library's Jump back in orders every source's by it
         others = [c for c in self.collections.get(instance_id, [])
                   if (c["kind"], c["id"]) != (entry["kind"], entry["id"])]
         self.collections[instance_id] = [entry, *others][:COLLECTIONS_LIMIT]

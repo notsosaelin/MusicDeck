@@ -14,7 +14,6 @@ import { NameModal } from "../components/NameModal";
 import { dataVersion, invalidateBrowserCache, playFrom } from "../nav";
 import { notify } from "../notify";
 import { player } from "../player";
-import { switchSource } from "../sources";
 import { mediaUrl, pluginState, useStore } from "../store";
 import { Place, go, goHome, useLiveSource, usePlace, useResult } from "./data";
 import {
@@ -38,14 +37,7 @@ import { StatsPage } from "./stats";
 import { ToolsPage } from "./tools";
 import { ColumnsPage } from "./columns";
 import { useDownload } from "../download";
-
-const GROUPS: [string, string][] = [
-  ["yours", "Your music"],
-  ["listening", "Listening"],
-  ["explore", "Explore"],
-  ["genres", "Genres"],
-  ["files", "Files"],
-];
+import { useLibrarySearch } from "../library";
 
 /** Where a right-click was, for a menu to open there: Steam's menus take the mouse event itself in place of an
  *  element (Decky's typings say only EventTarget). */
@@ -65,14 +57,36 @@ const clock = (s: number) => {
 
 // --- the sidebar ------------------------------------------------------------------------------------
 
+/** Whether a source's own tab is one the one library gathers (it shows under Your music, not the source). */
+const merged = (tabId: string, group?: string) =>
+  (group ?? "yours") === "yours" && ["playlists", "musicdeck-playlists", "albums", "soundtracks", "artists", "composers", "songs", "liked"].includes(tabId);
+
+/** The sources opened in the sidebar (their own tabs shown), kept between visits. */
+const OPEN_KEY = "musicdeck-open-sources";
+const readOpen = (): string[] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
 export const Sidebar: FC = () => {
   const state = useStore(pluginState);
-  const source = useLiveSource();
   const place = usePlace();
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<string[]>(readOpen);
   const at = (p: Place) => JSON.stringify(p) === JSON.stringify(place);
-  // a source's own "Home" tab is the sidebar's Home
-  const tabs = (source?.tabs ?? []).filter((t) => t.id !== "home" && t.title.toLowerCase() !== "home");
+  const services = state?.services ?? [];
+  const local = services.find((s) => s.type === "local");
+  const toggle = (id: string) => {
+    const next = open.includes(id) ? open.filter((x) => x !== id) : [...open, id];
+    setOpen(next);
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify(next));
+    } catch {}
+  };
   return (
     <nav className="md-sidebar">
       <form
@@ -84,59 +98,72 @@ export const Sidebar: FC = () => {
       >
         <FaSearch style={{ opacity: 0.6 }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" spellCheck={false}
-               title={'Words, or fields: artist:nirvana year:>1990 rating:>=4 genre:jazz plays:0 format:flac ("quotes" keep words together)'} />
+               title={'Every source at once. In Local files, fields too: artist:nirvana year:>1990 rating:>=4 genre:jazz plays:0 format:flac'} />
       </form>
-      <select
-        className="md-select"
-        value={source?.id ?? ""}
-        onChange={async (e) => {
-          await switchSource(e.target.value);
-          goHome();
-        }}
-      >
-        {(state?.services ?? []).map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
       <div className="md-nav-item" data-current={at({ type: "home" }) ? "" : undefined} onClick={() => go({ type: "home" })}>
         Home
       </div>
       <div className="md-nav-item" data-current={at({ type: "stats" }) ? "" : undefined} onClick={() => go({ type: "stats" })}>
         Your stats
       </div>
-      {GROUPS.map(([group, heading]) => {
-        const mine = tabs.filter((t) => (t.group ?? "yours") === group);
-        if (!mine.length) return null;
+      {!!state?.library_tabs?.length && <div className="md-nav-heading">Your music</div>}
+      {(state?.library_tabs ?? []).map((t) => {
+        const p: Place = { type: "tab", id: t.id, title: t.title };
         return (
-          <Fragment key={group}>
-            <div className="md-nav-heading">{heading}</div>
-            {mine.map((t) => {
-              const p: Place = { type: "tab", id: t.id, title: t.title };
-              return (
-                <div key={t.id} className="md-nav-item" data-current={at(p) ? "" : undefined} onClick={() => go(p)}>
-                  <span>{t.title}</span>
-                  {t.subtitle && <span className="md-nav-count">{t.subtitle.replace(/\D+$/, "")}</span>}
+          <div key={t.id} className="md-nav-item" data-current={at(p) ? "" : undefined} onClick={() => go(p)}>
+            {t.title}
+          </div>
+        );
+      })}
+      {!!services.length && <div className="md-nav-heading">Sources</div>}
+      {services.map((s) => {
+        const own = s.tabs.filter((t) => t.id !== "home" && t.title.toLowerCase() !== "home" && !merged(t.id, t.group));
+        const shown = open.includes(s.id);
+        const home: Place = { type: "home", source: s.id };
+        return (
+          <Fragment key={s.id}>
+            <div className="md-nav-item md-nav-source" data-current={at(home) ? "" : undefined} onClick={() => go(home)}>
+              <span>{s.name}</span>
+              {(own.length > 0 || s.type === "local") && (
+                <button
+                  className="md-nav-twisty"
+                  aria-label={shown ? `Hide ${s.name}'s parts` : `Show ${s.name}'s parts`}
+                  data-open={shown ? "" : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle(s.id);
+                  }}
+                >
+                  <FaChevronRight />
+                </button>
+              )}
+            </div>
+            {shown &&
+              own.map((t) => {
+                const p: Place = { type: "tab", id: t.id, title: t.title, source: s.id };
+                return (
+                  <div key={t.id} className="md-nav-item md-nav-sub" data-current={at(p) ? "" : undefined} onClick={() => go(p)}>
+                    <span>{t.title}</span>
+                    {t.subtitle && <span className="md-nav-count">{t.subtitle.replace(/\D+$/, "")}</span>}
+                  </div>
+                );
+              })}
+            {shown && s.features.includes("tags") && (
+              <>
+                <div className="md-nav-item md-nav-sub" data-current={at({ type: "columns" }) ? "" : undefined} onClick={() => go({ type: "columns" })}>
+                  Column browser
                 </div>
-              );
-            })}
+                <div className="md-nav-item md-nav-sub" data-current={at({ type: "tools", source: s.id }) ? "" : undefined}
+                     onClick={() => go({ type: "tools", source: s.id })}>
+                  Library tools
+                </div>
+              </>
+            )}
           </Fragment>
         );
       })}
-      {source && <Playlists id={source.id} local={source.type === "local"} at={at} />}
-      {source?.type === "local" && <Devices />}
-      {source?.features.includes("tags") && (
-        <>
-          <div className="md-nav-item" style={{ marginTop: 16 }} data-current={at({ type: "columns" }) ? "" : undefined}
-               onClick={() => go({ type: "columns" })}>
-            Column browser
-          </div>
-          <div className="md-nav-item" data-current={at({ type: "tools" }) ? "" : undefined} onClick={() => go({ type: "tools" })}>
-            Library tools
-          </div>
-        </>
-      )}
+      {local && <Devices local={local.id} />}
+      {!!services.length && <Playlists at={at} />}
       <div className="md-nav-item md-nav-add" style={{ marginTop: 16 }} onClick={showSettings}>
         Settings…
       </div>
@@ -179,26 +206,37 @@ const DropItem: FC<{ onDrop: (d: Dragged) => void; current?: boolean; onClick?: 
   );
 };
 
-/** MusicDeck's playlists of the source, and (Local files) its smart playlists. */
-const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> = ({ id, local, at }) => {
+/** MusicDeck's playlists, of every source, and Local files' smart playlists. */
+const Playlists: FC<{ at: (p: Place) => boolean }> = ({ at }) => {
   const version = useStore(dataVersion).v;
+  const services = useStore(pluginState)?.services ?? [];
+  const ids = services.map((s) => s.id).join(",");
+  const local = services.find((s) => s.type === "local")?.id;
   const [lists, setLists] = useState<Collection[]>([]);
-  const smart = useStore(smartLists).filter((p) => p.source === id);
+  const smart = useStore(smartLists);
   useEffect(() => {
-    api.localPlaylists(id).then(setLists).catch(() => setLists([]));
-  }, [id, version]);
+    let live = true;
+    Promise.all(services.map((s) => api.localPlaylists(s.id).then((l) => l.map((c) => ({ ...c, source: s.id }))).catch(() => [])))
+      .then((all) => live && setLists(all.flat()))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [ids, version]);
   useEffect(() => {
     if (local) loadSmart();
   }, [local]);
+  // a new playlist is Local files' (or, without it, the live source's): its songs come from there
+  const home = local ?? pluginState.get()?.active_service ?? services[0]?.id ?? "";
   const create = () =>
     desktopDialog(
       <NameModal
         title="New playlist"
         action="Create"
         onSubmit={async (name) => {
-          const made = await api.createPlaylist(id, name, []);
+          const made = await api.createPlaylist(home, name, []);
           invalidateBrowserCache();
-          go({ type: "collection", collection: made });
+          go({ type: "collection", collection: made, source: home });
         }}
       />,
       { ...SIZES.name, title: "New playlist" },
@@ -207,44 +245,43 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
     <>
       <div className="md-nav-heading">Playlists</div>
       {lists.map((l) => {
-        const p: Place = { type: "collection", collection: l };
+        const p: Place = { type: "collection", collection: l, source: l.source };
         return (
           <DropItem
-            key={l.id}
+            key={`${l.source}:${l.id}`}
             current={at(p)}
             onClick={() => go(p)}
-            onMenu={(e) => showCollectionMenu(id, l, clickPoint(e))}
+            onMenu={(e) => showCollectionMenu(l.source ?? home, l, clickPoint(e))}
             onDrop={(d) => dropOnPlaylist(d, l.id, l.title)}
           >
             <span>{l.title}</span>
           </DropItem>
         );
       })}
-      {local &&
-        smart.map((s) => {
-          const p: Place = { type: "smart", playlist: s };
-          return (
-            <div
-              key={s.id}
-              className="md-nav-item"
-              data-current={at(p) ? "" : undefined}
-              onClick={() => go(p)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                showSmartMenu(s, clickPoint(e), () => goHome());
-              }}
-            >
-              <span>⚙ {s.name}</span>
-            </div>
-          );
-        })}
+      {smart.map((s) => {
+        const p: Place = { type: "smart", playlist: s };
+        return (
+          <div
+            key={s.id}
+            className="md-nav-item"
+            data-current={at(p) ? "" : undefined}
+            onClick={() => go(p)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              showSmartMenu(s, clickPoint(e), () => goHome());
+            }}
+          >
+            <span>⚙ {s.name}</span>
+          </div>
+        );
+      })}
       <div className="md-nav-item md-nav-add" onClick={create}>
         + New playlist
       </div>
       {local && (
         <div
           className="md-nav-item md-nav-add"
-          onClick={() => desktopDialog(<SmartEditor source={id} onSaved={(s) => go({ type: "smart", playlist: s })} />, SIZES.smart)}
+          onClick={() => desktopDialog(<SmartEditor source={local} onSaved={(s) => go({ type: "smart", playlist: s })} />, SIZES.smart)}
         >
           + New smart playlist
         </div>
@@ -261,7 +298,7 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
 const gb = (n: number) => (n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1)} GB`);
 
 /** What's plugged in, with how full it is; drop music on one to copy it there. */
-const Devices: FC = () => {
+const Devices: FC<{ local: string }> = ({ local }) => {
   const devices = useStore(pluginState)?.devices ?? [];
   if (!devices.length) return null;
   return (
@@ -271,12 +308,11 @@ const Devices: FC = () => {
         const space = d.status?.space as { total: number; free: number } | null | undefined;
         const collection: Collection = { id: `dv~${d.id}~`, kind: "device", title: d.name, subtitle: "", art: null };
         const takes = d.kind !== "cd" && d.kind !== "disc" && d.kind !== "ios" && d.status?.writable !== false;
-        const instanceId = pluginState.get()?.active_service ?? "";
         return (
           <DropItem
             key={d.id}
-            onClick={() => go({ type: "collection", collection })}
-            onMenu={(e) => showCollectionMenu(instanceId, collection, clickPoint(e))}
+            onClick={() => go({ type: "collection", collection, source: local })}
+            onMenu={(e) => showCollectionMenu(local, collection, clickPoint(e))}
             onDrop={(x) => (takes ? dropOnDevice(x, d.id, d.name) : notify("MusicDeck", `${d.name} can only be read`))}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -298,9 +334,14 @@ const Devices: FC = () => {
 
 export const Pages: FC = () => {
   const place = usePlace();
-  const source = useLiveSource();
+  const live = useLiveSource();
+  const services = useStore(pluginState)?.services ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => scroller.current?.scrollTo(0, 0), [place]);
+  // a page of one source's (its Home, its tab, an album of it), else the one library's; what has no source of its
+  // own (an album opened from the player) is the live source's
+  const own = "source" in place && place.source && services.some((s) => s.id === place.source) ? place.source : null;
+  const source = live ?? services[0] ?? null;
   if (!source)
     return (
       <div className="md-page">
@@ -309,19 +350,29 @@ export const Pages: FC = () => {
         </button>
       </div>
     );
-  const id = source.id;
+  const id = own ?? source.id;
+  const name = (sid: string) => services.find((s) => s.id === sid)?.name ?? "";
+  const local = services.find((s) => s.type === "local")?.id ?? id;
   return (
     <div ref={scroller} className="md-page">
-      {place.type === "home" && <SectionsPage id={id} title="Home" what="home" fetch={() => api.getHome(id)} />}
-      {place.type === "tab" && (
-        <SectionsPage id={id} title={place.title} what={`tab:${place.id}`} fetch={() => api.getCenterTab(id, place.id)} />
-      )}
+      {place.type === "home" &&
+        (own ? (
+          <SectionsPage id={own} title={name(own)} what="home" fetch={() => api.getHome(own)} />
+        ) : (
+          <SectionsPage id={id} title="Home" what="library:home" fetch={() => api.libraryHome()} />
+        ))}
+      {place.type === "tab" &&
+        (own ? (
+          <SectionsPage id={own} title={place.title} what={`tab:${place.id}`} fetch={() => api.getCenterTab(own, place.id)} />
+        ) : (
+          <SectionsPage id={id} title={place.title} what={`library:tab:${place.id}`} fetch={() => api.libraryTab(place.id)} />
+        ))}
       {place.type === "search" && <SearchPage id={id} query={place.query} />}
-      {place.type === "collection" && <CollectionPage id={id} collection={place.collection} />}
-      {place.type === "smart" && <SmartPage id={id} playlist={place.playlist} />}
+      {place.type === "collection" && <CollectionPage id={own ?? place.collection.source ?? id} collection={place.collection} />}
+      {place.type === "smart" && <SmartPage id={place.playlist.source || local} playlist={place.playlist} />}
       {place.type === "stats" && <StatsPage />}
-      {place.type === "tools" && <ToolsPage id={place.source ?? id} />}
-      {place.type === "columns" && <ColumnsPage id={id} />}
+      {place.type === "tools" && <ToolsPage id={place.source ?? local} />}
+      {place.type === "columns" && <ColumnsPage id={local} />}
     </div>
   );
 };
@@ -411,7 +462,7 @@ const SectionsPage: FC<{ id: string; title: string; what: string; fetch: () => P
     <>
       <h1 className="md-title">{title}</h1>
       <Loading result={result} />
-      {result?.ok && result.data.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home"} />)}
+      {result?.ok && result.data.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home" || what === "library:home"} />)}
     </>
   );
 };
@@ -436,12 +487,13 @@ const SectionView: FC<{ id: string; section: Section; shelves?: boolean }> = ({ 
 };
 
 const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
-  const result = useResult(`${id}:desktop:search:${query}`, () => api.search(id, query));
+  // every source at once, each adding to the page as it answers (a field search, artist:nirvana, is Local files'
+  // own: the others just find nothing)
+  const { page } = useLibrarySearch(query);
   return (
     <>
       <h1 className="md-title">“{query}”</h1>
-      <Loading result={result} />
-      {result?.ok && <PageBody id={id} page={result.data} from={{ id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null }} />}
+      {page && <PageBody id={id} page={page} from={{ id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null }} />}
     </>
   );
 };
@@ -584,7 +636,7 @@ const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, ite
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
   }, [row]);
-  const cards = items.map((c) => <Card key={`${c.kind}:${c.id}`} id={id} item={c} />);
+  const cards = items.map((c) => <Card key={`${c.source ?? ""}:${c.kind}:${c.id}`} id={c.source ?? id} item={c} />);
   if (!row) return <div className="md-grid">{cards}</div>;
   return (
     <div className="md-shelf-box">
@@ -622,11 +674,13 @@ async function playCollection(id: string, c: Collection) {
 
 const Card: FC<{ id: string; item: Collection }> = ({ id, item }) => {
   const url = art(id, item.art);
+  // in the one library, where it's from
+  const from = useStore(pluginState)?.services.find((s) => s.id === item.source)?.name;
   const round = item.kind === "artist";
   return (
     <div
       className="md-card"
-      onClick={() => go({ type: "collection", collection: item })}
+      onClick={() => go({ type: "collection", collection: item, source: id })}
       title={item.title}
       draggable={item.kind !== "device"}
       onDragStart={(e) => {
@@ -654,16 +708,16 @@ const Card: FC<{ id: string; item: Collection }> = ({ id, item }) => {
         )}
       </div>
       <div className="md-card-title">{item.title}</div>
-      <div className="md-card-sub">{item.subtitle}</div>
+      <div className="md-card-sub">{[item.subtitle, from].filter(Boolean).join(" · ")}</div>
     </div>
   );
 };
 
 /** Genres, moods, charts: names in tiles. */
-const Tiles: FC<{ id: string; items: Collection[] }> = ({ items }) => (
+const Tiles: FC<{ id: string; items: Collection[] }> = ({ id, items }) => (
   <div className="md-tiles">
     {items.map((c) => (
-      <div key={`${c.kind}:${c.id}`} className="md-tile" onClick={() => go({ type: "collection", collection: c })}>
+      <div key={`${c.kind}:${c.id}`} className="md-tile" onClick={() => go({ type: "collection", collection: c, source: c.source ?? id })}>
         {c.title}
       </div>
     ))}
@@ -690,7 +744,13 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
   const playing = useStore(player.state);
   const current = playing.index >= 0 ? playing.queue[playing.index]?.track.id : null;
   const showAlbum = from.kind !== "album";
-  const rates = canRate(id);
+  // the one library's lists mix sources: each row is its own source's
+  const of = (t: Track) => t.source ?? id;
+  const rates = tracks.some((t) => canRate(of(t)));
+  // a list of several sources' songs says where each is from
+  const services = useStore(pluginState)?.services ?? [];
+  const mixed = new Set(tracks.map(of)).size > 1;
+  const sourceName = (t: Track) => services.find((s) => s.id === of(t))?.name ?? "";
   const order = useMemo(() => {
     const idx = tracks.map((_, i) => i);
     if (!sort) return idx;
@@ -721,7 +781,7 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
     </div>
   );
   // the sorted order is what plays: double-clicking a row plays from it on, in the order shown
-  const play = (at: number) => playFrom(id, from, order.map((i) => tracks[i]), at);
+  const play = (at: number) => playFrom(from.source ?? id, from, order.map((i) => tracks[i]), at);
   const choose = (at: number, e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => {
     if (e.shiftKey) {
       const range = new Set<number>();
@@ -757,6 +817,7 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
         {head("artist", "Artist", { flex: 2 })}
         {showAlbum && head("album", "Album", { flex: 2 })}
         {rates && head("rating", "Rating", { width: 84 })}
+        {mixed && <div className="md-th" style={{ width: 130 }}>Source</div>}
         {head("duration", "Time", { width: 64, textAlign: "right" })}
       </div>
       <div
@@ -779,7 +840,7 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
                 onDoubleClick={() => play(at)}
                 draggable
                 onDragStart={(e) => {
-                  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ instanceId: id, tracks: about(at) } satisfies Dragged));
+                  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ instanceId: of(t), tracks: about(at).filter((x) => of(x) === of(t)) } satisfies Dragged));
                   e.dataTransfer.effectAllowed = "copy";
                 }}
                 // the mouse event, not the row: Steam opens a menu given one where the click was
@@ -789,9 +850,10 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
                     setSelected(new Set([at]));
                     setAnchor(at);
                   }
-                  const songs = about(at);
-                  if (songs.length > 1) showSelectionMenu(id, songs, from, clickPoint(e));
-                  else showTrackMenu(id, songs[0], clickPoint(e), { playlistId });
+                  // a choice across sources: the menu is for this row's source's songs among it
+                  const songs = about(at).filter((x) => of(x) === of(t));
+                  if (songs.length > 1) showSelectionMenu(of(t), songs, from, clickPoint(e));
+                  else showTrackMenu(of(t), songs[0], clickPoint(e), { playlistId });
                 }}
               >
                 <div className="md-td md-dim" style={{ width: 44, textAlign: "right" }}>
@@ -810,7 +872,12 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
                 )}
                 {rates && (
                   <div className="md-td" style={{ width: 84 }}>
-                    <Stars instanceId={id} track={t} />
+                    {canRate(of(t)) && <Stars instanceId={of(t)} track={t} />}
+                  </div>
+                )}
+                {mixed && (
+                  <div className="md-td md-dim" style={{ width: 130 }}>
+                    {sourceName(t)}
                   </div>
                 )}
                 <div className="md-td md-dim" style={{ width: 64, textAlign: "right" }}>
@@ -838,6 +905,14 @@ export const LIBRARY_CSS = `
 .md-nav-count { font-size: 11px; color: #8b929a; }
 .md-nav-item[data-over] { background: rgba(26,159,255,0.3); color: #fff; }
 .md-nav-add { color: #8b929a; font-size: 13px; }
+.md-nav-sub { padding-left: 30px; font-size: 13px; }
+.md-sidebar { scrollbar-width: none; }
+.md-sidebar::-webkit-scrollbar { display: none; }
+.md-nav-twisty { border: none; background: none; color: #8b929a; width: 22px; height: 22px; margin: -4px -6px -4px 0; padding: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 10px; border-radius: 3px; cursor: pointer; }
+.md-nav-twisty:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.md-nav-twisty svg { transition: transform 0.15s; }
+.md-nav-twisty[data-open] svg { transform: rotate(90deg); }
 .md-capacity { height: 3px; margin-top: 4px; border-radius: 2px; background: rgba(255,255,255,0.12); overflow: hidden; }
 .md-capacity > div { height: 100%; background: #1a9fff; }
 .md-smart-cover { display: flex; align-items: center; justify-content: center; font-size: 72px; color: #8b929a;
