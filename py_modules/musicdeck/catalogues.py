@@ -104,7 +104,8 @@ class Catalogues:
                 "genres": [album["primaryGenreName"]] if album.get("primaryGenreName") else [],
                 "label": "", "group": "", "discs": max([r.get("discCount") or 1 for r in songs] or [1]),
                 "tracks": [{"disc": r.get("discNumber") or 1, "track": r.get("trackNumber") or 0,
-                            "title": r.get("trackName", ""), "artist": r.get("artistName", "")} for r in songs],
+                            "title": r.get("trackName", ""), "artist": r.get("artistName", ""),
+                            "length": round((r.get("trackTimeMillis") or 0) / 1000)} for r in songs],
                 "cover": _big_itunes_art(album.get("artworkUrl100", ""))}
 
     async def _deezer_album(self, id: str) -> dict[str, Any]:
@@ -118,7 +119,8 @@ class Catalogues:
                 "label": album.get("label") or "", "group": "",
                 "discs": max([t.get("disk_number") or 1 for t in tracks] or [1]),
                 "tracks": [{"disc": t.get("disk_number") or 1, "track": t.get("track_position") or 0,
-                            "title": t.get("title", ""), "artist": (t.get("artist") or {}).get("name", "")}
+                            "title": t.get("title", ""), "artist": (t.get("artist") or {}).get("name", ""),
+                            "length": int(t.get("duration") or 0)}
                            for t in sorted(tracks, key=lambda t: (t.get("disk_number") or 1, t.get("track_position") or 0))],
                 "cover": album.get("cover_xl") or ""}
 

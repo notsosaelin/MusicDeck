@@ -334,6 +334,14 @@ class SteamService(MusicService):
                         times[os.path.join(library, sub)] = os.stat(os.path.join(library, sub)).st_mtime
                     except OSError:
                         pass
+                # a download finishing rewrites its manifest in place, which (on Windows) leaves the
+                # folder's own time as it was: the newest manifest's time says so
+                try:
+                    with os.scandir(os.path.join(library, "steamapps")) as entries:
+                        times[os.path.join(library, "manifests")] = max(
+                            (e.stat().st_mtime for e in entries if e.name.startswith("appmanifest_")), default=0)
+                except OSError:
+                    pass
         return times
 
     def _check_for_changes(self) -> None:
@@ -347,10 +355,26 @@ class SteamService(MusicService):
         self.scan_progress.update(scanning=True, found=0, error="")
         self.scan_task = asyncio.get_event_loop().create_task(self._scan())
 
+    def _installed_now(self) -> set[str]:
+        return {a for a, s in self.soundtracks.items() if s.get("installed") and s.get("tracks")}
+
     async def _scan(self) -> None:
+        before = self._installed_now()
+        first = not self.scan_progress.get("last_scan")
         try:
             await asyncio.to_thread(self._scan_blocking)
             self.scan_progress["last_scan"] = time.time()
+            # a soundtrack finished installing (or went): said, and every page showing them is drawn again
+            # (the page that set this scan off was answered from before it)
+            after = self._installed_now()
+            announce = getattr(self, "announce", None)
+            if announce and not first and after != before:
+                added = [self._name(a) for a in self._by_name(list(after - before))]
+                gone = len(before - after)
+                if added:
+                    announce(f"{', '.join(added[:3])}{' and more' if len(added) > 3 else ''} installed: ready to play")
+                elif gone:
+                    announce(f"{models.count(gone, 'soundtrack')} removed")
         except Exception as e:
             self.scan_progress["error"] = str(e)
             raise

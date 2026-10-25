@@ -169,22 +169,39 @@ def _clock(seconds: float) -> str:
     return f"{seconds // 3600}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
 
 
+#: DLNA's names for the audio formats it has one for (DLNA.ORG_PN): Windows' renderer (Media Player, on
+#: Windows and the Xbox) takes an item it can't name for an anonymous stream, and shows no title, artist or
+#: cover; FLAC and Ogg have no DLNA name and are sent without one, as other servers do
+DLNA_PROFILES = {"audio/mpeg": "MP3", "audio/mp4": "AAC_ISO_320", "audio/x-m4a": "AAC_ISO_320", "audio/aac": "AAC_ADTS_320",
+                 "audio/wav": "LPCM", "audio/x-wav": "LPCM", "audio/l16": "LPCM", "audio/x-ms-wma": "WMABASE"}
+
+
+def features_for(content_type: str) -> str:
+    """protocolInfo's fourth field, and the contentFeatures.dlna.org header: the format's DLNA name (when it
+    has one), byte-range seeking, streaming."""
+    profile = DLNA_PROFILES.get(content_type.split(";")[0].strip().lower())
+    return f"DLNA.ORG_PN={profile};{DLNA_FEATURES}" if profile else DLNA_FEATURES
+
+
 def didl(url: str, content_type: str, meta: dict) -> str:
-    """DIDL-Lite metadata for SetAVTransportURI: what the renderer shows and how to fetch the audio."""
+    """DIDL-Lite metadata for SetAVTransportURI: what the renderer shows and how to fetch the audio. Artists go
+    in both dc:creator (what Windows' renderer reads) and upnp:artist (what most others do)."""
     # Samsung and other DLNA renderers only show covers labelled with a DLNA image profile
     art = (f'<upnp:albumArtURI dlna:profileID="JPEG_TN">{escape(meta["art"])}</upnp:albumArtURI>'
            if meta.get("art") else "")
     duration = f' duration="{_clock(meta["duration"])}.000"' if meta.get("duration") else ""
+    artist = escape(meta.get("artist") or "")
     return (
         '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
         'xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">'
-        '<item id="0" parentID="-1" restricted="1">'
+        '<item id="1" parentID="0" restricted="1">'
         f"<dc:title>{escape(meta.get('title') or 'MusicDeck')}</dc:title>"
-        f"<upnp:artist>{escape(meta.get('artist') or '')}</upnp:artist>"
+        f"<dc:creator>{artist}</dc:creator>"
+        f'<upnp:artist role="Performer">{artist}</upnp:artist>'
         f"<upnp:album>{escape(meta.get('album') or '')}</upnp:album>{art}"
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
-        f'<res protocolInfo="http-get:*:{escape(content_type)}:{DLNA_FEATURES}"{duration}>{escape(url)}</res>'
+        f'<res protocolInfo="http-get:*:{escape(content_type)}:{features_for(content_type)}"{duration}>{escape(url)}</res>'
         "</item></DIDL-Lite>"
     )
 

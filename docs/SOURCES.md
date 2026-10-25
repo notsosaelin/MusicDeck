@@ -51,7 +51,13 @@ source (`MusicService.remove`).
   case), the original year over a reissue's (`originaldate`), composer, label (`organization`), the
   compilation flag, and a 0-5 star rating (ID3 `POPM` 0-255 as players write it, through an `EasyID3`
   key registered as "rating"; Vorbis `RATING` 0-100 or 1-5; `FMPS_RATING` 0-1). Quality from the stream
-  info: format (an `.m4a` that says ALAC is ALAC), bit depth, sample rate, bitrate, channels.
+  info: format (an `.m4a` that says ALAC is ALAC), bit depth, sample rate, bitrate, channels. WMA's tags
+  (ASF: `WM/AlbumTitle`...) are read under the same names as the rest.
+- **Formats**: `PLAYABLE_EXTENSIONS` go to the player as they are; the rest of `AUDIO_EXTENSIONS` (and an
+  `.m4a` holding ALAC) through `convert_for_playback`: ffmpeg makes a FLAC of lossless ones (AIFF, APE,
+  WavPack, DSD, TAK, TTA, CAF, MKA) and a 192 kbps Opus of lossy ones (WMA, Musepack, AC-3), once, kept
+  in `converted/` under the runtime folder up to a size, least lately played going first. Without
+  ffmpeg such a song says so.
 - **Albums**: by album artist and album; without an album artist (compilations, often), by album and
   folder, so a compilation stays one album; `CD1`/`Disc 2` folders count as their parent. An album's
   artist is its album artist, its one artist, or "Various artists". An artist's page adds the songs
@@ -69,10 +75,17 @@ source (`MusicService.remove`).
   `local-<id>-tag-history.json` for one undo. No edits while a scan runs; the index is re-read for the
   files edited, and an album renamed as a whole keeps its own picture.
 - **Catalogues** (`catalogues.py`): Apple's (iTunes Search API) and Deezer's public APIs, no account or key,
-  searched beside MusicBrainz in Look up (results say their source; ids `itunes:<id>`, `deezer:<id>`)
-  with the same release shape, and asked for covers after the Cover Art Archive (Apple's 1200 px first;
-  only an album of exactly that title by that artist). Only when sure uses MusicBrainz alone: it tells
-  one release from another.
+  searched beside MusicBrainz in Look up (ids `itunes:<id>`, `deezer:<id>`) with the same release shape,
+  and asked for covers after the Cover Art Archive (Apple's 1200 px first; only an album of exactly that
+  title by that artist).
+- **Look up** (`identify.py`): MusicBrainz (3 releases), Apple Music and Deezer (2 each) are asked at once,
+  by the tags or by names typed in; the same record from several (title, artist, track count alike) becomes
+  one, MusicBrainz's at its heart, the others filling in year, label, genres, lengths and the best cover,
+  its source naming them all ("Deezer + MusicBrainz"). Each is scored 0-100 against the album's files:
+  lengths 35%, titles 25%, album title 15%, track count 15%, artist 10%, the year nudging. Files go to
+  tracks by number, then title and length (within 3 s is a match), and the changes preview lists each pair
+  with both lengths. Only when sure tags a new album from the best record at 90 or more, with the files'
+  count of tracks and the runner-up at least 8 behind.
 - **MusicBrainz** (`musicbrainz.py`, only when asked): releases searched by album and artist ("Various
   artists" left out), those with the album's track count first; a release's title, album artist, first
   year, top genres, label, and track titles, artists and numbers (per disc). Track by track only when
@@ -208,8 +221,10 @@ source (`MusicService.remove`).
 - **Installing**: a not-installed soundtrack opens as a Page with an `Install` action,
   `steam://install/<appid>`, which the frontend runs with `SteamClient.URL.ExecuteSteamURL`:
   Steam's own install dialog (drive choice, size) appears. Steam changing its library folders'
-  modification times triggers a rescan on the next visit (`_check_for_changes`), so the
-  soundtrack is playable when the download ends, without a manual rescan.
+  modification times, or its newest `appmanifest_*.acf` (rewritten in place when a download finishes,
+  which leaves the folder's own time alone), triggers a rescan on the next visit (`_check_for_changes`),
+  so the soundtrack is playable when the download ends, without a manual rescan; a rescan that finds
+  soundtracks newly installed or removed says so (a toast).
 - **One album per soundtrack**: tracks are grouped by app, not by tags, and named as Steam names
   the soundtrack. Soundtracks often ship the album in several formats (`MP3/`, `FLAC/`, `WAV/`);
   `_pick_formats` keeps FLAC, then M4A, Ogg, MP3, WAV, but only among formats with (nearly) as

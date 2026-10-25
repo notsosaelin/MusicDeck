@@ -1099,9 +1099,10 @@ class Plugin:
         return await self._managed(instance_id, "tags", lambda s: s.undo_tags(kind, item_id))
 
     @_when_ready
-    async def lookup_album(self, instance_id: str, album_id: str) -> dict[str, Any]:
-        """MusicBrainz releases that may be this album."""
-        return await self._managed(instance_id, "tags", lambda s: s.lookup(album_id))
+    async def lookup_album(self, instance_id: str, album_id: str, artist: str = "", album: str = "") -> dict[str, Any]:
+        """The records this album may be, most likely first (MusicBrainz, Apple Music and Deezer, weighed against
+        the files: identify.py); `artist` and `album` search by other names than its tags'."""
+        return await self._managed(instance_id, "tags", lambda s: s.lookup(album_id, str(artist or ""), str(album or "")))
 
     @_when_ready
     async def lookup_changes(self, instance_id: str, album_id: str, release_id: str) -> dict[str, Any]:

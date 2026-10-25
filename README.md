@@ -12,7 +12,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   Your library on the left and its pages on the right, laid out as Steam's library is (an album headed by its
   art with a green Play), track lists with columns to sort, Ctrl/Shift to pick several, right-click for
   Steam's own menus, and a player along the bottom with the queue, synced lyrics, a visualizer and the
-  equalizer. Leave Music while it plays and a mini player window takes over, dragged anywhere. Also on the
+  equalizer. Click the cover for a big Now Playing (lyrics, up next or the art, full size, over the whole
+  section). Leave Music while it plays and a mini player window takes over, dragged anywhere and kept on top
+  if you like (or opened by hand from the player). Also on the
   desktop: smart playlists (Local files' songs picked by rules, as iTunes's are), Get Info for several songs
   at once, dragging songs onto a playlist or a device in the sidebar (and music files from your desktop into
   Local files), a device's capacity at a glance, keyboard shortcuts, media keys and the system's media
@@ -32,11 +34,15 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   in CD1/CD2 folders together), artists with the songs they appear on elsewhere, genres, years by decade and
   composers, all from the files' tags. MusicDeck counts plays on the Deck for Recently played, Most played and
   Not played yet; star ratings in the files make Top rated. Now Playing's Info shows the file's format
-  (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays.
+  (FLAC 24-bit · 96 kHz, MP3 · 320 kbps), year, genre, composer, label, rating and plays. MP3, FLAC, Ogg,
+  Opus, AAC/ALAC (M4A), WAV and WebM play as they are; AIFF, Monkey's Audio, WavPack, DSD (DSF/DFF), TAK,
+  TTA, CAF, MKA, WMA, Musepack and AC-3 play through ffmpeg when it's installed (lossless ones as FLAC).
 - **Library manager for your files:** edit a track's or a whole album's tags (**Y** → Edit tags; the last
-  edit to each file can be undone), fill them in from a [MusicBrainz](https://musicbrainz.org) release you
-  pick after seeing exactly what would change (MusicBrainz, and Apple Music's and Deezer's public
-  catalogues for what it doesn't know), and give albums and artists pictures: one of your own, an
+  edit to each file can be undone), fill them in with **Look up details**: [MusicBrainz](https://musicbrainz.org),
+  Apple Music's and Deezer's public catalogues are all asked at once, the same record from several of them
+  merged into one, and each weighed against your files (their lengths above all, then titles, the number of
+  tracks, artist and year) into how sure a match it is. You pick one after seeing its cover, how sure it is,
+  exactly what would change and which file becomes which track; and give albums and artists pictures: one of your own, an
   album's cover from the Cover Art Archive (then Apple's or Deezer's, up to 1200 px), an artist's picture from Deezer's public catalogue (no account),
   or every missing one at once (Decky → MusicDeck → the source's menu → Find missing artwork). Pictures are
   kept in MusicDeck. Lyrics found online can be kept for a track, an album, or the whole library (Find
@@ -193,7 +199,7 @@ playlist without opening it, **Y** opens a track's or playlist's options (includ
 playing track), **B** goes back, **L1**/**R1** switch tabs. Re-selecting Library or Search returns to its start.
 
 Desktop: **Space** plays and pauses, **Ctrl+←/→** previous and next, **Ctrl+↑/↓** volume, **Ctrl+F** search,
-**Ctrl+L** lyrics, **Ctrl+Q** queue, **Alt+←/→** (or Steam's arrows, or the mouse's side buttons) back and
+**Ctrl+L** lyrics, **Ctrl+Q** queue (in the big Now Playing too; **Esc** leaves it), **Alt+←/→** (or Steam's arrows, or the mouse's side buttons) back and
 forward, **Ctrl+A** picks every song in a list, **Enter** plays the picked ones. Double-click a song to play from
 it; right-click anything for its menu.
 
@@ -215,7 +221,9 @@ lowest brightness under a black screen: nearly dark, on any device.
 volume slider then sets the device's volume and shows its name. The equalizer, volume levelling and
 crossfade only apply on the Deck. Spotify can't be cast from MusicDeck (use Spotify Connect); TVs and
 receivers get CD quality from Qobuz, and AAC rather than Opus from YouTube. UPnP renderers can't play
-HLS streams (some radio stations, SoundCloud, TIDAL).
+HLS streams (some radio stations, SoundCloud, TIDAL). Renderers get the title, artist, album and cover
+with each song (DIDL-Lite with DLNA profiles), as Windows Media Player on an Xbox expects. On desktop
+Steam, the cast button is in the player along the bottom.
 
 **Game music:** with a game running, open an album or playlist in MusicDeck and press the gamepad button
 next to Play (or choose "Play when … starts" from a row's options). From then on it plays whenever that

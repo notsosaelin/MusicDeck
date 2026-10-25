@@ -21,8 +21,27 @@ export const places = new Store<{ back: Place[]; current: Place; forward: Place[
   forward: [],
 });
 
-/** which panel is open beside the page (the queue, the lyrics) */
-export const panel = new Store<{ open: "queue" | "lyrics" | null }>({ open: null });
+/** what the desktop controller does that views ask for (set while desktop Steam shows) */
+export const desktopActions = { toggleMini: () => {} };
+
+/** How what's playing shows: a panel beside the page (the queue, the lyrics), or the full Now Playing view in
+ *  the page's place (its pane: the lyrics, the queue, or only the art). Never both: the full view hides the
+ *  panel, and keeps which it was to give it back. */
+export type Pane = "queue" | "lyrics";
+export const panel = new Store<{ open: Pane | null; full: boolean; pane: Pane | "art" }>({ open: null, full: false, pane: "lyrics" });
+
+/** The bar's Lyrics or Queue: in the full view, its pane; else the panel beside the page (again: closed). */
+export function showPane(which: Pane) {
+  const p = panel.get();
+  if (p.full) panel.set({ ...p, pane: p.pane === which ? "art" : which });
+  else panel.set({ ...p, open: p.open === which ? null : which });
+}
+
+/** The full Now Playing view, opened (with the pane the panel had, if one was open) or closed. */
+export function toggleFull(open = !panel.get().full) {
+  const p = panel.get();
+  panel.set({ ...p, full: open, pane: open && p.open ? p.open : p.pane });
+}
 
 export const usePlace = () => useSyncExternalStore(places.subscribe, places.get).current;
 

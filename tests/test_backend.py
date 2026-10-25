@@ -441,8 +441,10 @@ async def run():
         catmod.ITUNES, catmod.DEEZER = mb_base + "/itunes", mb_base + "/deezer"
         try:
             found = (await plugin.lookup_album(lid, hits[0]["id"]))["data"]
-            check([r["id"] for r in found] == ["rel1", "rel2"] and found[0]["tracks"] == 3 and found[0]["group"] == "rg1",
-                  f"releases with the album's track count first: {found}")
+            # rel2 (12 tracks) can't be fetched here, so it can't be weighed against the files: only what can be
+            check(found[0]["id"] == "rel1" and found[0]["tracks"] == 3 and found[0]["group"] == "rg1"
+                  and found[0]["confidence"] >= 90 and "rel2" not in [r["id"] for r in found],
+                  f"the release that is the album, weighed against its songs, first and sure: {found}")
             check("artist:" not in mb_calls[0][1]["query"] and mb_calls[0][2].startswith("MusicDeck/"),
                   f"a compilation isn't searched by 'Various artists'; the app names itself: {mb_calls[0]}")
             preview = (await plugin.lookup_changes(lid, hits[0]["id"], "rel1"))["data"]
@@ -579,8 +581,11 @@ async def run():
             await library.scan_task
             cat = next(k for k, v in library._albums().items() if v[0][1]["album"] == "Catalogue Only")
             found = (await plugin.lookup_album(lid, cat))["data"]
-            check([(r["id"], r["source"]) for r in found[:2]] == [("itunes:77", "Apple Music"), ("deezer:88", "Deezer")]
-                  and found[0]["year"] == "2023", f"an album MusicBrainz doesn't know, found in the catalogues: {found[:3]}")
+            # Apple's and Deezer's albums are one record (the same songs): one choice, not one per catalogue
+            check(found[0]["sources"] == ["Apple Music", "Deezer"] and found[0]["year"] == "2023"
+                  and found[0]["confidence"] >= 90 and found[0]["cover"].endswith("1200x1200bb.jpg")
+                  and not any(r["id"] == "deezer:88" for r in found),
+                  f"an album MusicBrainz doesn't know, found in the catalogues, as one record: {found[:3]}")
             preview = (await plugin.lookup_changes(lid, cat, "deezer:88"))["data"]
             check({c[0]: c[2] for c in preview["album"]} == {"Year": "2023", "Genre": "Indie",
                                                               "Label": "Small Label"}
@@ -2785,6 +2790,8 @@ async def run():
 
         print("steam soundtracks")
         from musicdeck.services import steam as stmod
+        # only the Steam made here: on Windows the real one (the registry's) would be found too
+        stmod._windows_steam = lambda: ()
         check(stmod.parse_vdf('"a" { "B" "x \\"y\\"" // note\n "c" { } }') == {"a": {"b": 'x "y"', "c": {}}},
               "vdf: nesting, escapes, comments, lower-cased keys")
         steam_root = os.path.join(tmp, ".local", "share", "Steam")
@@ -2842,7 +2849,8 @@ async def run():
               f"home: the running game's soundtrack first {[s['title'] for s in home]}")
         check([c["id"] for c in home[0]["items"]] == ["100"], "running game's soundtrack")
         check([c["title"] for c in home[1]["items"]] == ["Game Soundtrack", "Old Game OST"],
-              "installed from every library, DLC soundtracks included, named as Steam names them")
+              f"installed from every library, DLC soundtracks included, named as Steam names them "
+              f"{[c['title'] for c in home[1]['items']]} {[s['title'] for s in home]}")
         check([(c["id"], c["subtitle"]) for c in home[3]["items"]]
               == [("300", "Installing…"), ("400", "Not installed · Other Game"), ("500", "Not installed")],
               "not installed: downloading, with its game, plain")

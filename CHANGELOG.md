@@ -3,6 +3,46 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.33.0
+
+- **A big Now Playing in desktop Steam**: click the cover in the player (or the expand button beside it) and
+  the song takes the whole Music section, its cover large over a blur of itself, with its lyrics, what's up
+  next or just the art beside it. The side panel and the big view never show together: the lyrics or queue
+  you had open go along into the big view and come back when you leave it (Esc, or the button again).
+- **Look up details, better at finding the right album**: MusicBrainz, Apple Music and Deezer are asked at
+  once, the same record from several of them merged into one (MusicBrainz's track titles, the best cover,
+  the year, label and genres from whichever has them), and every record is weighed against your files,
+  above all by the songs' lengths, into how sure a match it is (100% for a record whose every track is the
+  right length). Nothing to choose between sources: the best is simply first.
+  - On the desktop, a window of its own: the records with their covers and how sure each is, and for the
+    one picked its cover large, what would change, and which file becomes which track with both lengths
+    (✓ within 3 seconds). A search by other names when the tags are too far off.
+  - In Game Mode, the records as a grid of covers with how sure each is.
+  - New albums tagged without asking ("Only when sure") only from a record at 90% or more that's well
+    ahead of the next one.
+- **More formats**: AIFF, Monkey's Audio, WavPack, DSD, TAK, TTA, CAF, MKA, WMA, Musepack, AC-3 and ALAC
+  in M4A now play, converted by ffmpeg the first time (lossless ones to FLAC, so nothing is lost) and kept
+  for next time. WMA's tags are read.
+- **Casting to Windows Media Player and TVs**: each song now goes with its title, artist, album and cover in
+  the form DLNA renderers expect, and the stream answers as they want it to. An Xbox's Windows Media Player
+  showed a bare ":sourcereceiver:" before. (Tried by the tests, not yet on an Xbox.)
+- **Desktop fixes**, from the first round of use:
+  - The **mini player** showed nowhere (it opened hidden). It's back, and opens by hand from the player's
+    button too; a pin keeps it above other windows. Opened by hand, it stays until you close it.
+  - The **cast button** is in the desktop player.
+  - Dialogs (settings, the equalizer, smart playlists...) can be **resized**, open at a size that fits what
+    they hold, and are titled "MusicDeck Settings" and so on rather than "Decky Dialog".
+  - **Dragging music files** from the desktop onto Music works (it showed a "no entry" sign): "Drop to add to
+    Local files" shows while you drag. "Add music files…" in the sidebar picks them instead.
+  - Right-click menus open where you clicked.
+  - **Library** in Steam's top bar no longer stays underlined while Music shows.
+  - Coming back to Music from a page with an address bar (Store, Community, Help) showed that page over
+    Music; Music now steps aside for it and comes back whole.
+  - The mouse wheel scrolls the page when over a row of albums; pages use wider grids where there's room.
+  - Albums and playlists without a cover show a music icon instead of nothing.
+- **Steam soundtracks**: one installed while MusicDeck was running still showed as "Not installed" on Home;
+  a finished download is noticed now, and a toast says it's ready to play.
+
 ## 0.32.0
 
 - **MusicDeck in desktop Steam**: a **Music** tab between Library and Community, with a section of its own,

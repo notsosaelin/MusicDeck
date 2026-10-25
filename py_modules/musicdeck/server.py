@@ -517,12 +517,13 @@ class StreamServer:
 
 
 async def _dlna_headers(request: web.Request, response: web.StreamResponse) -> None:
-    """DLNA renderers (Samsung's especially) ask how media may be fetched, and wait or give up without
-    an answer: audio streams and seeks by byte range, pictures arrive whole."""
-    if "getcontentFeatures.dlna.org" not in request.headers:
-        return
+    """How media may be fetched, as DLNA renderers want it said: Samsung's ask and wait for an answer;
+    Windows' (Media Player, on Windows and the Xbox) doesn't always ask, but only takes a stream for a song
+    when it's said. Said on every answer: audio streams and seeks by byte range, pictures arrive whole."""
+    from .cast import upnp  # (the cast package uses the server: not at load)
+
     picture = request.path.endswith("/art")
     response.headers["transferMode.dlna.org"] = "Interactive" if picture else "Streaming"
     response.headers["contentFeatures.dlna.org"] = (
         "DLNA.ORG_PN=JPEG_TN;DLNA.ORG_OP=00;DLNA.ORG_FLAGS=00f00000000000000000000000000000" if picture
-        else "DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000")
+        else upnp.features_for(response.content_type or ""))

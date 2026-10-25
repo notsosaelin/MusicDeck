@@ -3,7 +3,8 @@
  * owns its soundtrack; the Music tab's menu on hover (as Store's and Community's have); keyboard shortcuts and
  * the mouse's back and forward buttons; a small visualizer; the equalizer and MusicDeck's settings as dialogs.
  */
-import { DialogBody, DialogHeader, ModalRoot, showModal } from "@decky/ui";
+import { DialogBody, ModalRoot } from "@decky/ui";
+import { SIZES, desktopDialog } from "./dialog";
 import { FC, useEffect, useRef } from "react";
 import * as api from "../api";
 import { Equalizer } from "../components/Equalizer";
@@ -13,7 +14,7 @@ import { notify } from "../notify";
 import { player } from "../player";
 import { switchSource } from "../sources";
 import { pluginState, useStore } from "../store";
-import { Place, goBack, goForward, panel } from "./data";
+import { Place, goBack, goForward, showPane } from "./data";
 import { TopNav, contentBounds } from "./steamui";
 
 // --- a game's soundtrack, from its page ---------------------------------------------------------------
@@ -166,8 +167,8 @@ export function shortcuts(win: Window, active: () => boolean): () => void {
       player.setVolume(v);
       api.setSetting("volume", v).catch(() => {});
     } else if (ctrl && e.key.toLowerCase() === "f") (win.document.querySelector(".md-search input") as HTMLInputElement | null)?.focus();
-    else if (ctrl && e.key.toLowerCase() === "l") panel.set({ open: panel.get().open === "lyrics" ? null : "lyrics" });
-    else if (ctrl && e.key.toLowerCase() === "q") panel.set({ open: panel.get().open === "queue" ? null : "queue" });
+    else if (ctrl && e.key.toLowerCase() === "l") showPane("lyrics");
+    else if (ctrl && e.key.toLowerCase() === "q") showPane("queue");
     else if (e.altKey && e.key === "ArrowLeft") goBack();
     else if (e.altKey && e.key === "ArrowRight") goForward();
     else handled = false;
@@ -227,23 +228,23 @@ export const Visualizer: FC<{ width?: number; height?: number }> = ({ width = 96
 // --- dialogs ----------------------------------------------------------------------------------------
 
 export const showEqualizer = () =>
-  showModal(
-    <ModalRoot>
-      <DialogHeader>Equalizer</DialogHeader>
+  desktopDialog(
+    <ModalRoot bAllowFullSize>
       <DialogBody>
         <Equalizer />
       </DialogBody>
     </ModalRoot>,
+    SIZES.equalizer,
   );
 
 export const showSettings = () =>
-  showModal(
-    <ModalRoot>
-      <DialogHeader>MusicDeck</DialogHeader>
+  desktopDialog(
+    <ModalRoot bAllowFullSize>
       <DialogBody>
         <Settings />
       </DialogBody>
     </ModalRoot>,
+    SIZES.settings,
   );
 
 export const POLISH_CSS = `

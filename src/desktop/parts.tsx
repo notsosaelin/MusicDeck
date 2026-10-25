@@ -3,8 +3,8 @@
  * names), the transport buttons and the seek bar. They follow the player's stores, as the Quick Access
  * Menu and the media center do, so every view shows the same music.
  */
-import { CSSProperties, FC } from "react";
-import { FaBackward, FaForward, FaPause, FaPlay } from "react-icons/fa";
+import { CSSProperties, FC, useState } from "react";
+import { FaBackward, FaForward, FaMusic, FaPause, FaPlay } from "react-icons/fa";
 import { player } from "../player";
 import { mediaUrl, useStore } from "../store";
 
@@ -18,8 +18,15 @@ export const Cover: FC<{ size: number }> = ({ size }) => {
   useStore(player.state);
   const item = player.current;
   const url = (item?.track.art && mediaUrl("art", item.instanceId, item.track.art)) || "";
-  const box: CSSProperties = { width: size, height: size, minWidth: size, borderRadius: 3, background: "rgba(255,255,255,0.06)" };
-  return url ? <img src={url} style={{ ...box, objectFit: "cover" }} draggable={false} /> : <div style={box} />;
+  const [failed, setFailed] = useState("");
+  const box: CSSProperties = { width: size, height: size, minWidth: size, borderRadius: 3 };
+  if (url && failed !== url)
+    return <img src={url} style={{ ...box, objectFit: "cover" }} draggable={false} onError={() => setFailed(url)} />;
+  return (
+    <div className="md-noart" style={{ ...box, fontSize: size * 0.4 }}>
+      <FaMusic />
+    </div>
+  );
 };
 
 export const Button: FC<{ label: string; onClick: () => void; big?: boolean; children: any }> = ({ label, onClick, big, children }) => (
@@ -107,5 +114,7 @@ export const PARTS_CSS = `
 .md-button:hover { background: rgba(255,255,255,0.18); color: #fff; }
 .md-nav-item { padding: 6px 16px; color: #b8bcbf; font-size: 14px; cursor: default; border-radius: 2px; }
 .md-nav-item[data-current] { color: #fff; background: rgba(255,255,255,0.08); }
+.md-noart { display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.35);
+  background: linear-gradient(135deg, #2a3240 0%, #1b2129 100%); }
 .md-nav-heading { padding: 14px 16px 4px; color: #8b929a; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
 `;

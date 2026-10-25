@@ -3,11 +3,12 @@
  * panels it opens beside the page (what's up next, the lyrics), as Spotify's desktop app has them.
  */
 import { FC, useEffect, useRef, useState } from "react";
-import { FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaSlidersH, FaVolumeDown, FaVolumeMute, FaVolumeUp } from "react-icons/fa";
+import { FaBroadcastTower, FaCompress, FaExpand, FaListUl, FaMicrophoneAlt, FaRandom, FaRedo, FaSlidersH, FaVolumeDown, FaVolumeMute, FaVolumeUp, FaWindowRestore } from "react-icons/fa";
+import { canCast, prepareCastMenu, showCastMenu } from "../components/CastMenu";
 import { Lyrics, getLyrics, setSetting } from "../api";
 import { player } from "../player";
-import { useStore } from "../store";
-import { go, panel } from "./data";
+import { pluginState, useStore } from "../store";
+import { desktopActions, go, panel, showPane, toggleFull } from "./data";
 import { Visualizer, showEqualizer } from "./polish";
 import { Controls, Cover, Seek, Titles } from "./parts";
 
@@ -46,18 +47,24 @@ const Toggle: FC<{ label: string; on: boolean; onClick: () => void; children: an
 
 export const PlayerBar: FC = () => {
   const state = useStore(player.state);
-  const open = useStore(panel).open;
+  const view = useStore(panel);
   const item = player.current;
-  const flip = (which: "queue" | "lyrics") => panel.set({ open: open === which ? null : which });
+  // lit: what shows now, in whichever view
+  const lit = (which: "queue" | "lyrics") => (view.full ? view.pane === which : view.open === which);
   const toAlbum = () => {
     const t = item?.track;
     if (t?.album_id) go({ type: "collection", collection: { id: t.album_id, kind: "album", title: t.album, subtitle: t.artist, art: t.art } });
   };
   return (
     <div className="md-bar">
-      <div className="md-bar-side" style={{ cursor: item?.track.album_id ? "pointer" : "default" }} onClick={toAlbum}>
-        <Cover size={56} />
-        <Titles />
+      <div className="md-bar-side">
+        {/* the cover opens the full Now Playing view; the names, the album (as Spotify's bar does) */}
+        <div className="md-bar-cover" title={view.full ? "Back" : "Now Playing"} onClick={() => item && toggleFull()}>
+          <Cover size={56} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1, cursor: item?.track.album_id ? "pointer" : "default" }} onClick={toAlbum}>
+          <Titles />
+        </div>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0, opacity: item ? 1 : 0.5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -79,11 +86,30 @@ export const PlayerBar: FC = () => {
         <Toggle label="Equalizer" on={false} onClick={showEqualizer}>
           <FaSlidersH />
         </Toggle>
-        <Toggle label="Lyrics" on={open === "lyrics"} onClick={() => flip("lyrics")}>
+        {/* whenever the live source can play on a speaker or TV, playing or not (as Spotify's devices button) */}
+        {canCast(item?.instanceId ?? pluginState.get()?.active_service ?? "") && (
+          <button
+            className="md-icon"
+            data-on={state.castingTo ? "" : undefined}
+            title={state.castingTo ? `Playing on ${state.castingTo.name}` : "Play on a speaker or TV"}
+            aria-label="Play on"
+            onMouseEnter={() => prepareCastMenu()}
+            onClick={(e) => showCastMenu(e.currentTarget)}
+          >
+            <FaBroadcastTower />
+          </button>
+        )}
+        <Toggle label="Mini player" on={false} onClick={() => desktopActions.toggleMini()}>
+          <FaWindowRestore />
+        </Toggle>
+        <Toggle label="Lyrics" on={lit("lyrics")} onClick={() => showPane("lyrics")}>
           <FaMicrophoneAlt />
         </Toggle>
-        <Toggle label="Queue" on={open === "queue"} onClick={() => flip("queue")}>
+        <Toggle label="Queue" on={lit("queue")} onClick={() => showPane("queue")}>
           <FaListUl />
+        </Toggle>
+        <Toggle label={view.full ? "Leave Now Playing" : "Now Playing, full"} on={view.full} onClick={() => toggleFull()}>
+          {view.full ? <FaCompress /> : <FaExpand />}
         </Toggle>
         <Volume />
       </div>
@@ -92,12 +118,12 @@ export const PlayerBar: FC = () => {
 };
 
 export const SidePanel: FC = () => {
-  const open = useStore(panel).open;
-  if (!open) return null;
+  const { open, full } = useStore(panel);
+  if (!open || full) return null;
   return <aside className="md-panel">{open === "queue" ? <Queue /> : <LyricsPanel />}</aside>;
 };
 
-const Queue: FC = () => {
+export const Queue: FC<{ big?: boolean }> = ({ big }) => {
   const state = useStore(player.state);
   const order = player.playOrder;
   const at = order.indexOf(state.index);
@@ -106,7 +132,7 @@ const Queue: FC = () => {
     const t = state.queue[i]?.track;
     if (!t) return null;
     return (
-      <div key={`${i}-${t.id}`} className="md-queue-row" data-now={now ? "" : undefined} onDoubleClick={() => player.jumpTo(i)}>
+      <div key={`${i}-${t.id}`} className={big ? "md-queue-row md-queue-big" : "md-queue-row"} data-now={now ? "" : undefined} onDoubleClick={() => player.jumpTo(i)}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="md-td" style={{ color: now ? "#1a9fff" : "#dcdedf" }}>{t.title}</div>
           <div className="md-td md-dim" style={{ fontSize: 12 }}>{t.artist}</div>
@@ -125,7 +151,7 @@ const Queue: FC = () => {
   );
 };
 
-const LyricsPanel: FC = () => {
+export const LyricsPanel: FC<{ big?: boolean }> = ({ big }) => {
   useStore(player.state);
   const item = player.current;
   const { current } = useStore(player.position);
@@ -160,7 +186,7 @@ const LyricsPanel: FC = () => {
         <div
           key={i}
           data-line={i}
-          className="md-lyric"
+          className={big ? "md-lyric md-lyric-big" : "md-lyric"}
           data-now={i === now ? "" : undefined}
           style={{ cursor: l.t !== null ? "pointer" : "default" }}
           onClick={() => l.t !== null && player.seek(l.t)}
@@ -189,4 +215,9 @@ export const BAR_CSS = `
 .md-queue-row:hover { background: rgba(255,255,255,0.05); }
 .md-lyric { font-size: 16px; line-height: 1.7; color: #8b929a; transition: color 0.2s; }
 .md-lyric[data-now] { color: #fff; }
+.md-lyric-big { font-size: 28px; line-height: 1.45; font-weight: 600; padding: 6px 0; color: rgba(255,255,255,0.35); }
+.md-lyric-big[data-now] { color: #fff; }
+.md-queue-big { padding: 10px 12px; font-size: 15px; }
+.md-bar-cover { cursor: pointer; border-radius: 3px; transition: transform 0.15s; }
+.md-bar-cover:hover { transform: scale(1.05); }
 `;

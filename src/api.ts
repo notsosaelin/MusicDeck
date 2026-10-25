@@ -385,10 +385,12 @@ export interface TagResult {
   album_id: string;
   art?: boolean;
 }
+/** A record an album may be (identify.py): what every catalogue asked says of it, weighed against the files. */
 export interface Release {
   id: string;
-  /** where it's from: MusicBrainz, Apple Music or Deezer (their catalogues) */
+  /** the catalogues that know it, joined ("MusicBrainz + Deezer") */
   source: string;
+  sources?: string[];
   group: string;
   title: string;
   artist: string;
@@ -396,7 +398,13 @@ export interface Release {
   country: string;
   tracks: number;
   format: string;
+  /** how sure it is that the files are this record, 0-100 (also as score) */
   score: number;
+  confidence?: number;
+  /** a link to its cover, at a catalogue (shown through the stream server's relay) */
+  cover?: string;
+  label?: string;
+  genres?: string[];
 }
 /** [label, before, after] */
 export type Change = [string, string, string];
@@ -405,6 +413,8 @@ export interface LookupChanges {
   album: Change[];
   tracks: [string, Change[]][];
   matched: boolean;
+  /** each file beside the release's track it was matched to: [file, its length, "3. Title" or "", that track's length] */
+  pairs?: [string, number, string, number][];
 }
 export const getTags = callable<[id: string, kind: TagKind, itemId: string], Result<TagInfo>>("get_tags");
 export const setTags = callable<
@@ -412,7 +422,9 @@ export const setTags = callable<
   Result<TagResult>
 >("set_tags");
 export const undoTags = callable<[id: string, kind: TagKind, itemId: string], Result<TagResult>>("undo_tags");
-export const lookupAlbum = callable<[id: string, albumId: string], Result<Release[]>>("lookup_album");
+export const lookupAlbum = callable<[id: string, albumId: string, artist?: string, album?: string], Result<Release[]>>(
+  "lookup_album",
+);
 export const lookupChanges = callable<[id: string, albumId: string, releaseId: string], Result<LookupChanges>>(
   "lookup_changes",
 );

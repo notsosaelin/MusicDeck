@@ -13,12 +13,14 @@ Archive, is kept in local-<id>-art/ (the music folders aren't touched) and shown
 Nothing leaves the Deck except LRCLIB lyrics lookups and the MusicBrainz look-ups the user asks for.
 """
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import random
 import struct
 import re
+import subprocess
 import time
 from typing import Any, Optional
 
@@ -26,7 +28,7 @@ import shutil
 
 import aiohttp
 
-from .. import lyrics, models, pictures, tagging
+from .. import identify, lyrics, models, native, pictures, tagging
 from ..background import spawn
 from ..catalogues import Catalogues
 from ..musicbrainz import MusicBrainz
@@ -48,7 +50,12 @@ try:
 except ImportError:  # vendored into py_modules by scripts/vendor.py; degrade to filename-only metadata
     mutagen = None
 
-AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".mp4", ".aac", ".wav", ".webm"}
+#: what Steam's browser engine plays as it is
+PLAYABLE_EXTENSIONS = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".mp4", ".aac", ".wav", ".webm"}
+#: what it doesn't, played through ffmpeg (convert_for_playback): lossless ones as FLAC, lossy as Opus
+LOSSLESS_TO_CONVERT = {".aif", ".aiff", ".aifc", ".ape", ".wv", ".dsf", ".dff", ".tak", ".tta", ".caf", ".mka"}
+LOSSY_TO_CONVERT = {".wma", ".mpc", ".ac3"}
+AUDIO_EXTENSIONS = PLAYABLE_EXTENSIONS | LOSSLESS_TO_CONVERT | LOSSY_TO_CONVERT
 #: containers that hold music as often as video (a phone's camera clips are .mp4): only audio-only ones count
 MAYBE_VIDEO = {".mp4", ".webm"}
 
@@ -149,14 +156,86 @@ def _hash(value: str) -> str:
 ID3_FRAMES = {"title": "TIT2", "artist": "TPE1", "albumartist": "TPE2", "album": "TALB",
               "tracknumber": "TRCK", "discnumber": "TPOS", "date": "TDRC", "genre": "TCON",
               "composer": "TCOM", "organization": "TPUB", "originaldate": "TDOR", "compilation": "TCMP"}
+# WMA's (ASF's) names for the same, which mutagen has no easy form of
+ASF_NAMES = {"title": "Title", "artist": "Author", "albumartist": "WM/AlbumArtist", "album": "WM/AlbumTitle",
+             "tracknumber": "WM/TrackNumber", "discnumber": "WM/PartOfSet", "date": "WM/Year", "genre": "WM/Genre",
+             "composer": "WM/Composer", "organization": "WM/Publisher", "originaldate": "WM/OriginalReleaseYear",
+             "lyrics": "WM/Lyrics"}
+
+
+def _asf(tags: Any) -> bool:
+    return type(tags).__name__ == "ASFTags"
 # several genres in one tag: "Rock; Pop", "Rock/Pop", or one value each
 GENRE_SPLIT = re.compile(r"\s*[;/|\x00]\s*")
 # folders of one album's discs ("CD1", "Disc 2"): the album is the folder above
 DISC_FOLDER = re.compile(r"^(cd|dis[ck])\s*\d+$", re.IGNORECASE)
 # what each kind of file is called, by extension (an .m4a says itself whether it's ALAC or AAC)
 FORMATS = {".mp3": "MP3", ".flac": "FLAC", ".ogg": "Ogg Vorbis", ".oga": "Ogg Vorbis", ".opus": "Opus",
-           ".m4a": "AAC", ".mp4": "AAC", ".aac": "AAC", ".wav": "WAV", ".webm": "WebM"}
-LOSSLESS = {"FLAC", "ALAC", "WAV"}
+           ".m4a": "AAC", ".mp4": "AAC", ".aac": "AAC", ".wav": "WAV", ".webm": "WebM", ".aif": "AIFF", ".aiff": "AIFF",
+           ".aifc": "AIFF", ".ape": "Monkey's Audio", ".wv": "WavPack", ".dsf": "DSD", ".dff": "DSD", ".tak": "TAK",
+           ".tta": "TTA", ".caf": "CAF", ".mka": "Matroska", ".wma": "WMA", ".mpc": "Musepack", ".ac3": "AC-3"}
+LOSSLESS = {"FLAC", "ALAC", "WAV", "AIFF", "Monkey's Audio", "WavPack", "DSD", "TAK", "TTA"}
+#: how sure a lookup must be (identify.confidence, 0-100) to fill an album's empty tags by itself
+SURE = 90
+#: songs converted for playing kept up to this much, the least lately played going first
+CONVERTED_MAX = 2 * 1024 ** 3
+
+
+def needs_converting(path: str, t: dict[str, Any]) -> bool:
+    """Whether Steam's browser engine can't play a file as it is: a format it lacks, or Apple Lossless in
+    an .m4a (which it can't decode, though it plays AAC in one)."""
+    ext = os.path.splitext(path)[1].lower()
+    return ext not in PLAYABLE_EXTENSIONS or t.get("format") == "ALAC"
+
+
+def convert_for_playback(path: str, t: dict[str, Any], cache: str) -> str:
+    """A file Steam can't play, as one it can: FLAC from lossless ones (ALAC, AIFF, Monkey's Audio, WavPack,
+    DSD...: nothing lost), Opus at 192 kbps from lossy ones (WMA, Musepack). Made once, by ffmpeg, kept in
+    `cache` (by the file's path, size and date: an edited file is made again); only the newest CONVERTED_MAX
+    of them are kept."""
+    st = os.stat(path)
+    key = hashlib.sha1(f"{path}|{st.st_size}|{st.st_mtime}".encode()).hexdigest()[:16]
+    lossy = os.path.splitext(path)[1].lower() in LOSSY_TO_CONVERT
+    target = os.path.join(cache, key + (".opus" if lossy else ".flac"))
+    if os.path.isfile(target):
+        os.utime(target)
+        return target
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise ServiceError(f"Playing {t.get('format') or os.path.splitext(path)[1]} files needs ffmpeg, which isn't installed")
+    os.makedirs(cache, exist_ok=True)
+    part = target + tagging.TEMP_SUFFIX
+    codec = ["-c:a", "libopus", "-b:a", "192k"] if lossy else ["-c:a", "flac", "-compression_level", "3"]
+    # DSD is 1-bit at MHz rates: as 24-bit 88.2 kHz PCM, which FLAC holds and every DAC takes
+    if os.path.splitext(path)[1].lower() in (".dsf", ".dff"):
+        codec += ["-ar", "88200", "-sample_fmt", "s32"]
+    result = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", path, "-map", "0:a:0",
+                             "-map_metadata", "-1", *codec, "-f", "ogg" if lossy else "flac", part],
+                            capture_output=True, text=True, errors="replace", timeout=600, **native.NO_WINDOW)
+    if result.returncode != 0 or not os.path.isfile(part):
+        with contextlib.suppress(OSError):
+            os.remove(part)
+        raise ServiceError(f"Couldn't play {os.path.basename(path)}: {result.stderr.strip()[-160:]}")
+    os.replace(part, target)
+    _trim(cache, CONVERTED_MAX)
+    return target
+
+
+def _trim(folder: str, limit: int) -> None:
+    """The oldest-used files of a folder out, until it holds `limit` bytes or less."""
+    files = []
+    for name in os.listdir(folder):
+        p = os.path.join(folder, name)
+        with contextlib.suppress(OSError):
+            st = os.stat(p)
+            files.append((st.st_mtime, st.st_size, p))
+    total = sum(size for _, size, _ in files)
+    for _, size, p in sorted(files):
+        if total <= limit:
+            break
+        with contextlib.suppress(OSError):
+            os.remove(p)
+            total -= size
 VARIOUS = "Various artists"
 SHELF = 20  # tracks or albums in a Home row
 LIST_MAX = 100  # tracks in a played or rated list
@@ -212,6 +291,9 @@ def _first(tags: Any, key: str) -> str:
         if hasattr(tags, "getall"):
             frame = tags.get(ID3_FRAMES[key])
             value = frame.text if frame is not None else None
+        elif _asf(tags):
+            # an ASF attribute says its value as a string
+            value = [str(v) for v in tags.get(ASF_NAMES.get(key, key)) or []]
         else:
             value = tags.get(key)
     except Exception:
@@ -247,6 +329,8 @@ def _all(tags: Any, key: str) -> list[str]:
         if hasattr(tags, "getall"):
             frame = tags.get(ID3_FRAMES[key])
             values = list(frame.text) if frame is not None else []
+        elif _asf(tags):
+            values = tags.get(ASF_NAMES.get(key, key)) or []
         else:
             values = tags.get(key) or []
     except Exception:
@@ -781,21 +865,21 @@ class LocalService(MusicService):
         items = self._albums()[key]
         album = items[0][1]["album"]
         owner = self._album_owner(items)
-        releases = [r for r in await self.lookup(key) if plain(r["title"]) == plain(album)]
-        if not releases:
+        records = await self.lookup(key)
+        if not records:
             return key
         if mode == "ask":
             self.review[key] = {"title": album, "artist": owner, "at": time.time()}
             self._save_review()
             done["review"] += 1
             return key
-        # MusicBrainz's only: it tells one release from another, where the catalogues name albums
-        sure = [r for r in releases if r["source"] == "MusicBrainz" and r["tracks"] == len(items) and r["score"] >= 95
-                and (owner == VARIOUS or plain(r["artist"]) == plain(owner))]
-        # every likely release the same record (pressings of one release group), or no doubt at all
-        if not sure or len({r["group"] or r["id"] for r in sure}) != 1:
+        # sure: weighed against the songs themselves (identify.py), from whichever catalogues know it, and
+        # nothing else close (two records this alike: it's left for the user to pick)
+        best = records[0]
+        runner_up = records[1]["confidence"] if len(records) > 1 else 0
+        if best["confidence"] < SURE or best["tracks"] != len(items) or runner_up > best["confidence"] - 8:
             return key
-        plan = await self._lookup_plan(key, sure[0]["id"])
+        plan = await self._lookup_plan(key, best["id"])
         # only what the files leave empty: nothing the user (or their tagger) wrote is changed
         album_changes = {f: new for f, (old, new) in plan["album"].items() if not old}
         edits = [(tid, {**album_changes, **{f: new for f, (old, new) in plan["tracks"].get(tid, {}).items() if not old}})
@@ -1487,22 +1571,56 @@ class LocalService(MusicService):
             self.mb = MusicBrainz(self._http())
         return self.mb
 
-    async def lookup(self, album_id: str) -> list[dict[str, Any]]:
-        """MusicBrainz releases that may be this album, best first."""
+    #: how many of each catalogue's likeliest albums are fetched whole to weigh against the files
+    LOOKUP_FETCH = {"MusicBrainz": 3, "Apple Music": 2, "Deezer": 2}
+
+    async def lookup(self, album_id: str, artist: str = "", album: str = "") -> list[dict[str, Any]]:
+        """The records this album may be, most likely first (identify.py): every catalogue asked, the likeliest
+        of each fetched whole and weighed against the files (track lengths, titles, numbers), the ones that are
+        the same record merged. `artist` and `album` search by other names than the files'. Each: {"id",
+        "title", "artist", "year", "tracks" (how many), "format", "country", "confidence" (0-100), "score" (the
+        same), "source" and "sources" (the catalogues that know it), "cover" (a link, when one has it)}."""
         items = self._target("album", album_id)
         first = items[0][1]
-        album = first["album"] or os.path.basename(self._album_folder(first))
         owner = self._album_owner(items)
-        artist = "" if owner == VARIOUS else owner
-        # MusicBrainz, and the catalogues that know what it may not; one that can't be asked is left out
+        album = album or first["album"] or os.path.basename(self._album_folder(first))
+        artist = artist or ("" if owner == VARIOUS else owner)
         found = await asyncio.gather(self._musicbrainz().search(artist, album, len(items)),
                                      self._catalogues().search(artist, album), return_exceptions=True)
         if isinstance(found[0], BaseException) and isinstance(found[1], BaseException):
             raise found[0] if isinstance(found[0], ServiceError) else ServiceError("Couldn't look the album up")
-        releases = [{**r, "source": "MusicBrainz"} for r in found[0]] if isinstance(found[0], list) else []
-        releases += found[1] if isinstance(found[1], list) else []
-        # the album's track count first, then the best matches; MusicBrainz's before the catalogues' on a tie
-        return sorted(releases, key=lambda r: (r["tracks"] != len(items), -r["score"], r["source"] != "MusicBrainz"))[:12]
+        hits = [{**r, "source": "MusicBrainz"} for r in found[0]] if isinstance(found[0], list) else []
+        hits += found[1] if isinstance(found[1], list) else []
+        # the likeliest of each catalogue by name and track count, fetched whole (MusicBrainz's one a second)
+        hits.sort(key=lambda r: (r["tracks"] != len(items), -r["score"]))
+        picked, per = [], {}
+        for h in hits:
+            if per.get(h["source"], 0) < self.LOOKUP_FETCH.get(h["source"], 1):
+                per[h["source"]] = per.get(h["source"], 0) + 1
+                picked.append(h)
+        fetched = await asyncio.gather(*(self._release(h["id"]) for h in picked), return_exceptions=True)
+        files = [{"title": t["title"], "track": t["track"], "disc": t["disc"], "duration": t["duration"]} for _, t in items]
+        year = str(first.get("year") or "")
+        candidates = []
+        for h, r in zip(picked, fetched):
+            if isinstance(r, BaseException) or not r.get("tracks"):
+                continue
+            candidates.append({**r, "source": h["source"], "format": h.get("format", ""), "country": h.get("country", ""),
+                               "confidence": identify.confidence(files, album, artist, year, r)})
+        found_records = identify.records(candidates)
+        # kept: the plan for one (lookup_changes, apply_lookup) is made from the record, not fetched again; by
+        # any of its catalogues' ids
+        self.identified = {i: r for r in found_records for i in [r["id"], *r.get("also", [])]}
+        return [{"id": r["id"], "group": r.get("group", ""), "title": r["title"], "artist": r["artist"], "year": r["year"],
+                 "country": r.get("country", ""), "format": r.get("format", ""), "tracks": len(r["tracks"]),
+                 "confidence": r["confidence"], "score": r["confidence"], "source": " + ".join(r["sources"]),
+                 "sources": r["sources"], "cover": r.get("cover", ""), "label": r.get("label", ""),
+                 "genres": r.get("genres", [])}
+                for r in found_records[:10]]
+
+    async def _release(self, release_id: str) -> dict[str, Any]:
+        """A catalogue's album ("itunes:...", "deezer:...") or a MusicBrainz release, whole."""
+        return await (self._catalogues().release(release_id) if ":" in release_id else self._musicbrainz().release(release_id))
 
     async def lookup_changes(self, album_id: str, release_id: str) -> dict[str, Any]:
         """What taking a release's details would change: {"release", "album": [[label, old, new]],
@@ -1514,8 +1632,15 @@ class LocalService(MusicService):
         tracks = [[os.path.basename(self.tracks[tid]["path"]), [[labels[f], old, new] for f, (old, new) in c.items()]]
                   for tid, c in plan["tracks"].items() if c]
         r = plan["release"]
+        # each file beside the release's track it was matched to, with both lengths, for the picker to show
+        pairs = []
+        for (tid, t), j in zip(self._target("album", album_id), plan["mapping"]):
+            rt = r["tracks"][j] if j is not None else None
+            pairs.append([os.path.basename(t["path"]), round(t.get("duration") or 0),
+                          f"{rt['disc']}-{rt['track']}. {rt['title']}" if rt and r["discs"] > 1 else
+                          f"{rt['track']}. {rt['title']}" if rt else "", rt.get("length", 0) if rt else 0])
         return {"release": {k: r[k] for k in ("id", "title", "artist", "year", "label")} | {"genre": "; ".join(r["genres"])},
-                "album": album, "tracks": tracks, "matched": plan["matched"]}
+                "album": album, "tracks": tracks, "matched": plan["matched"], "pairs": pairs}
 
     async def apply_lookup(self, album_id: str, release_id: str) -> dict[str, Any]:
         """Writes a release's details to the album's files; finds its cover too when the album has none."""
@@ -1539,9 +1664,8 @@ class LocalService(MusicService):
 
     async def _lookup_plan(self, album_id: str, release_id: str) -> dict[str, Any]:
         items = self._target("album", album_id)
-        # a catalogue's album ("itunes:...", "deezer:...") or a MusicBrainz release
-        r = await (self._catalogues().release(release_id) if ":" in release_id
-                   else self._musicbrainz().release(release_id))
+        # the record lookup put together (several catalogues' word on it), else the one release fetched
+        r = getattr(self, "identified", {}).get(release_id) or await self._release(release_id)
         first = items[0][1]
         wanted = {"album": r["title"], "albumartist": r["artist"], "year": r["year"],
                   "genre": "; ".join(r["genres"]), "label": r["label"]}
@@ -1550,17 +1674,23 @@ class LocalService(MusicService):
             # only what MusicBrainz knows, and only what differs from every track
             if new and any(self._field_value(t, field) != new for _, t in items):
                 album[field] = (self._field_value(first, field), new)
-        matched = len(r["tracks"]) == len(items)
+        # each file to the release's track it is (identify.match_tracks: numbers, then titles and lengths),
+        # not by order: a partial album, or one in another order, still finds its songs
+        files = [{"title": t["title"], "track": t["track"], "disc": t["disc"], "duration": t["duration"]} for _, t in items]
+        mapping = identify.match_tracks(files, r["tracks"])
+        matched = all(j is not None for j in mapping)
         tracks: dict[str, dict[str, tuple[str, str]]] = {}
-        if matched:
-            for (tid, t), rt in zip(items, r["tracks"]):
-                change = {}
-                for field, new in (("title", rt["title"]), ("artist", rt["artist"]), ("track", str(rt["track"])),
-                                   ("disc", str(rt["disc"]) if r["discs"] > 1 else "")):
-                    if new and self._field_value(t, field) != new:
-                        change[field] = (self._field_value(t, field), new)
-                tracks[tid] = change
-        return {"release": r, "album": album, "tracks": tracks, "matched": matched}
+        for (tid, t), j in zip(items, mapping):
+            if j is None:
+                continue
+            rt = r["tracks"][j]
+            change = {}
+            for field, new in (("title", rt["title"]), ("artist", rt["artist"]), ("track", str(rt["track"])),
+                               ("disc", str(rt["disc"]) if r["discs"] > 1 else "")):
+                if new and self._field_value(t, field) != new:
+                    change[field] = (self._field_value(t, field), new)
+            tracks[tid] = change
+        return {"release": r, "album": album, "tracks": tracks, "matched": matched, "mapping": mapping}
 
     # --- managing the library: artwork ---
 
@@ -1794,6 +1924,10 @@ class LocalService(MusicService):
         t = self.tracks.get(track_id)
         if not t or not os.path.isfile(t["path"]):
             raise ServiceError("Track not found")
+        if needs_converting(t["path"], t):
+            # a format Steam can't play (WMA, AIFF, Apple Lossless...): as one it can, made once
+            cache = os.path.join(self.runtime_dir, "converted")
+            return StreamSource(path=await asyncio.to_thread(convert_for_playback, t["path"], t, cache))
         return StreamSource(path=t["path"])
 
     # --- smart playlists (desktop Steam's Music section) ---

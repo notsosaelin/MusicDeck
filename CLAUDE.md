@@ -37,6 +37,13 @@
   `test_cast.py` loads the backend with those parts blocked; a module that needs one imports it when called.
 - Desktop Steam is tested through its debugger: this PC's on 127.0.0.1:8080, the Deck's through
   `ssh -N -L 18090:localhost:8080` (run with a `timeout`, and reopened when it ends).
+- Desktop test scripts that wait use SharedJSContext's timers (`window.opener.setTimeout` from the main
+  window): a minimized or covered Steam window's own timers are throttled and the script hangs.
+- Screenshots of desktop Steam don't work here (a minimized window captures the wallpaper; the Deck's
+  Xwayland gives black): check the DOM, `document.visibilityState` and `GetWindowDimensions` instead.
+  On this PC "hidden" usually means covered by another window: compare with the main window's.
+- `scripts/cdp.py <title>` picks the target titled exactly that first: the main window is "Steam",
+  the Decky side "SharedJSContext"; each test script's first line says which it runs in.
 
 ## Where things build
 

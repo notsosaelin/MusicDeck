@@ -5,6 +5,7 @@ import * as api from "./api";
 import { MusicPanel } from "./components/MusicPanel";
 import { MediaCenter } from "./components/media/MediaCenter";
 import { showTrackMenu } from "./components/TrackMenu";
+import { lookupOpener } from "./components/TagEditor";
 import { notify, releaseToastHooks } from "./notify";
 import { followState, switchSource } from "./sources";
 import {
@@ -107,6 +108,8 @@ export default definePlugin(() => {
     syncSteam,
     // desktop Steam: desktop.current?.showMusic(), .openMini(), .mini() (its window), .state()
     desktop: desktopDebug,
+    // "Look up details" for any source's album: lookup.open(sourceId, album, files)
+    lookup: lookupOpener,
     // pretend which games are running, e.g. games.reconcile([570]) then games.reconcile([]); which app
     // is in front: games.duckFor(570), games.duckFor(769)
     games: { reconcile, runningGame, toggle: toggleGameMusic, duckFor },

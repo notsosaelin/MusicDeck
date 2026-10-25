@@ -75,3 +75,11 @@ export function mediaUrl(kind: "stream" | "art", instanceId: string, id: string)
   const { base, key } = state.server;
   return `${base}/${kind}/${encodeURIComponent(instanceId)}/${encodeURIComponent(id)}?k=${encodeURIComponent(key)}`;
 }
+
+/** A picture somewhere else (a catalogue's cover), through the stream server: Steam's pages show the server's. */
+export function relayUrl(url: string | undefined): string {
+  const state = pluginState.get();
+  if (!url || !state) return "";
+  const b64 = btoa(unescape(encodeURIComponent(url))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${state.server.base}/fetch?k=${encodeURIComponent(state.server.key)}&u=${b64}`;
+}

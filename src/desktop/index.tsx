@@ -9,9 +9,11 @@
  */
 import { mediaUrl } from "../store";
 import { player } from "../player";
-import { Place, go, goBack, goForward } from "./data";
-import { loadSmart } from "./manage";
-import { SoundtrackButton, TabMenu, shortcuts } from "./polish";
+import { Place, desktopActions, go, goBack, goForward } from "./data";
+import { followDialogs } from "./dialog";
+import { installDesktopLookup } from "./identify";
+import { catchDrops, loadSmart } from "./manage";
+import { SoundtrackButton, TabMenu, currentRoute, shortcuts } from "./polish";
 import { BASE_CSS, MiniPlayer, MusicView } from "./views";
 import { Root, TopNav, UI_MODE_DESKTOP, contentBounds, createRoot, findTopNav, fontFaces, mainWindow, pageBackground } from "./steamui";
 
@@ -19,6 +21,19 @@ import { Root, TopNav, UI_MODE_DESKTOP, contentBounds, createRoot, findTopNav, f
 const CHECK_MS = 1500;
 const MINI = { width: 360, height: 92 };
 const MINI_PLACE = "musicdeck:mini-player";
+const MINI_PIN = "musicdeck:mini-player-on-top";
+// Steam's popup creation flags (EPopupCreationFlags, read from its own code): its main window's 274 is
+// Hidden | Resizable | Composited, made visible later by Steam; a window of ours must not be Hidden
+const RESIZABLE = 16;
+const ALWAYS_ON_TOP = 8192;
+
+const pinned = () => {
+  try {
+    return localStorage.getItem(MINI_PIN) === "1";
+  } catch {
+    return false;
+  }
+};
 
 class MiniWindow {
   private win: Window | null = null;
@@ -44,13 +59,15 @@ class MiniWindow {
       place = { ...place, ...JSON.parse(localStorage.getItem(MINI_PLACE) || "{}") };
     } catch {}
     // a Steam window like its others (the news popup's kind): made by SharedJSContext, drawn by us
+    const flags = RESIZABLE | (pinned() ? ALWAYS_ON_TOP : 0);
     const win = window.open(
-      `about:blank?createflags=274&minwidth=${MINI.width - 60}&minheight=${MINI.height}`,
+      `about:blank?createflags=${flags}&minwidth=${MINI.width - 60}&minheight=${MINI.height}`,
       "MusicDeck_MiniPlayer",
       `width=${MINI.width},height=${MINI.height},left=${place.x},top=${place.y}`,
     );
     if (!win) return;
     this.win = win;
+    (win as any).SteamClient?.Window?.ShowWindow?.();
     const doc = win.document;
     doc.title = "MusicDeck";
     const style = doc.createElement("style");
@@ -70,6 +87,15 @@ class MiniWindow {
           this.onDismissed();
         }}
         onOpenMusic={this.openMusic}
+        onTop={pinned()}
+        onPin={() => {
+          // on top is how the window is made: it's made again
+          try {
+            localStorage.setItem(MINI_PIN, pinned() ? "0" : "1");
+          } catch {}
+          this.close();
+          this.open(styleFrom);
+        }}
       />,
     );
     this.dragging(win);
@@ -216,11 +242,18 @@ class MusicTab {
     this.menu = new TabMenu(win, this.tab, openAt);
     this.soundtrack = new SoundtrackButton(win, nav, () => this.active, openAt);
     this.stopShortcuts = shortcuts(win, () => this.active);
+    this.stopDrops = catchDrops(win, this.host, () => this.active);
   }
 
+  private routeWatch = 0;
+  private keepCurrent = new MutationObserver(() => {
+    const { selectedClass } = this.nav;
+    for (const t of this.nav.tabs) if (t.classList.contains(selectedClass)) t.classList.remove(selectedClass);
+  });
   private menu: TabMenu;
   private soundtrack: SoundtrackButton;
   private stopShortcuts: () => void;
+  private stopDrops: () => void;
 
   get connected() {
     return this.tab.isConnected && !this.win.closed;
@@ -234,13 +267,29 @@ class MusicTab {
   show = () => {
     this.menu?.hide();
     if (this.active) return;
+    // Steam's web pages (the store, Community, Help's pages) are browser views drawn over the window, above
+    // anything in it: Steam goes back to its library first, which closes them, and Music shows over that
+    if (!currentRoute().startsWith("/library")) {
+      (window as any).SteamClient?.URL?.ExecuteSteamURL?.("steam://nav/games");
+      this.win.setTimeout(this.show, 250);
+      return;
+    }
     this.active = true;
     const { selectedClass } = this.nav;
     if (selectedClass) {
       this.lentFrom = this.nav.tabs.find((t) => t.classList.contains(selectedClass)) ?? null;
       this.lentFrom?.classList.remove(selectedClass);
       this.tab.classList.add(selectedClass);
+      // Steam draws its tabs again on hover (Library's menu), and marks Library current again: not while
+      // Music is
+      this.keepCurrent.observe(this.nav.row, { attributes: true, attributeFilter: ["class"], subtree: true });
     }
+    // Steam going to a web page itself (Help's pages, a store link, the Steam menu) while Music shows: its
+    // browser view would be drawn over Music, so Music steps aside
+    this.win.clearInterval(this.routeWatch);
+    this.routeWatch = this.win.setInterval(() => {
+      if (this.active && !currentRoute().startsWith("/library")) this.hide();
+    }, 400);
     this.place();
     this.host.style.background = pageBackground(this.win, contentBounds(this.win, this.nav).top);
     this.host.style.display = "block";
@@ -250,6 +299,8 @@ class MusicTab {
   hide = () => {
     if (!this.active) return;
     this.active = false;
+    this.keepCurrent.disconnect();
+    this.win.clearInterval(this.routeWatch);
     const { selectedClass } = this.nav;
     if (selectedClass) {
       this.tab.classList.remove(selectedClass);
@@ -280,6 +331,7 @@ class MusicTab {
     this.menu.remove();
     this.soundtrack.remove();
     this.stopShortcuts();
+    this.stopDrops();
     this.win.removeEventListener("resize", this.place);
     this.nav.row.removeEventListener("click", this.leaveOnOtherTab, true);
     this.root?.unmount();
@@ -295,8 +347,15 @@ class Desktop {
   private music: MusicTab | null = null;
   private mini = new MiniWindow(
     () => this.openMusic(),
-    () => (this.miniDismissed = true),
+    () => {
+      this.miniDismissed = true;
+      this.miniByHand = false;
+    },
   );
+  /** opened with the player bar's button: it stays, with Music showing too, until it's closed */
+  private miniByHand = false;
+  private stopDialogs = followDialogs();
+  private stopLookup = installDesktopLookup();
   private timer = window.setInterval(() => this.check(), CHECK_MS);
   private stopKeys = mediaKeys();
   private unsubscribe = player.state.subscribe(() => this.followPlayer());
@@ -304,6 +363,7 @@ class Desktop {
   private miniDismissed = false;
 
   constructor() {
+    desktopActions.toggleMini = () => this.toggleMini();
     this.check();
     // music already playing when desktop Steam shows: it's in the mini player
     if (this.playing) this.mini.open(mainWindow()?.document ?? null);
@@ -336,7 +396,19 @@ class Desktop {
   }
 
   private shown() {
-    this.mini.close();
+    if (!this.miniByHand) this.mini.close();
+  }
+
+  /** The player bar's button: the mini player opened (or closed) by hand. */
+  toggleMini() {
+    if (this.mini.isOpen) {
+      this.mini.close();
+      this.miniByHand = false;
+      return;
+    }
+    this.miniByHand = true;
+    this.miniDismissed = false;
+    this.mini.open(this.music?.win.document ?? mainWindow()?.document ?? null);
   }
 
   /** Music left while something plays: the mini player takes over. */
@@ -346,7 +418,7 @@ class Desktop {
   }
 
   private followPlayer() {
-    if (player.state.get().index < 0) {
+    if (player.state.get().index < 0 && !this.miniByHand) {
       this.mini.close();
       this.miniDismissed = false;
     } else if (this.playing && !this.miniDismissed && !this.mini.isOpen && !this.music?.active) {
@@ -357,6 +429,9 @@ class Desktop {
 
   stop() {
     window.clearInterval(this.timer);
+    this.stopDialogs();
+    this.stopLookup();
+    desktopActions.toggleMini = () => {};
     this.unsubscribe();
     this.stopKeys();
     this.music?.remove();

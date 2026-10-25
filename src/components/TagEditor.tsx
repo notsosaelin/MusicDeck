@@ -4,7 +4,6 @@ import {
   DialogButton,
   DialogFooter,
   DialogHeader,
-  Field,
   Focusable,
   MenuItem,
   MenuSeparator,
@@ -14,6 +13,7 @@ import {
   showModal,
 } from "@decky/ui";
 import { FC, ReactNode, useEffect, useRef, useState } from "react";
+import { FaCompactDisc } from "react-icons/fa";
 import {
   Collection,
   Change,
@@ -38,7 +38,7 @@ import {
 import { View, invalidateBrowserCache, navigation, setStack } from "../nav";
 import { notify } from "../notify";
 import { hasFeature } from "../player";
-import { pluginState, refreshState } from "../store";
+import { pluginState, refreshState, relayUrl } from "../store";
 import { DialogActions } from "./common";
 import { centerNav } from "./media/pages";
 
@@ -205,20 +205,52 @@ const TagModal: FC<{ closeModal?: () => void; instanceId: string; kind: TagKind;
 export const editTags = (instanceId: string, kind: TagKind, id: string, title: string) =>
   showModal(<TagModal instanceId={instanceId} kind={kind} id={id} title={title} />);
 
-/** One line of a release: what tells two pressings apart. */
-const releaseLine = (r: Release, files: number) =>
-  [
-    r.source,
-    r.artist,
-    r.year,
-    r.country,
-    r.format,
-    `${r.tracks} tracks${r.tracks !== files ? ` (yours: ${files})` : ""}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+/** How sure a match is, as a colour: green when it's sure, amber when it's likely, grey below. */
+export const confidenceColour = (n: number) => (n >= 90 ? "#59bf40" : n >= 70 ? "#d7a640" : "#8b929a");
 
-/** MusicBrainz's releases that may be the album; picking one shows what it would change. */
+/** A record to choose: its cover large, how sure it is, what it is. */
+const ReleaseCard: FC<{ release: Release; files: number; onPick: () => void }> = ({ release: r, files, onPick }) => {
+  const sure = r.confidence ?? r.score;
+  const [failed, setFailed] = useState(false);
+  const cover = relayUrl(r.cover);
+  return (
+    <Focusable
+      noFocusRing={false}
+      onActivate={onPick}
+      onClick={onPick}
+      onOKActionDescription="See changes"
+      style={{ borderRadius: 4, padding: 6, background: "rgba(255,255,255,0.04)" }}
+    >
+      <div style={{ position: "relative", aspectRatio: "1", borderRadius: 3, overflow: "hidden", background: "rgba(255,255,255,0.06)",
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {cover && !failed ? (
+          <img src={cover} onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <FaCompactDisc style={{ width: "34%", height: "34%", opacity: 0.35 }} />
+        )}
+        <div style={{ position: "absolute", top: 6, right: 6, padding: "2px 7px", borderRadius: 10, fontSize: 12, fontWeight: 700,
+                      background: confidenceColour(sure), color: "#10141a" }}>
+          {sure}%
+        </div>
+      </div>
+      <div style={{ fontSize: 14, marginTop: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.title}</div>
+      <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.35 }}>
+        {[r.artist, r.year, `${r.tracks} tracks${r.tracks !== files ? ` (yours ${files})` : ""}`].filter(Boolean).join(" · ")}
+      </div>
+      <div style={{ fontSize: 11, opacity: 0.5 }}>{r.source}</div>
+    </Focusable>
+  );
+};
+
+/** The records the album may be (every catalogue's, weighed against the files); picking one shows what it would change. */
+/** How "Look up details" opens: Game Mode's cover grid, unless desktop Steam's Music has put its own picker here
+ *  (src/desktop/identify.tsx) while it shows. */
+export const lookupOpener = {
+  open: (instanceId: string, album: Collection, files: number) => {
+    showModal(<LookupModal instanceId={instanceId} album={album} files={files} />);
+  },
+};
+
 const LookupModal: FC<{ closeModal?: () => void; instanceId: string; album: Collection; files: number }> = ({
   closeModal,
   instanceId,
@@ -246,21 +278,13 @@ const LookupModal: FC<{ closeModal?: () => void; instanceId: string; album: Coll
             <Loading />
           ) : releases.length === 0 ? (
             <div style={{ opacity: 0.7 }}>
-              MusicBrainz has nothing by that name. Fix the album's name or artist first.
+              MusicBrainz, Apple Music and Deezer have nothing by that name. Fix the album's name or artist first.
             </div>
           ) : (
-            <Focusable flow-children="column">
+            // covers to choose from, most likely first, as SteamGridDB's picker has them
+            <Focusable flow-children="grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 14 }}>
               {releases.map((r) => (
-                <Field
-                  key={r.id}
-                  focusable
-                  highlightOnFocus
-                  label={r.title}
-                  description={releaseLine(r, files)}
-                  onActivate={() => pick(r)}
-                  onClick={() => pick(r)}
-                  onOKActionDescription="See changes"
-                />
+                <ReleaseCard key={r.id} release={r} files={files} onPick={() => pick(r)} />
               ))}
             </Focusable>
           )}
@@ -504,11 +528,8 @@ export function albumManageItems(instanceId: string, album: Collection, info: Ta
       <MenuItem key="tags" onSelected={() => editTags(instanceId, "album", album.id, album.title)}>
         Edit album tags
       </MenuItem>,
-      <MenuItem
-        key="lookup"
-        onSelected={() => showModal(<LookupModal instanceId={instanceId} album={album} files={info?.files ?? 0} />)}
-      >
-        Look up on MusicBrainz
+      <MenuItem key="lookup" onSelected={() => lookupOpener.open(instanceId, album, info?.files ?? 0)}>
+        Look up details…
       </MenuItem>,
       <MenuItem key="lyrics" onSelected={() => findAlbumLyrics(instanceId, album)}>
         Find lyrics

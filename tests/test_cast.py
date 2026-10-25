@@ -265,8 +265,14 @@ async def upnp_tests(http):
     check(upnp._seconds("1:02:03.500") == 3723.5 and upnp._seconds("NOT_IMPLEMENTED") == 0 and upnp._clock(3723.9) == "1:02:03",
           "UPnP clock times convert both ways")
     meta = upnp.didl("http://deck/c/x?a=1&b=2", "audio/mp4", {"title": "Rock & <Roll>", "artist": "A", "duration": 200})
-    check("Rock &amp; &lt;Roll&gt;" in meta and "a=1&amp;b=2" in meta and "http-get:*:audio/mp4:DLNA.ORG_OP=01" in meta
+    check("Rock &amp; &lt;Roll&gt;" in meta and "a=1&amp;b=2" in meta
+          and "http-get:*:audio/mp4:DLNA.ORG_PN=AAC_ISO_320;DLNA.ORG_OP=01" in meta
           and 'duration="0:03:20.000"' in meta, "DIDL metadata is escaped and says how to fetch and seek")
+    check("<dc:creator>A</dc:creator>" in meta and '<upnp:artist role="Performer">A</upnp:artist>' in meta
+          and 'id="1" parentID="0"' in meta, "the artist as Windows' renderer reads it (dc:creator) and as others do")
+    flac = upnp.didl("http://deck/c/y", "audio/flac", {"title": "t"})
+    check("http-get:*:audio/flac:DLNA.ORG_OP=01" in flac and "DLNA.ORG_PN" not in flac,
+          "a format DLNA has no name for is sent without one")
     statuses, gone = [], []
     renderer = upnp.Renderer(device, http, statuses.append, gone.append)
     await renderer.connect()
@@ -342,6 +348,9 @@ async def lan_tests(http, path):
                   "DLNA renderers are told the track streams and seeks")
         async with http.get(link["art"], headers={"getcontentFeatures.dlna.org": "1"}) as r:
             check(r.headers.get("transferMode.dlna.org") == "Interactive", "and that the cover is a picture")
+        async with http.get(link["url"]) as r:
+            check(r.headers.get("transferMode.dlna.org") == "Streaming",
+                  "told without asking too (Windows' renderer doesn't ask, and needs it)")
         async with http.get(server.lan_base + "/c/guessed") as r:
             check(r.status == 404, "a made-up link gets nothing")
         async with http.get(server.lan_base + f"/stream/fake/t?k={server.key}") as r:

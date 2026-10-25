@@ -86,7 +86,7 @@ class MusicBrainz:
 
     async def release(self, mbid: str) -> dict[str, Any]:
         """One release: {"id", "title", "artist", "year", "genres", "label", "group",
-        "tracks": [{"disc", "track", "title", "artist"}]} in disc and track order."""
+        "tracks": [{"disc", "track", "title", "artist", "length" (seconds, 0 unknown)}]} in disc and track order."""
         r = await self._get(f"release/{mbid}", inc="recordings artist-credits release-groups labels genres")
         group = r.get("release-group") or {}
         # the genres people voted for most, the release group's when the release has none of its own
@@ -96,9 +96,11 @@ class MusicBrainz:
         tracks = []
         for medium in r.get("media") or []:
             for t in medium.get("tracks") or []:
+                length = t.get("length") or (t.get("recording") or {}).get("length") or 0
                 tracks.append({"disc": int(medium.get("position") or 1), "track": int(t.get("position") or 0),
                                "title": t.get("title") or (t.get("recording") or {}).get("title", ""),
-                               "artist": _credit(t.get("artist-credit")) or _credit(r.get("artist-credit"))})
+                               "artist": _credit(t.get("artist-credit")) or _credit(r.get("artist-credit")),
+                               "length": round(int(length) / 1000) if str(length).isdigit() else 0})
         return {"id": r.get("id", mbid), "title": r.get("title", ""), "artist": _credit(r.get("artist-credit")),
                 # the year it first came out, as the library shows it
                 "year": _year(group.get("first-release-date")) or _year(r.get("date")),

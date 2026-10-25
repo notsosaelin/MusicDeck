@@ -5,11 +5,11 @@
  * art as a game's is by its hero, with a green Play.
  */
 import { CSSProperties, FC, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { showModal } from "@decky/ui";
-import { FaEject, FaEllipsisH, FaPlay, FaRandom, FaSearch } from "react-icons/fa";
+import { FaCompactDisc, FaEject, FaEllipsisH, FaFolder, FaHdd, FaListUl, FaPlay, FaRandom, FaSearch, FaUser } from "react-icons/fa";
 import * as api from "../api";
 import { Collection, Page, Section, SmartPlaylist, Track } from "../api";
 import { showCollectionMenu, showTrackMenu } from "../components/TrackMenu";
+import { lookupOpener } from "../components/TagEditor";
 import { NameModal } from "../components/NameModal";
 import { dataVersion, invalidateBrowserCache, playFrom } from "../nav";
 import { notify } from "../notify";
@@ -21,14 +21,16 @@ import {
   DRAG_TYPE,
   Dragged,
   SmartEditor,
-  dragData,
   dropOnDevice,
+  dropTargets,
+  pickFiles,
   dropOnPlaylist,
   loadSmart,
   showSelectionMenu,
   showSmartMenu,
   smartLists,
 } from "./manage";
+import { SIZES, desktopDialog } from "./dialog";
 import { showSettings } from "./polish";
 
 const GROUPS: [string, string][] = [
@@ -38,6 +40,13 @@ const GROUPS: [string, string][] = [
   ["genres", "Genres"],
   ["files", "Files"],
 ];
+
+/** Where a right-click was, for a menu to open there: Steam's menus take the mouse event itself in place of an
+ *  element (Decky's typings say only EventTarget). */
+const clickPoint = (e: { nativeEvent: Event }) => e.nativeEvent as unknown as EventTarget;
+
+/** Whether a source keeps tags MusicDeck can fix (Local files): its albums can be looked up. */
+const canLookUp = (id: string) => !!pluginState.get()?.services.find((s) => s.id === id)?.features.includes("tags");
 
 const art = (instanceId: string, id: string | null | undefined) => (id ? mediaUrl("art", instanceId, id) || "" : "");
 
@@ -122,31 +131,26 @@ const DropItem: FC<{ onDrop: (d: Dragged) => void; current?: boolean; onClick?: 
   onMenu,
   children,
 }) => {
-  const [over, setOver] = useState(false);
+  // the drop itself is caught by catchDrops (manage.tsx), before Steam's window can refuse it
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    dropTargets.set(el, onDrop);
+    return () => {
+      dropTargets.delete(el);
+    };
+  }, [onDrop]);
   return (
     <div
+      ref={ref}
       className="md-nav-item"
       data-current={current ? "" : undefined}
-      data-over={over ? "" : undefined}
       onClick={onClick}
       onContextMenu={(e) => {
         if (!onMenu) return;
         e.preventDefault();
         onMenu(e);
-      }}
-      onDragOver={(e) => {
-        if (![...e.dataTransfer.types].includes(DRAG_TYPE)) return;
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        setOver(false);
-        const d = dragData(e);
-        if (d) {
-          e.preventDefault();
-          onDrop(d);
-        }
       }}
     >
       {children}
@@ -166,7 +170,7 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
     if (local) loadSmart();
   }, [local]);
   const create = () =>
-    showModal(
+    desktopDialog(
       <NameModal
         title="New playlist"
         action="Create"
@@ -176,6 +180,7 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
           go({ type: "collection", collection: made });
         }}
       />,
+      { ...SIZES.name, title: "New playlist" },
     );
   return (
     <>
@@ -187,7 +192,7 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
             key={l.id}
             current={at(p)}
             onClick={() => go(p)}
-            onMenu={(e) => showCollectionMenu(id, l, e.currentTarget)}
+            onMenu={(e) => showCollectionMenu(id, l, clickPoint(e))}
             onDrop={(d) => dropOnPlaylist(d, l.id, l.title)}
           >
             <span>{l.title}</span>
@@ -205,7 +210,7 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
               onClick={() => go(p)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                showSmartMenu(s, e.currentTarget, () => goHome());
+                showSmartMenu(s, clickPoint(e), () => goHome());
               }}
             >
               <span>⚙ {s.name}</span>
@@ -218,9 +223,14 @@ const Playlists: FC<{ id: string; local: boolean; at: (p: Place) => boolean }> =
       {local && (
         <div
           className="md-nav-item md-nav-add"
-          onClick={() => showModal(<SmartEditor source={id} onSaved={(s) => go({ type: "smart", playlist: s })} />)}
+          onClick={() => desktopDialog(<SmartEditor source={id} onSaved={(s) => go({ type: "smart", playlist: s })} />, SIZES.smart)}
         >
           + New smart playlist
+        </div>
+      )}
+      {local && (
+        <div className="md-nav-item md-nav-add" title="Or drag music files onto Music" onClick={(e) => pickFiles(e.currentTarget.ownerDocument)}>
+          + Add music files…
         </div>
       )}
     </>
@@ -245,7 +255,7 @@ const Devices: FC = () => {
           <DropItem
             key={d.id}
             onClick={() => go({ type: "collection", collection })}
-            onMenu={(e) => showCollectionMenu(instanceId, collection, e.currentTarget)}
+            onMenu={(e) => showCollectionMenu(instanceId, collection, clickPoint(e))}
             onDrop={(x) => (takes ? dropOnDevice(x, d.id, d.name) : notify("MusicDeck", `${d.name} can only be read`))}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -306,7 +316,7 @@ const SmartPage: FC<{ id: string; playlist: SmartPlaylist }> = ({ id, playlist }
               <button className="md-button md-wide" disabled={tracks.length < 2} onClick={() => playFrom(id, from, tracks, 0, true)}>
                 <FaRandom /> Shuffle
               </button>
-              <button className="md-button md-wide" onClick={() => showModal(<SmartEditor source={latest.source} existing={latest} />)}>
+              <button className="md-button md-wide" onClick={() => desktopDialog(<SmartEditor source={latest.source} existing={latest} />, SIZES.smart)}>
                 Edit rules
               </button>
               <button className="md-button md-wide" aria-label="More" onClick={(e) => showSmartMenu(latest, e.currentTarget, () => goHome())}>
@@ -370,12 +380,14 @@ const SectionsPage: FC<{ id: string; title: string; what: string; fetch: () => P
     <>
       <h1 className="md-title">{title}</h1>
       <Loading result={result} />
-      {result?.ok && result.data.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} />)}
+      {result?.ok && result.data.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home"} />)}
     </>
   );
 };
 
-const SectionView: FC<{ id: string; section: Section }> = ({ id, section }) => {
+/** A section: on Home, its cards a row that scrolls (as Steam's library home has them); elsewhere, a grid
+ *  using the room there is. */
+const SectionView: FC<{ id: string; section: Section; shelves?: boolean }> = ({ id, section, shelves }) => {
   if (section.notice) return <Notice text={section.notice} />;
   const from: Collection = { id: `section:${section.title}`, kind: "list", title: section.title, subtitle: "", art: null };
   return (
@@ -385,7 +397,7 @@ const SectionView: FC<{ id: string; section: Section }> = ({ id, section }) => {
         (section.display === "tiles" || section.display === "rows" ? (
           <Tiles id={id} items={section.items} />
         ) : (
-          <Cards id={id} items={section.items} row={!section.display || section.display === "shelf"} />
+          <Cards id={id} items={section.items} row={!!shelves && (!section.display || section.display === "shelf")} />
         ))}
       {!!section.tracks?.length && <TrackTable id={id} tracks={section.tracks} from={from} />}
     </section>
@@ -418,7 +430,9 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
       <header className="md-hero">
         {cover && <div className="md-hero-backdrop" style={{ backgroundImage: `url("${cover}")` }} />}
         <div className="md-hero-body">
-          {cover ? <img className="md-hero-cover" src={cover} draggable={false} /> : <div className="md-hero-cover" />}
+          <div className="md-hero-cover" style={{ overflow: "hidden", borderRadius: collection.kind === "artist" ? "50%" : 0 }}>
+            <ArtOrIcon url={cover} kind={collection.kind} />
+          </div>
           <div style={{ minWidth: 0 }}>
             <div className="md-kind">{KIND_NAMES[collection.kind] ?? ""}</div>
             <div className="md-hero-title">{page?.title ?? collection.title}</div>
@@ -438,6 +452,11 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
                 <FaRandom /> Shuffle
               </button>
               {page?.action && <PageAction id={id} collection={collection} action={page.action} />}
+              {collection.kind === "album" && canLookUp(id) && (
+                <button className="md-button md-wide" onClick={() => lookupOpener.open(id, collection, tracks.length)}>
+                  Look up details…
+                </button>
+              )}
               <button className="md-button md-wide" aria-label="More" onClick={(e) => showCollectionMenu(id, collection, e.currentTarget)}>
                 <FaEllipsisH />
               </button>
@@ -493,13 +512,40 @@ const PageBody: FC<{ id: string; page: Page; from: Collection; skipHeader?: bool
 // --- cards ------------------------------------------------------------------------------------------
 
 /** Albums, artists, playlists as covers: a row that scrolls (Home's shelves) or a wrapping grid. */
-const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, items, row }) => (
-  <div className={row ? "md-shelf" : "md-grid"}>
-    {items.map((c) => (
-      <Card key={`${c.kind}:${c.id}`} id={id} item={c} />
-    ))}
-  </div>
-);
+const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, items, row }) => {
+  const shelf = useRef<HTMLDivElement>(null);
+  // the wheel over a shelf moves it along, as Steam's library shelves do, until its end: then the page scrolls
+  useEffect(() => {
+    const el = shelf.current;
+    if (!el || !row) return;
+    const wheel = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const room = delta > 0 ? el.scrollWidth - el.clientWidth - el.scrollLeft : el.scrollLeft;
+      if (e.shiftKey || room <= 0 || el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += delta;
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => el.removeEventListener("wheel", wheel);
+  }, [row]);
+  return (
+    <div ref={shelf} className={row ? "md-shelf" : "md-grid"}>
+      {items.map((c) => (
+        <Card key={`${c.kind}:${c.id}`} id={id} item={c} />
+      ))}
+    </div>
+  );
+};
+
+const KIND_ICONS: Record<string, ReactNode> = { artist: <FaUser />, playlist: <FaListUl />, folder: <FaFolder />, device: <FaHdd /> };
+
+/** A cover, or (none, or one that won't load) the kind's icon on a soft gradient. */
+export const ArtOrIcon: FC<{ url: string; kind?: string; size?: number | string }> = ({ url, kind = "album", size = "100%" }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  if (url && !failed) return <img src={url} draggable={false} loading="lazy" onError={() => setFailed(true)} style={{ width: size, height: size, objectFit: "cover", display: "block" }} />;
+  return <div className="md-noart" style={{ width: size, height: size }}>{KIND_ICONS[kind] ?? <FaCompactDisc />}</div>;
+};
 
 async function playCollection(id: string, c: Collection) {
   const r = await api.openCollection(id, c.kind, c.id);
@@ -521,11 +567,11 @@ const Card: FC<{ id: string; item: Collection }> = ({ id, item }) => {
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        showCollectionMenu(id, item, e.currentTarget);
+        showCollectionMenu(id, item, clickPoint(e));
       }}
     >
       <div className="md-card-art" style={{ borderRadius: round ? "50%" : 3 }}>
-        {url && <img src={url} draggable={false} loading="lazy" />}
+        <ArtOrIcon url={url} kind={item.kind} />
         {item.kind !== "artist" && item.kind !== "device" && (
           <button
             className="md-card-play"
@@ -665,6 +711,7 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
                   e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ instanceId: id, tracks: about(at) } satisfies Dragged));
                   e.dataTransfer.effectAllowed = "copy";
                 }}
+                // the mouse event, not the row: Steam opens a menu given one where the click was
                 onContextMenu={(e) => {
                   e.preventDefault();
                   if (!selected.has(at)) {
@@ -672,8 +719,8 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
                     setAnchor(at);
                   }
                   const songs = about(at);
-                  if (songs.length > 1) showSelectionMenu(id, songs, from, e.currentTarget);
-                  else showTrackMenu(id, songs[0], e.currentTarget, { playlistId });
+                  if (songs.length > 1) showSelectionMenu(id, songs, from, clickPoint(e));
+                  else showTrackMenu(id, songs[0], clickPoint(e), { playlistId });
                 }}
               >
                 <div className="md-td md-dim" style={{ width: 44, textAlign: "right" }}>
@@ -729,8 +776,10 @@ export const LIBRARY_CSS = `
 .md-dim { color: #8b929a; }
 .md-section { margin-bottom: 8px; }
 .md-shelf { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; }
-.md-shelf .md-card { width: 160px; min-width: 160px; }
-.md-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px 16px; }
+.md-shelf .md-card { width: 176px; min-width: 176px; }
+.md-shelf { scroll-behavior: auto; scrollbar-width: thin; }
+.md-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 22px 18px; }
+.md-card-art .md-noart svg, .md-hero-cover .md-noart svg { width: 32%; height: 32%; }
 .md-card { cursor: pointer; min-width: 0; }
 .md-card-art { position: relative; aspect-ratio: 1; background: rgba(255,255,255,0.06); overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
 .md-card-art img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.2s; }

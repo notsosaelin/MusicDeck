@@ -29,7 +29,8 @@ async def main() -> None:
         with open(code, encoding="utf-8") as f:
             code = f.read()
     targets = json.load(urllib.request.urlopen(BASE + "/json"))
-    target = next(t for t in targets if title in t["title"])
+    # the target of exactly that title first ("Steam", desktop Steam's main window, is in "Steam Root Menu" too)
+    target = next((t for t in targets if t["title"] == title), None) or next(t for t in targets if title in t["title"])
     async with websockets.connect(target["webSocketDebuggerUrl"], max_size=2**26) as ws:
         ids = iter(range(1, 1_000_000))
 
