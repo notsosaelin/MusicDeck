@@ -487,7 +487,7 @@ class Peers:
         return {"name": self.me["name"], "session": self.session(), "services": self.services()}
 
     async def _took_over(self, request, peer_id, payload) -> dict[str, Any]:
-        await self.emit("peer_took_over", {"name": self.paired[peer_id].get("name", "")})
+        await self.emit("peer_took_over", {"id": peer_id, "name": self.paired[peer_id].get("name", "")})
         return {"ok": True}
 
     def _casting(self, action: str):

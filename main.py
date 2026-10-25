@@ -1646,12 +1646,14 @@ class Plugin:
             if not self.peers or peer_id not in self.peers.paired:
                 raise ServiceError("That device isn't paired")
             try:
+                # it stops first (and saves where it stopped, to the second), then its queue is read
+                with contextlib.suppress(peermod.PeerError):
+                    await self.peers.call(peer_id, "POST", "/p/took-over", {}, timeout=4)
+                    await asyncio.sleep(TOOK_OVER_SAVE)
                 found = await self.peers.call(peer_id, "GET", "/p/session")
                 session = self._handed_over(peer_id, found)
                 if not session["queue"]:
                     raise ServiceError("Nothing's playing there")
-                with contextlib.suppress(peermod.PeerError):
-                    await self.peers.call(peer_id, "POST", "/p/took-over", {}, timeout=4)
             except peermod.PeerError as e:
                 raise ServiceError(str(e))
             return session
@@ -2050,6 +2052,8 @@ class Plugin:
 
 #: services whose songs have the same ids for everyone: another device's are played from the same service here
 CATALOGUE_TYPES = {"qobuz", "tidal", "spotify", "youtube", "soundcloud", "bandcamp", "radio", "podcasts", "livemusic"}
+#: how long a device that's been taken over has to stop and save where it was, before its queue is read
+TOOK_OVER_SAVE = 0.6
 #: another device's music is offered to continue here for this long after it was last played
 HANDOFF_FRESH = 12 * 3600
 

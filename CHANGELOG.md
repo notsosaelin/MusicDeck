@@ -3,6 +3,16 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.3
+
+- **Picking it back up follows the music**: once another of your devices has continued what was playing here, Play
+  here carries on from where it's got to there (and it stops), back and forth as often as you like, instead of from
+  where it stopped here. Continuing takes the other device's exact second (it stops, then says where).
+- **Browse crossfades between sources**: the source before stays as it is until the next one's ready, then the next
+  fades in over it, so there's never an empty page or a reload between them; the page stays still until you move.
+- **Your library's pages are just the grid**: no source and order buttons, no count above it (Browse picks the
+  source now).
+
 ## 0.39.2
 
 - **Browse switches sources without a jump**: a source's Browse appears once its rows are loaded and in place, faded

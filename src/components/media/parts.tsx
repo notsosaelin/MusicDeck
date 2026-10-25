@@ -40,8 +40,10 @@ export const CENTER_CSS =
 /* a source's Browse coming in: faded in where it'll be, the page keeping its height meanwhile */
 /* a source's Browse coming in: hidden until its rows have settled where they'll be, then faded in; the page keeps
    its height meanwhile */
+.mc-browse-stack { display: grid; }
+.mc-browse-stack > .mc-browse-body { grid-area: 1 / 1; }
 .mc-browse-body { min-height: 70vh; opacity: 0; }
-.mc-browse-body[data-ready] { opacity: 1; transition: opacity 0.2s ease; }
+.mc-browse-body[data-ready] { opacity: 1; transition: opacity 0.22s ease; }
 /* the browser's scroll anchoring moved the page as rows and covers came in above where it was looking: off here, where
    the page's own scrolling (snapRows) decides */
 .mc-center, .mc-center * { overflow-anchor: none; }
@@ -295,9 +297,12 @@ export const CardGrid: FC<{ title: string; count: number; children: (shown: numb
   return (
     <FittedGrid
       title={
-        <SectionTitle right={<span style={{ fontSize: 14, opacity: 0.5 }}>{count.toLocaleString()}</span>}>
-          {title}
-        </SectionTitle>
+        // a grid without a name (one of Your library's pages, all of the page) has no header to take room
+        title ? (
+          <SectionTitle right={<span style={{ fontSize: 14, opacity: 0.5 }}>{count.toLocaleString()}</span>}>
+            {title}
+          </SectionTitle>
+        ) : undefined
       }
 
       onNearEnd={() => shown < count && setShown(Math.min(count, shown + GRID_STEP))}
@@ -523,7 +528,8 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
       target.focus({ preventScroll: true });
       // a card remembered from before: in view (the page's first row: the very top, as snapRows has it)
       const scroller = scrollParent(container);
-      const firstRow = !!scroller && scroller.querySelector(".mc-row-block") === target.closest(".mc-row-block");
+      const block = target.closest(".mc-row-block") as HTMLElement | null;
+      const firstRow = !!scroller && !!block && isFirstRow(scroller, block);
       if (remembered && !firstRow) target.scrollIntoView?.({ block: "nearest" });
       else {
         // the page's first thing: from the very top, so its heading shows too (set, not scrollTo: that's Steam's
@@ -534,6 +540,13 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
     }
   }, 100);
   return () => window.clearInterval(timer);
+}
+
+/** Whether a row is its page's first: of the scrolling tab, or of the Browse it's in (while one source's Browse
+ *  comes in over another's, its own first row, not the one going). */
+export function isFirstRow(scroller: HTMLElement, block: HTMLElement): boolean {
+  const page = (block.closest(".mc-browse-body") as HTMLElement | null) ?? scroller;
+  return page.querySelector(".mc-row-block") === block;
 }
 
 /** The nearest ancestor of `el` that scrolls (in the media center, the tab's contents). */
@@ -893,7 +906,7 @@ export function snapRows(container: HTMLElement | null, { under = TAB_BAR } = {}
     const top = scroller.scrollTop + box.top - view.top;
     const max = scroller.scrollHeight - scroller.clientHeight;
     // the page's first row: the very top, so what's above it (a heading, Browse's source dots) shows with it
-    if (!nearest && scroller.querySelector(".mc-row-block") === block) return 0;
+    if (!nearest && isFirstRow(scroller, block)) return 0;
     if (!nearest) return Math.max(0, Math.min(top - under - 8, max));
     const at = glide && glide.scroller === scroller ? glide.to : scroller.scrollTop;
     const room = scroller.clientHeight - under - 8 - 24;

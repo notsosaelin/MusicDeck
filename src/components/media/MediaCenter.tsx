@@ -51,7 +51,7 @@ import {
   useDetails,
 } from "./nowplaying";
 import { DEFAULT_CENTER, setCenter } from "./center";
-import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, scrollParent, snapRows } from "./parts";
+import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, isFirstRow, scrollParent, snapRows } from "./parts";
 import { librarySources } from "../../library";
 import { playCollection, useResult } from "../Browser";
 import { useOnAir } from "../NowPlaying";
@@ -995,9 +995,9 @@ const browseOn = new Store<string>("library");
 const L2 = 7;
 /** How long the controller rests on a source's dot before its Browse loads */
 const SETTLE_MS = 300;
-/** How long after switching source the page is held at its top (the new one's rows and covers coming in) */
-const SETTLE_HOLD_MS = 900;
 
+/** How long a source's Browse takes to fade in over the one before */
+const CROSSFADE_MS = 220;
 /** No change of its size for this long: what's in it has settled */
 const SETTLED_MS = 160;
 /** Shown by now however it's doing (a slow source's rows come in where they are) */
@@ -1005,9 +1005,16 @@ const SETTLED_MAX_MS = 1500;
 
 /** What's in it, hidden until it's settled (its rows loaded and laid out, no longer changing size), then faded in: it
  *  arrives where it'll stay, never seen moving into place. */
-const Settled: FC<{ children: ReactNode }> = ({ children }) => {
+const Settled: FC<{ children: ReactNode; onReady?: () => void; leaving?: boolean }> = ({ children, onReady, leaving }) => {
   const box = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (ready) onReady?.();
+  }, [ready]);
+  // set on the element itself (Steam's React doesn't pass `inert` on)
+  useEffect(() => {
+    box.current?.toggleAttribute("inert", !!leaving);
+  }, [leaving]);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -1029,6 +1036,7 @@ const Settled: FC<{ children: ReactNode }> = ({ children }) => {
     };
   }, []);
   return (
+    // leaving: the source before, shown as it was until this one's ready (and out of the controller's way)
     <div ref={box} className="mc-browse-body" data-ready={ready ? "" : undefined}>
       {children}
     </div>
@@ -1048,7 +1056,6 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
   const local = services.find((s) => s.type === "local");
   const places = [{ id: "library", name: "Your library" }, ...services.map((s) => ({ id: s.id, name: s.name }))];
   const at = places.some((p) => p.id === chosen) ? chosen : "library";
-  const source = services.find((s) => s.id === at);
   // the dot the controller's on lights and names itself at once; what's under the dots follows when it rests there a
   // moment, so passing along the dots doesn't load every source on the way
   const [shown, setShown] = useState(at);
@@ -1076,6 +1083,9 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
     </Focusable>
   );
   const half = Math.ceil(places.length / 2);
+  // what's shown: the source now, and while it comes in, the one before
+  const [layers, setLayers] = useState<string[]>([at]);
+  useEffect(() => setLayers((now) => (now[now.length - 1] === at ? now : [now[now.length - 1], at])), [at]);
   // switching source keeps the page still, as Now Playing's dots do: at the very top the moment it switches, and held
   // there (a scroll undone before it's drawn) while the new source settles, so nothing left over from the last one
   // (where the controller was, a row gliding into place) moves it
@@ -1087,21 +1097,24 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
     const hold = () => {
       if (scroller.scrollTop !== 0) scroller.scrollTop = 0;
     };
-    const release = () => scroller.removeEventListener("scroll", hold);
-    // the controller going on past the first row: the page is the user's again at once
+    const wrap = top.current;
+    // held until the user moves the page: the controller going on past the first row, the wheel, a finger
+    const release = () => {
+      scroller.removeEventListener("scroll", hold);
+      wrap?.removeEventListener("focusin", moved);
+      scroller.removeEventListener("wheel", release);
+      scroller.removeEventListener("touchstart", release);
+    };
     const moved = (e: FocusEvent) => {
       const el = e.target as HTMLElement | null;
-      if (el && !el.closest(".mc-sources") && el.closest(".mc-row-block") !== scroller.querySelector(".mc-row-block")) release();
+      const block = el?.closest(".mc-row-block") as HTMLElement | null;
+      if (el && !el.closest(".mc-sources") && !(block && isFirstRow(scroller, block))) release();
     };
     scroller.addEventListener("scroll", hold);
-    top.current?.addEventListener("focusin", moved);
-    const stop = window.setTimeout(release, SETTLE_HOLD_MS);
-    const wrap = top.current;
-    return () => {
-      window.clearTimeout(stop);
-      release();
-      wrap?.removeEventListener("focusin", moved);
-    };
+    wrap?.addEventListener("focusin", moved);
+    scroller.addEventListener("wheel", release, { passive: true });
+    scroller.addEventListener("touchstart", release, { passive: true });
+    return release;
   }, [at]);
   return (
     <Focusable
@@ -1118,13 +1131,26 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
         <div className="mc-sources-name">{places.find((p) => p.id === shown)?.name ?? ""}</div>
         <div className="mc-sources-side">{places.slice(half).map(dot)}</div>
       </Focusable>
-      <Settled key={at}>
-        {source ? (
-          <Browse instanceId={source.id} tab={BROWSE.id} sections={ownSections(source)} withHome />
-        ) : (
-          <Browse instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id} />
-        )}
-      </Settled>
+      {/* the source before stays as it was, and the new one comes in over it once it's ready, then it goes: one
+          crossfade, never an empty page */}
+      <div className="mc-browse-stack">
+        {layers.map((id) => {
+          const from = services.find((s) => s.id === id);
+          return (
+            <Settled
+              key={id}
+              leaving={id !== at}
+              onReady={() => id === at && window.setTimeout(() => setLayers([id]), CROSSFADE_MS)}
+            >
+              {from ? (
+                <Browse instanceId={from.id} tab={BROWSE.id} sections={ownSections(from)} withHome />
+              ) : (
+                <Browse instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id} />
+              )}
+            </Settled>
+          );
+        })}
+      </div>
     </Focusable>
   );
 };

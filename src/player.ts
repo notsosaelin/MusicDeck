@@ -321,6 +321,9 @@ export class Player {
   renderFor: string | null = null;
   /** playing for another device, the song it gave came to its end */
   renderEnded = false;
+  /** Another of the user's devices took the music over from here (devices.tsx): play here picks it up from where that
+   *  one's got to (and it stops), rather than from where it was here. Forgotten when something else plays here. */
+  resumeElsewhere: (() => Promise<boolean>) | null = null;
   private lastProgress = { time: 0, at: 0 };
 
   constructor() {
@@ -527,6 +530,7 @@ export class Player {
   /** Replace the queue and start playing at `start`. */
   playList(instanceId: string, tracks: Track[], start = 0, shuffle?: boolean) {
     if (!tracks.length) return;
+    this.resumeElsewhere = null;
     // a list from the one library mixes sources: each track plays from its own
     const queue = tracks.map((track) => ({ instanceId: track.source ?? instanceId, track }));
     if (shuffle !== undefined) this.state.update({ shuffle });
@@ -609,6 +613,7 @@ export class Player {
   }
 
   clear() {
+    this.resumeElsewhere = null;
     saveSession({ queue: [], index: -1, position: 0 }).catch(() => {});
     this.loadToken++;
     this.queueGeneration++;
@@ -621,6 +626,7 @@ export class Player {
 
   jumpTo(i: number) {
     dlog("jumpTo", { i });
+    this.resumeElsewhere = null;
     this.load(i);
   }
 
@@ -629,6 +635,19 @@ export class Player {
   toggle() {
     dlog("toggle", { paused: !this.deck.built || this.audio.paused, released: !this.deck.built });
     if (this.state.get().index < 0) return;
+    const elsewhere = this.resumeElsewhere;
+    if (elsewhere && !this.state.get().playing) {
+      this.resumeElsewhere = null;
+      this.state.update({ loading: true });
+      // where the other device has got to; it can't be reached: on from here
+      void elsewhere()
+        .catch(() => false)
+        .then((took) => {
+          this.state.update({ loading: false });
+          if (!took) this.toggle();
+        });
+      return;
+    }
     this.cancelFade();
     // let go of while paused (releaseAudio): built again, from where it was
     if (!this.deck.built && this.current) {

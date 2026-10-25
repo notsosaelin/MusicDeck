@@ -26,9 +26,16 @@ export function watchDevices(): () => void {
   const paired = (p: { name: string }) => notify("MusicDeck", `Paired with ${p.name}`);
   const failed = (p: { name: string }) => notify("MusicDeck", `${p.name} didn't pair`);
   // another device picked up the music: it stops here
-  const tookOver = (p: { name: string }) => {
+  const tookOver = (p: { id: string; name: string }) => {
     if (player.state.get().playing) player.toggle();
     notify("MusicDeck", `Playing on ${p.name}`);
+    // play here again: on from where it's got to there, not from where it stopped here
+    player.resumeElsewhere = async () => {
+      const r = await takeOver(p.id).catch(() => null);
+      if (!r?.ok) return false;
+      player.takeOver(r.data);
+      return true;
+    };
   };
   addEventListener("peer_pair_request", asked);
   addEventListener("peer_paired", paired);
@@ -201,9 +208,11 @@ export function useOtherSessions(): OtherSession[] {
       window.clearInterval(timer);
     };
   }, []);
-  // not what's playing here already (continued a moment ago)
+  // not what's playing here now (continued a moment ago); what stopped here when the other took it is offered, from
+  // where it's got to there
   const here = player.current;
-  return found.filter((s) => !(here && here.track.id === s.track.id));
+  const playing = player.state.get().playing;
+  return found.filter((s) => !(playing && here && here.track.id === s.track.id));
 }
 
 /** Plays here what another device was playing, from where it was; that device stops. */
