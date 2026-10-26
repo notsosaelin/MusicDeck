@@ -841,6 +841,17 @@ class Plugin:
         return await _result(work())
 
     @_when_ready
+    async def search_more(self, instance_id: str, query: str, part: str, offset: int) -> dict[str, Any]:
+        """More of a search's songs or videos (MusicService.search_more), for "Load more" at the end of the list."""
+        async def work():
+            instance = self._instance(instance_id)
+            if "more" not in instance.features or not isinstance(query, str) or not isinstance(part, str):
+                raise ServiceError(f"{instance.display_name} has no more to show")
+            start = offset if isinstance(offset, int) and not isinstance(offset, bool) and offset > 0 else 0
+            return self._liked(instance_id, {"tracks": await instance.search_more(query, part, start)})["tracks"]
+        return await _result(work())
+
+    @_when_ready
     async def browse_info(self, instance_id: str) -> dict[str, Any]:
         """Lines and covers for Browse's tiles that don't come with their own (MusicService.browse_info),
         fetched as Browse opens: {tab id: {"subtitle", "art"}}."""

@@ -988,6 +988,7 @@ const Browse: FC<{
           title={view.title}
           items={view.items}
           tracks={view.tracks}
+          more={view.more}
         />
       ) : view.type === "collection" ? (
         <CollectionPage

@@ -43,6 +43,9 @@ MOOD_PARAMS = re.compile(r"^[\w%=-]{4,200}$")
 CHANNEL_ID = re.compile(r"^UC[\w-]{22}$")
 LYRICS_IDS_TTL = 6 * 3600
 LYRICS_IDS_KEPT = 1000
+# a search's "Load more": this many more each time, from this many before what was shown (its videos mix two lists)
+MORE_STEP = 40
+MORE_OVERLAP = 20
 # opus (itag 251, ~160 kbps) first, then AAC; both play natively in Steam's Chromium
 AUDIO_FORMAT = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio"
 # for renderers that can't play Opus (most UPnP ones): AAC in MP4
@@ -228,7 +231,7 @@ class YouTubeService(LocalLikes, MusicService):
 
     type = "youtube"
     display_name = "YouTube Music"
-    features = frozenset({"star", "radio", "lyrics", "browse"})
+    features = frozenset({"star", "radio", "lyrics", "browse", "more"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
@@ -483,6 +486,17 @@ class YouTubeService(LocalLikes, MusicService):
                                    for r in got[key]) if c]
         return models.page(f"Results for “{query}”", collections=collections, tracks=self._tracks(got["songs"]),
                            extra=[{"title": "Videos", "tracks": videos}], tracks_first=True)
+
+    async def search_more(self, query: str, part: str, offset: int) -> list[dict[str, Any]]:
+        """The next of a search's songs or videos. Neither search can start part-way, so it's asked for again with
+        room for MORE_STEP more, and the end given (from a little before `offset`: the videos shown mix two lists)."""
+        if part == "Videos":
+            found = await self._youtube_search(query, offset + MORE_STEP)
+        elif part == "Songs":
+            found = self._tracks(await self._music("search", query, filter="songs", limit=offset + MORE_STEP))
+        else:
+            raise ServiceError("There's no more of that")
+        return found[max(0, offset - MORE_OVERLAP):]
 
     async def _channel_page(self, channel_id: str) -> dict[str, Any]:
         if not CHANNEL_ID.match(channel_id):

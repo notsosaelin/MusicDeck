@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Collection, Page, Section, ServiceInfo, Track, search } from "./api";
+import { Collection, Page, Section, ServiceInfo, Track, search, searchMore } from "./api";
 import { pluginState, useStore } from "./store";
 
 /**
@@ -13,6 +13,31 @@ const SEARCH_TRACKS = 5;
 const SEARCH_COLLECTIONS = 12;
 /** a source that takes longer than this is left out of the results */
 const SEARCH_SECONDS = 10;
+
+/**
+ * A search's list of songs that can go on: the songs so far, and `load` (undefined when the source can't give more,
+ * or has none left) for "Load more" at its end, adding the next ones (each song once). `part`: which of the
+ * search's lists it is (nav's SearchPart), none for a list that can't go on.
+ */
+export function useMoreSongs(
+  instanceId: string,
+  first: Track[],
+  part?: { query: string; part: string },
+): { tracks: Track[]; load?: () => void; loading: boolean } {
+  const [tracks, setTracks] = useState(first);
+  const [state, setState] = useState<"more" | "loading" | "done">("more");
+  const can = !!part && !!pluginState.get()?.services.find((s) => s.id === instanceId)?.features.includes("more");
+  const load = async () => {
+    if (!part || state !== "more") return;
+    setState("loading");
+    const r = await searchMore(instanceId, part.query, part.part, tracks.length).catch(() => null);
+    const seen = new Set(tracks.map((t) => t.id));
+    const fresh = r?.ok ? r.data.filter((t) => !seen.has(t.id)) : [];
+    setTracks((now) => [...now, ...fresh]);
+    setState(fresh.length ? "more" : "done");
+  };
+  return { tracks, load: can && state !== "done" ? load : undefined, loading: state === "loading" };
+}
 
 /** The sources in the one library's order: Local files first (the user's own), then as they're listed. */
 export const librarySources = (services: ServiceInfo[]) =>

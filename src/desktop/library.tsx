@@ -12,7 +12,7 @@ import { showCollectionMenu, showTrackMenu } from "../components/TrackMenu";
 import { KIND_TITLES, groupByKind } from "../components/Browser";
 import { lookupOpener } from "../components/TagEditor";
 import { NameModal } from "../components/NameModal";
-import { dataVersion, invalidateBrowserCache, playFrom } from "../nav";
+import { SearchPart, dataVersion, invalidateBrowserCache, playFrom } from "../nav";
 import { notify } from "../notify";
 import { player } from "../player";
 import { mediaUrl, pluginState, useStore } from "../store";
@@ -38,7 +38,7 @@ import { StatsPage } from "./stats";
 import { ToolsPage } from "./tools";
 import { ColumnsPage } from "./columns";
 import { useDownload } from "../download";
-import { LIBRARY_SORTS, LibrarySort, filterLibrary, mergeSearch, sourcesIn, useLibrarySearch, useSearchChoice } from "../library";
+import { LIBRARY_SORTS, LibrarySort, filterLibrary, mergeSearch, sourcesIn, useLibrarySearch, useMoreSongs, useSearchChoice } from "../library";
 import { continueFrom, useOtherSessions } from "../devices";
 
 /** Where a right-click was, for a menu to open there: Steam's menus take the mouse event itself in place of an
@@ -585,15 +585,16 @@ const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
           </div>
         )}
       </div>
-      {page && <SearchParts key={one?.source.id ?? ""} id={one?.source.id ?? id} page={page} query={query} />}
+      {page && <SearchParts key={one?.source.id ?? ""} id={one?.source.id ?? id} page={page} query={query} one={!!one} />}
       {!found.page && found.waiting > 0 && <Loading result={null} />}
       {!found.page && !found.waiting && <Notice text={`Nothing found for “${query}”`} />}
     </>
   );
 };
 
-/** One search's results, a part for each kind, each under its name and how many. */
-const SearchParts: FC<{ id: string; page: Page; query: string }> = ({ id, page, query }) => {
+/** One search's results, a part for each kind, each under its name and how many (`one`: a single source's, whose
+ *  song lists can go on: Load more). */
+const SearchParts: FC<{ id: string; page: Page; query: string; one: boolean }> = ({ id, page, query, one }) => {
   const from: Collection = { id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null };
   // songs, and stations apart from them
   const songs = page.tracks.filter((t) => !t.live);
@@ -606,7 +607,8 @@ const SearchParts: FC<{ id: string; page: Page; query: string }> = ({ id, page, 
   return (
     <>
       {lists.map((x) => (
-        <SongPart key={x.title} id={id} title={x.title} tracks={x.tracks} from={from} />
+        <SongPart key={x.title} id={id} title={x.title} tracks={x.tracks} from={from}
+                  more={one && x.title !== "Stations" ? { query, part: x.title } : undefined} />
       ))}
       {groupByKind(page.collections).map(([kind, items]) => (
         <section className="md-section" key={kind}>
@@ -620,9 +622,16 @@ const SearchParts: FC<{ id: string; page: Page; query: string }> = ({ id, page, 
   );
 };
 
-/** A search's songs (or episodes...): the first 30, then Show all. */
-const SongPart: FC<{ id: string; title: string; tracks: Track[]; from: Collection }> = ({ id, title, tracks, from }) => {
+/** A search's songs (or episodes...): the first 30, then Show all; then, from a source that has more, Load more. */
+const SongPart: FC<{ id: string; title: string; tracks: Track[]; from: Collection; more?: SearchPart }> = ({
+  id,
+  title,
+  tracks: first,
+  from,
+  more,
+}) => {
   const [all, setAll] = useState(false);
+  const { tracks, load, loading } = useMoreSongs(id, first, more);
   const shown = all ? tracks : tracks.slice(0, SEARCH_SONGS);
   return (
     <section className="md-section">
@@ -633,6 +642,11 @@ const SongPart: FC<{ id: string; title: string; tracks: Track[]; from: Collectio
       {tracks.length > SEARCH_SONGS && (
         <button className="md-button md-more" onClick={() => setAll(!all)}>
           {all ? "Show fewer" : `Show all ${tracks.length}`}
+        </button>
+      )}
+      {(all || tracks.length <= SEARCH_SONGS) && load && (
+        <button className="md-button md-more" style={{ marginLeft: 8 }} disabled={loading} onClick={load}>
+          {loading ? "Loading…" : "Load more"}
         </button>
       )}
     </section>

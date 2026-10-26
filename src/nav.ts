@@ -87,7 +87,19 @@ export type View =
   /** a source's own Home (its picks, charts, sections), opened from the panel's Library without switching to it */
   | { type: "source"; instanceId: string; title: string }
   /** a row's every item, from its Show all: a grid of them (a list, for songs) */
-  | { type: "all"; title: string; items: Collection[]; tracks: Track[]; /** whose they are, when not the live source's */ instanceId?: string };
+  | {
+      type: "all";
+      title: string;
+      items: Collection[];
+      tracks: Track[];
+      /** whose they are, when not the live source's */
+      instanceId?: string;
+      /** a search's list that can go on ("Load more"): the search, and which of its lists */
+      more?: SearchPart;
+    };
+
+/** One of a search's lists of songs, to ask its source for more of: "Songs", or an extra list's title ("Videos") */
+export type SearchPart = { query: string; part: string };
 
 export type StackName = "library" | "search";
 

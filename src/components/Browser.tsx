@@ -80,7 +80,7 @@ import {
   TrackRow,
 } from "./common";
 import { useDownload, useSavedCopy } from "../download";
-import { librarySources, useLibrarySearch, useSearchChoice } from "../library";
+import { librarySources, useLibrarySearch, useMoreSongs, useSearchChoice } from "../library";
 import { continueFrom, useOtherSessions } from "../devices";
 import { PanelPages } from "./PanelPages";
 import { TYPE_ICONS } from "./Settings";
@@ -885,8 +885,8 @@ const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> =
   }, [shown]);
   const id = at?.source.id ?? instanceId;
   const page = at?.page;
-  const all = (title: string, items: Collection[], tracks: Track[]) =>
-    pushView("search", { type: "all", title, items, tracks, instanceId: id });
+  const all = (title: string, items: Collection[], tracks: Track[], part?: string) =>
+    pushView("search", { type: "all", title, items, tracks, instanceId: id, more: part ? { query, part } : undefined });
   const draw = (rows: number) => {
     const first = (
       <>
@@ -918,13 +918,13 @@ const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> =
     if (songs.length)
       more.push(
         <TrackList key={`${id}:songs`} instanceId={id} tracks={songs.slice(0, rows)}
-                   head={head(songsTitle, songs.length, () => all(songsTitle, [], songs))} />,
+                   head={head(songsTitle, songs.length, () => all(songsTitle, [], songs, "Songs"))} />,
       );
     for (const x of page?.extra ?? [])
       if (x.tracks.length)
         more.push(
           <TrackList key={`${id}:${x.title}`} instanceId={id} tracks={x.tracks.slice(0, rows)}
-                     head={head(x.title, x.tracks.length, () => all(x.title, [], x.tracks))} />,
+                     head={head(x.title, x.tracks.length, () => all(x.title, [], x.tracks, x.title))} />,
         );
     for (const [kind, items] of groupByKind(page?.collections ?? []))
       more.push(
@@ -951,8 +951,20 @@ let justSearched: string | null = null;
 /** A part's Show all: every song, video or album of it, a page of their own. */
 const AllView: FC<{ instanceId: string; view: Extract<View, { type: "all" }> }> = ({ instanceId, view }) => {
   const id = view.instanceId ?? instanceId;
+  const { tracks, load, loading } = useMoreSongs(id, view.tracks, view.more);
   return view.tracks.length ? (
-    <TrackList instanceId={id} title={view.title} tracks={view.tracks} />
+    <>
+      <TrackList instanceId={id} title={view.title} tracks={tracks} />
+      {load && (
+        <PanelSection>
+          <PanelSectionRow>
+            <Field focusable highlightOnFocus bottomSeparator="none" onActivate={load} onClick={load}>
+              <div style={{ fontSize: 13, opacity: 0.8 }}>{loading ? "Loading…" : "Load more"}</div>
+            </Field>
+          </PanelSectionRow>
+        </PanelSection>
+      )}
+    </>
   ) : (
     <CollectionList instanceId={id} stack="search" title={view.title} items={view.items} limit={view.items.length} />
   );

@@ -118,6 +118,7 @@ FEATURES = {
     "playlists",   # add tracks to the user's playlists
     "progress",    # long tracks (podcast episodes) resume where they were left and can be marked played
     "browse",      # genres, moods or charts to explore (browse())
+    "more",        # a search's song (and video) lists go on past the first page: "Load more" (search_more())
 }
 
 
@@ -328,6 +329,12 @@ class MusicService:
 
     async def search(self, query: str) -> dict[str, Any]:
         """A Page of results."""
+        raise NotImplementedError
+
+    async def search_more(self, query: str, part: str, offset: int) -> list[dict[str, Any]]:
+        """More of a search's songs ("Songs") or of one of its extra lists (by its title, "Videos"), from about
+        `offset` on (feature "more"): what's already shown can come again (the caller keeps each once); none left,
+        an empty list."""
         raise NotImplementedError
 
     async def stream(self, track_id: str) -> StreamSource:

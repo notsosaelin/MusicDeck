@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.4
+
+- **Load more**: a YouTube Music or SoundCloud search's songs and videos go on past the first page. At the end of
+  their Show all (in the Quick Access panel, the media center, and desktop search with that source picked), Load more
+  adds the next 40 or so, as often as you like: YouTube's whole search (other people's uploads, lyric videos, covers,
+  mixes), not just the first page of it.
+
 ## 0.41.3
 
 - **Quick Access search can always search again**: the results take the controller only right after you search;

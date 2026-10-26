@@ -28,7 +28,7 @@ export interface Track {
 }
 
 export type Feature =
-  "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork" | "rate";
+  "star" | "scrobble" | "lyrics" | "radio" | "queue_sync" | "playlists" | "progress" | "browse" | "tags" | "artwork" | "rate" | "more";
 
 export interface LyricLine {
   /** seconds; null for unsynced lyrics */
@@ -614,6 +614,8 @@ export const logEvents = callable<[entries: { t: number; event: string; data?: R
 
 // MusicDeck playlists (stored on the device, per source)
 export const localPlaylists = callable<[id: string], Collection[]>("local_playlists");
+/** More of a search's songs ("Songs") or of an extra list ("Videos"), from about `offset` on (sources with "more") */
+export const searchMore = callable<[id: string, query: string, part: string, offset: number], Result<Track[]>>("search_more");
 /** Every MusicDeck playlist, whatever its songs' sources ("source": where each was made) */
 export const allPlaylists = callable<[], Collection[]>("all_playlists");
 

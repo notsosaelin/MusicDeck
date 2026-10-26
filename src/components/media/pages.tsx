@@ -54,11 +54,11 @@ import {
   openCollection,
   searchHistory,
 } from "../../api";
-import { bySource, useLibrarySearch, useSearchChoice } from "../../library";
+import { bySource, useLibrarySearch, useMoreSongs, useSearchChoice } from "../../library";
 import { SourcePager } from "./sources";
 import { continueFrom, useOtherSessions } from "../../devices";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
-import { View, centerTab, playFrom, setOpenInCenter } from "../../nav";
+import { SearchPart, View, centerTab, playFrom, setOpenInCenter } from "../../nav";
 import { notify } from "../../notify";
 import { hasFeature, player } from "../../player";
 import { isMissingArt, useArtLoad } from "../../art";
@@ -733,7 +733,11 @@ export const AllPage: FC<{
   title: string;
   items: Collection[];
   tracks: Track[];
-}> = ({ instanceId, stack, title, items, tracks }) => (
+  /** a search's list that can go on ("Load more" at its end) */
+  more?: SearchPart;
+}> = ({ instanceId, stack, title, items, tracks: first, more }) => {
+  const { tracks, load, loading } = useMoreSongs(instanceId, first, more);
+  return (
   <>
     {items.length > 0 && (
       <CardGrid title={title} count={items.length}>
@@ -764,10 +768,22 @@ export const AllPage: FC<{
             onSecondary={(i) => addToQueue(instanceId, tracks[i])}
             onOptions={(i, e) => showTrackMenu(instanceId, tracks[i], e?.currentTarget)}
           />
+          {load && (
+            <Focusable
+              className="mc-row"
+              noFocusRing
+              onActivate={load}
+              onClick={load}
+              style={{ padding: "10px 12px", fontSize: 15, opacity: 0.75 }}
+            >
+              {loading ? "Loading…" : "Load more"}
+            </Focusable>
+          )}
         </div>
       ))}
   </>
-);
+  );
+};
 
 /** "12 albums", "1 song" */
 const countOf = (n: number, noun: string) => `${n.toLocaleString()} ${noun}${n === 1 ? "" : "s"}`;
@@ -1151,7 +1167,7 @@ const SearchResults: FC<{ instanceId: string; stack: CenterStack; query: string 
             // marked, so the controller lands on the first result
             return found ? (
               <div className="mc-results">
-                <ResultsContent instanceId={id} stack={stack} page={found.page} />
+                <ResultsContent instanceId={id} stack={stack} page={found.page} query={query} />
               </div>
             ) : null;
           }}
@@ -1166,7 +1182,12 @@ const SearchResults: FC<{ instanceId: string; stack: CenterStack; query: string 
  * never a line of a list at a time, nor half of one): its songs (and each other list of tracks it has, episodes...),
  * as many as fit on a screen and a Show all; then a row for each kind of thing found, its Show all at its end.
  */
-const ResultsContent: FC<{ instanceId: string; stack: CenterStack; page: Page }> = ({ instanceId, stack, page }) => {
+const ResultsContent: FC<{ instanceId: string; stack: CenterStack; page: Page; query: string }> = ({
+  instanceId,
+  stack,
+  page,
+  query,
+}) => {
   // stations: their own fitted grid
   if (allStations(page.tracks)) return <PageContent instanceId={instanceId} stack={stack} page={{ ...page, tracks_first: true }} />;
   const lists = [
@@ -1177,7 +1198,8 @@ const ResultsContent: FC<{ instanceId: string; stack: CenterStack; page: Page }>
     <>
       {page.notice && <Notice>{page.notice}</Notice>}
       {lists.map((x) => (
-        <FittedTracks key={x.title} instanceId={instanceId} stack={stack} title={x.title} tracks={x.tracks} />
+        <FittedTracks key={x.title} instanceId={instanceId} stack={stack} title={x.title} tracks={x.tracks}
+                      more={{ query, part: x.title }} />
       ))}
       <Shelves instanceId={instanceId} stack={stack} items={page.collections} titled />
       {!lists.length && !page.collections.length && !page.notice && <Notice>Nothing found</Notice>}
@@ -1189,11 +1211,12 @@ const ResultsContent: FC<{ instanceId: string; stack: CenterStack; page: Page }>
  * A titled list of tracks that fits on one screen: as many as fit (measured, so on any screen, scale or text size; the
  * page's first part shares its screen with what's above it, the source dots), then Show all, opening every one.
  */
-const FittedTracks: FC<{ instanceId: string; stack: CenterStack; title: string; tracks: Track[] }> = ({
+const FittedTracks: FC<{ instanceId: string; stack: CenterStack; title: string; tracks: Track[]; more?: SearchPart }> = ({
   instanceId,
   stack,
   title,
   tracks,
+  more,
 }) => {
   const block = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -1234,7 +1257,7 @@ const FittedTracks: FC<{ instanceId: string; stack: CenterStack; title: string; 
           tracks={tracks}
           showAlbum={showAlbum}
           limit={fit}
-          onShowAll={() => pushCenter(stack, { type: "all", title, items: [], tracks, instanceId })}
+          onShowAll={() => pushCenter(stack, { type: "all", title, items: [], tracks, instanceId, more })}
           onPlay={(i) => player.playList(instanceId, tracks, i)}
           onSecondary={(i) => addToQueue(instanceId, tracks[i])}
           onOptions={(i, e) => showTrackMenu(instanceId, tracks[i], e?.currentTarget)}

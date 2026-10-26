@@ -74,7 +74,7 @@ class SoundCloudService(LocalLikes, MusicService):
 
     type = "soundcloud"
     display_name = "SoundCloud"
-    features = frozenset({"star", "radio", "browse"})
+    features = frozenset({"star", "radio", "browse", "more"})
     downloadable = True
 
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
@@ -295,6 +295,13 @@ class SoundCloudService(LocalLikes, MusicService):
                            collections=[self._user(u) for u in users.get("collection", [])]
                            + [self._playlist(p) for p in albums.get("collection", []) + playlists.get("collection", [])],
                            tracks=self._tracks_of(tracks.get("collection", [])))
+
+    async def search_more(self, query: str, part: str, offset: int) -> list[dict[str, Any]]:
+        """The next of a search's songs, from `offset` on (SoundCloud's own paging)."""
+        if part != "Songs":
+            raise ServiceError("There's no more of that")
+        found = await self._get("/search/tracks", q=query, limit=100, offset=offset)
+        return self._tracks_of(found.get("collection", []))
 
     async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
         data = await self._get(f"/tracks/{track['id']}/related", limit=50)
