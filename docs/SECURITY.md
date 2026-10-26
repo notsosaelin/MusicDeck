@@ -77,8 +77,10 @@ How MusicDeck protects the accounts and data it handles, what an audit of every 
   the casting site are plain HTTP, as the protocols are. Someone on the same network could see what's
   playing and, from the device's address, fetch the current track while casting lasts.
 - **Your devices talk in plain HTTP** on the home network (signed, not encrypted: Decky's Python has no fast
-  cipher). Someone on the same network could see which songs pass between them and what's in a listening
-  history being synced, but not change anything or ask for anything.
+  cipher). Someone on the same network could see which songs pass between them, what's in a listening
+  history being synced and the playlists kept the same on each, but not change anything or ask for anything.
+  A paired device can change this one's playlists (that's the point of keeping them the same); what it sends is
+  checked as a backup's playlists are, and its songs only ever stream from the device they're on.
 - **Plex servers' plain-HTTP local addresses** are tried with the server token, as Plex's own apps
   do on a home network.
 

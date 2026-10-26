@@ -48,6 +48,10 @@ export type View =
   | { type: "collection"; collection: Collection }
   /** one of a source's own sections (its albums, genres, charts...), opened from the media center's Browse */
   | { type: "section"; tab: string; title: string }
+  /** one of the one library's parts (every source's playlists, albums, artists, songs): the panel's Your music */
+  | { type: "library"; tab: string; title: string }
+  /** a source's own Home (its picks, charts, sections), opened from the panel's Library without switching to it */
+  | { type: "source"; instanceId: string; title: string }
   /** a row's every item, from its Show all: a grid of them (a list, for songs) */
   | { type: "all"; title: string; items: Collection[]; tracks: Track[]; /** whose they are, when not the live source's */ instanceId?: string };
 

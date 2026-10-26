@@ -2,8 +2,13 @@
 MusicDeck's own playlists, stored on the device (like NewPipe's local playlists).
 
 They work for any source, including ones without accounts (SoundCloud, YouTube), and keep each
-track's full metadata, so they open instantly and survive the source changing. Playlists are
-per-source: a playlist belongs to one service instance and only holds that source's tracks.
+track's full metadata, so they open instantly and survive the source changing. A playlist mixes
+sources: each track says which it's from ("source", an instance id; a paired device's songs
+"peer~<device>~<its source>"); "instance_id" is the source it was made from, where it's listed.
+
+They're the same on every paired device (peers.py): each device asks the others for theirs, and
+the latest change to a playlist wins; a deleted one is remembered a while ("deleted"), so it
+doesn't come back from a device that still has it.
 
 A playlist can be marked for download ("offline"); the files themselves are kept by
 offline.py per (instance, track id), so one file serves every playlist that contains the track.
@@ -13,8 +18,9 @@ import os
 import secrets
 import shutil
 import tempfile
+import re
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from . import models
 from .settings import load_json
@@ -23,20 +29,35 @@ PREFIX = "md:"  # collection ids for MusicDeck playlists, so they never collide 
 ART_PREFIX = "mdart:"  # art ids for custom playlist artwork, served from the art folder
 ART_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_ART_BYTES = 15 * 1024 * 1024
+#: what says where a song from a paired device is from: that device, its source there, the source's kind and name
+ORIGIN_KEYS = ("dev", "inst", "type", "name")
+#: a playlist's id (made here: 12 hex digits)
+ID = re.compile(r"^[0-9a-f]{6,32}$")
+#: how long a deleted playlist is remembered, so a paired device that still has it doesn't bring it back
+DELETED_FOR = 90 * 24 * 3600
 
 
 class PlaylistStore:
     def __init__(self, directory: str):
         self.path = os.path.join(directory, "playlists.json")
         self.art_dir = os.path.join(directory, "playlist-art")
-        playlists = load_json(self.path).get("playlists")
+        data = load_json(self.path)
+        playlists = data.get("playlists")
         self.playlists: list[dict[str, Any]] = playlists if isinstance(playlists, list) else []
+        # from before playlists mixed sources: each track is its playlist's source's
+        for p in self.playlists:
+            for t in p.get("tracks") or []:
+                if isinstance(t, dict):
+                    t.setdefault("source", p.get("instance_id", ""))
+        deleted = data.get("deleted")
+        self.deleted: dict[str, float] = (
+            {k: v for k, v in deleted.items() if isinstance(v, (int, float))} if isinstance(deleted, dict) else {})
 
     def _save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path), suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"version": 1, "playlists": self.playlists}, f)
+            json.dump({"version": 2, "playlists": self.playlists, "deleted": self.deleted}, f)
         os.replace(tmp, self.path)
 
     @staticmethod
@@ -71,6 +92,11 @@ class PlaylistStore:
         ours.sort(key=lambda p: p.get("updated", 0), reverse=True)
         return [self._collection(p) for p in ours]
 
+    def every(self) -> list[dict[str, Any]]:
+        """Every playlist, the latest changed first, each saying its source ("source": where it was made)."""
+        ours = sorted(self.playlists, key=lambda p: p.get("updated", 0), reverse=True)
+        return [{**self._collection(p), "source": p["instance_id"]} for p in ours]
+
     def page(self, collection_id: str) -> dict[str, Any]:
         p = self._find(collection_id)
         c = self._collection(p)
@@ -80,7 +106,7 @@ class PlaylistStore:
                source: Optional[dict[str, str]] = None) -> dict[str, Any]:
         now = time.time()
         p = {"id": secrets.token_hex(6), "instance_id": instance_id, "name": name.strip() or "New playlist",
-             "tracks": self._fresh([], tracks or []), "created": now, "updated": now,
+             "tracks": self._fresh([], tracks or [], instance_id), "created": now, "updated": now,
              # where a saved copy came from ({"kind", "id"}), and whether it's downloaded
              "source": source, "offline": False}
         self.playlists.append(p)
@@ -92,23 +118,31 @@ class PlaylistStore:
         return next((p for p in self.playlists if p["instance_id"] == instance_id and p.get("source") == source), None)
 
     @classmethod
-    def _fresh(cls, have: list[dict[str, Any]], tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """The tracks not in `have` yet, once each (anything without an id isn't a track)."""
-        seen = {t["id"] for t in have}
+    def _fresh(cls, have: list[dict[str, Any]], tracks: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+        """The tracks not in `have` yet, once each (anything without an id isn't a track), each saying its source
+        (its own "source", else `source`); one from a paired device keeps where it's from there ("origin")."""
+        seen = {(t.get("source"), t["id"]) for t in have}
         fresh = []
         for t in tracks:
-            if isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"] and t["id"] not in seen:
-                seen.add(t["id"])
-                fresh.append(models.clean_track(t))
+            if not (isinstance(t, dict) and isinstance(t.get("id"), str) and t["id"]):
+                continue
+            own = t["source"] if isinstance(t.get("source"), str) and t["source"] else source
+            if (own, t["id"]) in seen:
+                continue
+            seen.add((own, t["id"]))
+            clean = {**models.clean_track(t), "source": own}
+            if isinstance(t.get("origin"), dict):
+                clean["origin"] = {k: v for k, v in t["origin"].items() if k in ORIGIN_KEYS and isinstance(v, str)}
+            fresh.append(clean)
         return fresh
 
-    def add(self, collection_id: str, tracks: list[dict[str, Any]]) -> int:
-        """Appends tracks that aren't already in the playlist; returns how many were added (0 when
-        the playlist is gone)."""
+    def add(self, collection_id: str, tracks: list[dict[str, Any]], source: Optional[str] = None) -> int:
+        """Appends tracks that aren't already in the playlist (from `source` when they don't say: the playlist's own
+        by default); returns how many were added (0 when the playlist is gone)."""
         p = self._get(collection_id)
         if p is None:
             return 0
-        fresh = self._fresh(p["tracks"], tracks)
+        fresh = self._fresh(p["tracks"], tracks, source or p["instance_id"])
         p["tracks"].extend(fresh)
         p["updated"] = time.time()
         self._save()
@@ -118,10 +152,8 @@ class PlaylistStore:
         """A source's songs known by new ids (Local files' files moved: an id is its path's): its playlists follow."""
         changed = 0
         for p in self.playlists:
-            if p["instance_id"] != instance_id:
-                continue
             for t in p["tracks"]:
-                if t["id"] in ids:
+                if t.get("source") == instance_id and t["id"] in ids:
                     t["id"] = ids[t["id"]]
                     changed += 1
         if changed:
@@ -130,11 +162,12 @@ class PlaylistStore:
 
     # remove, rename and clear_art do nothing for a playlist that's gone (deleted from another
     # screen, or by a page left over from a reload); the views refresh afterwards
-    def remove(self, collection_id: str, track_id: str) -> None:
+    def remove(self, collection_id: str, track_id: str, source: Optional[str] = None) -> None:
+        """Takes a track out (`source`'s, when given: two sources' songs can share an id)."""
         p = self._get(collection_id)
         if p is None:
             return
-        p["tracks"] = [t for t in p["tracks"] if t["id"] != track_id]
+        p["tracks"] = [t for t in p["tracks"] if not (t["id"] == track_id and (not source or t.get("source") == source))]
         p["updated"] = time.time()
         self._save()
 
@@ -215,7 +248,7 @@ class PlaylistStore:
         if self._get(p["id"]) is not None:
             return False
         restored = {"id": p["id"], "instance_id": p["instance_id"], "name": p["name"][:200] or "Playlist",
-                    "tracks": self._fresh([], p["tracks"]), "created": p.get("created") or time.time(),
+                    "tracks": self._fresh([], p["tracks"], p["instance_id"]), "created": p.get("created") or time.time(),
                     "updated": time.time(), "source": p.get("source") if isinstance(p.get("source"), dict) else None,
                     "offline": p.get("offline") is True}
         if art and art[0] in ART_TYPES and len(art[1]) <= MAX_ART_BYTES:
@@ -232,12 +265,84 @@ class PlaylistStore:
         p = next((x for x in self.playlists if x["id"] == pid), None)
         if p:
             self._remove_art_file(p)
+            self.deleted[pid] = time.time()
         self.playlists = [p for p in self.playlists if p["id"] != pid]
         self._save()
 
     def delete_for_instance(self, instance_id: str) -> None:
+        """A source removed: its songs leave every playlist; one made from it goes when nothing else is left in it,
+        else it's listed under the source of its first song now."""
+        kept = []
         for p in self.playlists:
+            p["tracks"] = [t for t in p["tracks"] if t.get("source") != instance_id]
             if p["instance_id"] == instance_id:
-                self._remove_art_file(p)
-        self.playlists = [p for p in self.playlists if p["instance_id"] != instance_id]
+                if not p["tracks"]:
+                    self._remove_art_file(p)
+                    continue
+                p["instance_id"] = p["tracks"][0]["source"]
+            kept.append(p)
+        self.playlists = kept
         self._save()
+
+    # --- the same on every paired device ---
+
+    def shared(self, origin: Callable[[str], dict[str, str]]) -> dict[str, Any]:
+        """What a paired device is given: every playlist, each track saying where it's from in terms another device
+        can use (`origin` of its source: {"dev", "inst", "type", "name"}), and what was deleted lately."""
+        now = time.time()
+        self.deleted = {k: v for k, v in self.deleted.items() if now - v < DELETED_FOR}
+
+        def track(t: dict[str, Any]) -> dict[str, Any]:
+            out = {k: v for k, v in t.items() if k not in ("source", "origin")}
+            # a song this device has from another one: where it's from there, as it was told
+            peer = str(t.get("source", "")).startswith("peer~") and t.get("origin")
+            out["origin"] = t["origin"] if peer else origin(t.get("source", ""))
+            return out
+        return {"playlists": [{"id": p["id"], "name": p["name"], "created": p.get("created", 0),
+                               "updated": p.get("updated", 0), "home": origin(p["instance_id"]),
+                               "tracks": [track(t) for t in p["tracks"]]} for p in self.playlists],
+                "deleted": dict(self.deleted)}
+
+    def take(self, theirs: Any, here: Callable[[dict[str, str]], str]) -> bool:
+        """A paired device's playlists (as shared() gives them) into these: each one newer there replaces this one's
+        (or is added), each deleted there since it last changed here goes. `here`: an origin as a source here.
+        Whether anything changed."""
+        if not isinstance(theirs, dict):
+            return False
+        changed = False
+        deleted = theirs.get("deleted")
+        for pid, when in (deleted.items() if isinstance(deleted, dict) else []):
+            if not isinstance(pid, str) or not isinstance(when, (int, float)):
+                continue
+            p = self._get(pid)
+            if p is not None and p.get("updated", 0) <= when:
+                self._remove_art_file(p)
+                self.playlists = [x for x in self.playlists if x is not p]
+                changed = True
+            if when > self.deleted.get(pid, 0):
+                self.deleted[pid] = when
+        for r in theirs.get("playlists") or []:
+            if not (isinstance(r, dict) and isinstance(r.get("id"), str) and ID.match(r["id"])
+                    and isinstance(r.get("name"), str) and isinstance(r.get("tracks"), list)):
+                continue
+            updated = r["updated"] if isinstance(r.get("updated"), (int, float)) else 0
+            if self.deleted.get(r["id"], 0) >= updated:
+                continue
+            p = self._get(r["id"])
+            if p is not None and p.get("updated", 0) >= updated:
+                continue
+            tracks = [{**t, "source": here(t["origin"])} for t in r["tracks"]
+                      if isinstance(t, dict) and isinstance(t.get("origin"), dict)]
+            fresh = self._fresh([], tracks, "")
+            home = here(r["home"]) if isinstance(r.get("home"), dict) else ""
+            if not home or home.startswith("peer~"):
+                # made from a source only that device has: listed under the first of its songs' sources here
+                home = next((t["source"] for t in fresh if not t["source"].startswith("peer~")), "") or                     (p["instance_id"] if p else "") or home
+            if p is None:
+                p = {"id": r["id"], "created": r.get("created") or updated, "source": None, "offline": False}
+                self.playlists.append(p)
+            p.update({"name": r["name"][:200] or "Playlist", "tracks": fresh, "updated": updated, "instance_id": home})
+            changed = True
+        if changed:
+            self._save()
+        return changed

@@ -427,7 +427,7 @@ export const TrackLine: FC<{
           {n}
         </div>
       ) : (
-        <Cover instanceId={instanceId} c={{ art: track.art, kind: "album" }} size={44} />
+        <Cover instanceId={track.source ?? instanceId} c={{ art: track.art, kind: "album" }} size={44} />
       )}
       <div style={{ flex: 3, minWidth: 0 }}>
         <ScrollingText
@@ -761,7 +761,7 @@ export const StationCard: FC<{
       style={{ width: width ?? size, flexShrink: 0, padding: 2 }}
     >
       <StationArt
-        url={track.art ? mediaUrl("art", instanceId, track.art) : undefined}
+        url={track.art ? mediaUrl("art", track.source ?? instanceId, track.art) : undefined}
         name={track.title}
         style={{ width: "100%", aspectRatio: "1", borderRadius: 6 }}
       />
@@ -797,7 +797,7 @@ export const TrackCard: FC<{
       onGamepadBlur={() => setFocused(false)}
       style={{ width: size, flexShrink: 0, padding: 2 }}
     >
-      <Cover instanceId={instanceId} c={{ art: track.art, kind: "album" }} size={size} />
+      <Cover instanceId={track.source ?? instanceId} c={{ art: track.art, kind: "album" }} size={size} />
       <div style={{ marginTop: 10 }}>
         <ScrollingText text={track.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
         {track.artist && (

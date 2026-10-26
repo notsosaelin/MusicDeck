@@ -183,6 +183,8 @@ class Plugin:
                     lambda: [{"id": s["id"], "type": s["type"], "name": s["name"]} for s in self.settings.services()],
                     self.play_log, self.server.for_peer, self.http, version.current())
                 self.peers.on_cast = self._cast_here
+                self.peers.playlists_shared = lambda: self.playlists.shared(self._origin)
+                self.peers.playlists_take = self._take_playlists
                 await self.peers.start()
                 self.cast.peers = self.peers
                 self.cast.services = lambda: [{"id": s["id"], "type": s["type"], "name": s["name"]}
@@ -1661,11 +1663,55 @@ class Plugin:
             return session
         return await _result(work())
 
-    # --- MusicDeck playlists (stored on the device, per source) ---
+    # --- MusicDeck playlists (stored on the device; any mix of sources; the same on every paired device) ---
 
     @_when_ready
     async def local_playlists(self, instance_id: str) -> list[dict[str, Any]]:
         return self.playlists.for_instance(instance_id)
+
+    @_when_ready
+    async def all_playlists(self) -> list[dict[str, Any]]:
+        """Every MusicDeck playlist, whatever its songs' sources (Add to playlist offers them all)."""
+        return self.playlists.every()
+
+    def _origin(self, instance_id: str) -> dict[str, str]:
+        """Where a source's songs are from, in terms a paired device can use (playlists.py): this device and its
+        source, and the source's kind and name (a streaming service's songs are the same service's there)."""
+        if instance_id.startswith("peer~"):
+            _, dev, inst = (instance_id.split("~", 2) + ["", ""])[:3]
+            return {"dev": dev, "inst": inst, "type": "", "name": ""}
+        service = next((x for x in self.settings.services() if x["id"] == instance_id), {})
+        return {"dev": self.peers.me["id"] if self.peers else "", "inst": instance_id,
+                "type": service.get("type", ""), "name": service.get("name", "")}
+
+    def _here(self, origin: dict[str, str]) -> str:
+        """A song's origin (another device's terms) as a source here: this device's own source when it's from here,
+        the same streaming service here (its ids are the service's own), else streamed from the device it's on."""
+        me = self.peers.me["id"] if self.peers else ""
+        dev, inst = str(origin.get("dev", "")), str(origin.get("inst", ""))
+        if dev == me and inst in self.instances:
+            return inst
+        kind = origin.get("type")
+        if kind in CATALOGUE_TYPES:
+            same = [x for x in self.settings.services() if x["type"] == kind and x["id"] in self.instances]
+            pick = next((x for x in same if x["name"] == origin.get("name")), same[0] if same else None)
+            if pick:
+                return pick["id"]
+        return f"peer~{dev}~{inst}"
+
+    async def _take_playlists(self, peer_id: str, theirs: Any) -> bool:
+        """A paired device's playlists into these (playlists.take); what shows them is told when anything changed."""
+        if not self.playlists.take(theirs, self._here):
+            return False
+        decky.logger.info(f"Playlists updated from {self.peers.paired.get(peer_id, {}).get('name', peer_id)}")
+        self._sync_offline()
+        await decky.emit("playlists_changed")
+        return True
+
+    def _playlists_changed(self) -> None:
+        """A playlist made, changed or deleted here: the paired devices are told, so they fetch it."""
+        if self.peers:
+            self.peers.playlists_changed()
 
     # --- smart playlists (desktop Steam's Music section; Local files' songs picked by rules) ---
 
@@ -1720,7 +1766,9 @@ class Plugin:
 
     @_when_ready
     async def create_playlist(self, instance_id: str, name: str, tracks: list[dict[str, Any]]) -> dict[str, Any]:
-        return self.playlists.create(instance_id, name, tracks)
+        made = self.playlists.create(instance_id, name, tracks)
+        self._playlists_changed()
+        return made
 
     @_when_ready
     async def save_as_playlist(self, instance_id: str, kind: str, collection_id: str) -> dict[str, Any]:
@@ -1733,23 +1781,31 @@ class Plugin:
             copy = self.playlists.find_copy(instance_id, source)
             if copy:
                 raise ServiceError(f"Already in your playlists as “{copy['name']}”")
-            return self.playlists.create(instance_id, page["title"], page["tracks"], source=source)
+            made = self.playlists.create(instance_id, page["title"], page["tracks"], source=source)
+            self._playlists_changed()
+            return made
         return await _result(work())
 
     @_when_ready
-    async def playlist_add(self, playlist_id: str, tracks: list[dict[str, Any]]) -> int:
-        added = self.playlists.add(playlist_id, tracks)
+    async def playlist_add(self, playlist_id: str, tracks: list[dict[str, Any]], instance_id: Optional[str] = None) -> int:
+        """Adds tracks to a playlist; `instance_id`: the source of those that don't say (any source's go in any
+        playlist)."""
+        added = self.playlists.add(playlist_id, tracks, instance_id if isinstance(instance_id, str) else None)
         self._sync_offline()
+        if added:
+            self._playlists_changed()
         return added
 
     @_when_ready
-    async def playlist_remove(self, playlist_id: str, track_id: str) -> None:
-        self.playlists.remove(playlist_id, track_id)
+    async def playlist_remove(self, playlist_id: str, track_id: str, source: Optional[str] = None) -> None:
+        self.playlists.remove(playlist_id, track_id, source if isinstance(source, str) else None)
         self._sync_offline()
+        self._playlists_changed()
 
     @_when_ready
     async def playlist_rename(self, playlist_id: str, name: str) -> None:
         self.playlists.rename(playlist_id, name)
+        self._playlists_changed()
 
     @_when_ready
     async def playlist_set_art(self, playlist_id: str, image_path: str) -> dict[str, Any]:
@@ -1768,6 +1824,7 @@ class Plugin:
     async def playlist_delete(self, playlist_id: str) -> None:
         self.playlists.delete(playlist_id)
         self._sync_offline()
+        self._playlists_changed()
         self.recents.forget(collection_id=playlist_id)
         if self._forget_game_music(lambda m: m["collection"]["id"] == playlist_id):
             await _announce_change()
@@ -1778,9 +1835,11 @@ class Plugin:
         """Brings the downloaded files in line with the playlists marked for download."""
         wanted = {}
         for p in self.playlists.offline():
-            instance = self.instances.get(p["instance_id"])
-            if instance and instance.downloadable:
-                wanted.update({(p["instance_id"], t["id"]): t for t in p["tracks"]})
+            for t in p["tracks"]:
+                source = t.get("source") or p["instance_id"]
+                instance = self.instances.get(source)
+                if instance and instance.downloadable:
+                    wanted[(source, t["id"])] = t
         self.offline.sync(wanted, self._resolve_for_offline)
 
     async def _resolve_for_offline(self, instance_id: str, kind: str, item_id: str) -> StreamSource:
@@ -1793,7 +1852,7 @@ class Plugin:
         if not instance or not instance.downloadable:
             return None
         return {"on": self.playlists.is_offline(playlist_id), "total": len(tracks),
-                "saved": sum(1 for t in tracks if self.offline.has(instance_id, t["id"]))}
+                "saved": sum(1 for t in tracks if self.offline.has(t.get("source") or instance_id, t["id"]))}
 
     @_when_ready
     async def set_playlist_offline(self, playlist_id: str, on: bool) -> dict[str, Any]:

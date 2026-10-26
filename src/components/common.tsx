@@ -413,7 +413,7 @@ export const TrackRow: FC<
   }
 > = ({ track, active, onPlay, leading, showAlbum = true, artInstanceId, albumArtist, ...actions }) => (
   <ListRow
-    leading={leading ?? (artInstanceId ? <Art instanceId={artInstanceId} art={track.art} size={40} /> : undefined)}
+    leading={leading ?? (artInstanceId ? <Art instanceId={track.source ?? artInstanceId} art={track.art} size={40} /> : undefined)}
     title={track.title}
     subtitle={[track.artist !== albumArtist && track.artist, showAlbum && track.album].filter(Boolean).join(" · ")}
     trailing={

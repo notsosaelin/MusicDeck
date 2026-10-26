@@ -121,6 +121,10 @@ class Peers:
         # a paired device playing on this one, as on a speaker (cast/peer.py there): (its id, "start" | "load" |
         # "control" | "end" | "status", what it sent) -> the answer
         self.on_cast: Optional[Callable[[str, str, Any], Awaitable[Any]]] = None
+        # the playlists, the same on every paired device (playlists.py): what this one gives them, and taking
+        # a device's in (its id, what it gave) -> whether anything changed
+        self.playlists_shared: Optional[Callable[[], dict[str, Any]]] = None
+        self.playlists_take: Optional[Callable[[str, Any], Awaitable[bool]]] = None
         self.seen_sigs: dict[str, float] = {}
         self.port = 0
         self.runner: Optional[web.AppRunner] = None
@@ -159,6 +163,8 @@ class Peers:
             app.router.add_post(f"/p/cast/{action}", self._signed(self._casting(action)))
         app.router.add_get("/p/cast/status", self._signed(self._casting("status")))
         app.router.add_get("/p/plays", self._signed(self._plays))
+        app.router.add_get("/p/playlists", self._signed(self._playlists))
+        app.router.add_post("/p/playlists/changed", self._signed(self._playlists_changed))
         app.router.add_post("/p/unpair", self._signed(self._unpaired))
         app.router.add_get("/p/stream/{instance}/{id:.+}", self._linked("stream"))
         app.router.add_get("/p/art/{instance}/{id:.+}", self._linked("art"))
@@ -241,6 +247,7 @@ class Peers:
         peer_id, port = hello.get("id"), hello.get("port")
         if not isinstance(peer_id, str) or peer_id == self.me["id"] or not isinstance(port, int) or not 0 < port < 65536:
             return
+        back = peer_id in self.paired and not self._near(peer_id)
         self.nearby[peer_id] = {"name": str(hello.get("name") or "Another device")[:80], "address": address,
                                 "port": port, "seen": time.time()}
         known = self.paired.get(peer_id)
@@ -249,6 +256,14 @@ class Peers:
             self._save()
         if hello.get("ask"):
             asyncio.ensure_future(self.announce())
+        if back:
+            # a paired device just switched on (or came back to this network): playlists made meanwhile, either way
+            asyncio.ensure_future(self.sync_playlists(peer_id))
+            asyncio.ensure_future(self._tell(peer_id, "/p/playlists/changed"))
+
+    def _near(self, peer_id: str) -> bool:
+        near = self.nearby.get(peer_id)
+        return bool(near) and time.time() - near["seen"] < NEARBY_FOR
 
     def _where(self, peer_id: str) -> Optional[str]:
         near = self.nearby.get(peer_id)
@@ -512,6 +527,14 @@ class Peers:
         own = [e for e in self.plays.read(since) if not e.get("dev") and e.get("t", 0) > since]
         return {"plays": own[:PLAYS_PAGE], "more": len(own) > PLAYS_PAGE}
 
+    async def _playlists(self, request, peer_id, payload) -> dict[str, Any]:
+        return self.playlists_shared() if self.playlists_shared else {"playlists": [], "deleted": {}}
+
+    async def _playlists_changed(self, request, peer_id, payload) -> dict[str, Any]:
+        """A paired device's playlists changed: they're fetched (after answering, so it isn't kept waiting)."""
+        asyncio.ensure_future(self.sync_playlists(peer_id))
+        return {"ok": True}
+
     async def _unpaired(self, request, peer_id, payload) -> dict[str, Any]:
         self.paired.pop(peer_id, None)
         self.synced.pop(peer_id, None)
@@ -543,12 +566,33 @@ class Peers:
                 break
         return added
 
+    async def sync_playlists(self, peer_id: str) -> bool:
+        """A paired device's playlists into this one's (playlists.py says which wins); whether anything changed."""
+        if not self.playlists_take or peer_id not in self.paired:
+            return False
+        try:
+            got = await self.call(peer_id, "GET", "/p/playlists", timeout=15)
+        except PeerError:
+            return False
+        return await self.playlists_take(peer_id, got)
+
+    async def _tell(self, peer_id: str, path: str) -> None:
+        with contextlib.suppress(PeerError):
+            await self.call(peer_id, "POST", path, {}, timeout=4)
+
+    def playlists_changed(self) -> None:
+        """This device's playlists changed: the paired devices that are on are told (each fetches them)."""
+        for peer_id in list(self.paired):
+            if self._near(peer_id):
+                asyncio.ensure_future(self._tell(peer_id, "/p/playlists/changed"))
+
     async def _syncing(self) -> None:
         while True:
             await asyncio.sleep(SYNC_EVERY)
             for peer_id in list(self.paired):
                 if self._where(peer_id):
                     await self.sync_plays(peer_id)
+                    await self.sync_playlists(peer_id)
 
     async def sessions(self) -> list[dict[str, Any]]:
         """What each paired device that's on was playing: {"peer", "name", "session", "services"}."""

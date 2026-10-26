@@ -989,7 +989,7 @@ const Browse: FC<{
           items={view.items}
           tracks={view.tracks}
         />
-      ) : (
+      ) : view.type === "collection" ? (
         <CollectionPage
           key={view.collection.kind + view.collection.id}
           // one from the one library's lists is its own source's
@@ -997,7 +997,7 @@ const Browse: FC<{
           stack={stack}
           collection={view.collection}
         />
-      )}
+      ) : null /* the panel's own (its Library's parts and sources) */}
     </Focusable>
   );
 };

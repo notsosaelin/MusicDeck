@@ -53,8 +53,11 @@ export function followState(): () => void {
     refreshState().catch(() => {});
   };
   addEventListener("state_changed", onChange);
+  // a paired device's playlists came in: pages showing them are fetched again
+  addEventListener("playlists_changed", invalidateBrowserCache);
   return () => {
     unsubscribe();
     removeEventListener("state_changed", onChange);
+    removeEventListener("playlists_changed", invalidateBrowserCache);
   };
 }

@@ -59,9 +59,10 @@ async function copyTracks(instanceId: string, tracks: Track[], deviceId: string,
 }
 
 export async function pickPlaylist(instanceId: string, tracks: Track[], target: EventTarget) {
-  const lists = await api.localPlaylists(instanceId).catch(() => [] as Collection[]);
+  // every one of MusicDeck's: they mix sources
+  const lists = await api.allPlaylists().catch(() => [] as Collection[]);
   const add = async (playlistId: string, title: string) => {
-    const added = await api.playlistAdd(playlistId, tracks).catch(() => 0);
+    const added = await api.playlistAdd(playlistId, tracks, instanceId).catch(() => 0);
     invalidateBrowserCache();
     notify("MusicDeck", added ? `Added ${added} songs to ${title}` : `They're already in ${title}`);
   };
@@ -344,7 +345,7 @@ const songsOf = async (d: Dragged): Promise<Track[]> => {
 export async function dropOnPlaylist(d: Dragged, playlistId: string, title: string) {
   const tracks = await songsOf(d);
   if (!tracks.length) return;
-  const added = await api.playlistAdd(playlistId, tracks).catch(() => 0);
+  const added = await api.playlistAdd(playlistId, tracks, d.instanceId).catch(() => 0);
   invalidateBrowserCache();
   notify("MusicDeck", added ? `Added ${added} songs to ${title}` : `They're already in ${title}`);
 }

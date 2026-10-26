@@ -13,16 +13,20 @@ import {
   FaCheck,
   FaChevronLeft,
   FaChevronRight,
+  FaCompactDisc,
   FaDownload,
   FaExternalLinkAlt,
   FaGamepad,
   FaHeart,
   FaHistory,
+  FaListUl,
+  FaMusic,
   FaPlay,
   FaPlus,
   FaRandom,
   FaRegHeart,
   FaSearch,
+  FaUser,
   FaUserCheck,
   FaUserPlus,
 } from "react-icons/fa";
@@ -39,6 +43,8 @@ import {
   forgetSearch,
   getHome,
   isLocalPlaylist,
+  libraryHome,
+  libraryTab,
   openCollection,
   saveToLibrary,
   searchHistory,
@@ -74,7 +80,8 @@ import {
   TrackRow,
 } from "./common";
 import { useDownload, useSavedCopy } from "../download";
-import { useLibrarySearch, useSearchChoice } from "../library";
+import { librarySources, useLibrarySearch, useSearchChoice } from "../library";
+import { continueFrom, useOtherSessions } from "../devices";
 import { PanelPages } from "./PanelPages";
 import { TYPE_ICONS } from "./Settings";
 
@@ -181,22 +188,20 @@ const CollectionList: FC<{
   return (
     <PanelSection title={title}>
       {head}
-      {shown.map((item) => (
-        <CollectionRow
-          key={item.kind + item.id}
-          instanceId={instanceId}
-          item={item}
-          onOpen={(c) => pushView(stack, { type: "collection", collection: c })}
-          onPlay={
-            item.kind === "album" || item.kind === "playlist" ? () => playCollection(instanceId, item) : undefined
-          }
-          onOptions={
-            hasCollectionMenu(instanceId, item)
-              ? (e) => showCollectionMenu(instanceId, item, e?.currentTarget)
-              : undefined
-          }
-        />
-      ))}
+      {shown.map((item) => {
+        // a list mixing sources (the one library's): each item its own source's
+        const id = item.source ?? instanceId;
+        return (
+          <CollectionRow
+            key={`${item.source ?? ""}${item.kind}${item.id}`}
+            instanceId={id}
+            item={item}
+            onOpen={(c) => pushView(stack, { type: "collection", collection: c })}
+            onPlay={item.kind === "album" || item.kind === "playlist" ? () => playCollection(id, item) : undefined}
+            onOptions={hasCollectionMenu(id, item) ? (e) => showCollectionMenu(id, item, e?.currentTarget) : undefined}
+          />
+        );
+      })}
       {items.length > limit && (
         <PanelSectionRow>
           <Field
@@ -214,12 +219,115 @@ const CollectionList: FC<{
   );
 };
 
-const HomeView: FC<{ instanceId: string }> = ({ instanceId }) => {
+/** A page's name over it (a source's Home opened from the Library, a part of Your music) */
+const ViewTitle: FC<{ children: ReactNode }> = ({ children }) => (
+  <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", padding: "10px 16px 2px" }}>{children}</div>
+);
+
+/** Your music's parts in the Library, each with its icon (the one library's tabs, as the backend has them) */
+const PART_ICONS: Record<string, ReactNode> = {
+  playlists: <FaListUl />,
+  albums: <FaCompactDisc />,
+  artists: <FaUser />,
+  songs: <FaMusic />,
+};
+/** Rows Jump back in and Your playlists show before their Show all */
+const LIBRARY_ROWS = 4;
+
+/**
+ * The panel's Library: every source's music, not just the one playing. What to carry on with first (what your other
+ * devices are playing, then what you played lately, from any source); then Your music (every source's playlists,
+ * albums, artists and songs, a row each); your playlists; and each source's own Home (its picks and charts) to open
+ * without switching to it.
+ */
+const LibraryHome: FC<{ instanceId: string }> = ({ instanceId }) => {
+  const state = useStore(pluginState);
+  const result = useResult<Section[]>("library:home", () => libraryHome(), true);
+  const sessions = useOtherSessions();
+  const sections = result?.ok ? result.data : [];
+  const jump = sections.find((s) => s.title === "Jump back in");
+  const playlists = sections.find((s) => s.title === "Your playlists");
+  const parts = state?.library_tabs ?? [];
+  const sources = librarySources(state?.services ?? []);
+  const continuing = sessions.map((s) => (
+    <TrackRow
+      key={`peer:${s.peer}`}
+      track={{ ...s.track, artist: `On ${s.name}` }}
+      showAlbum={false}
+      artInstanceId={s.instanceId}
+      onPlay={() => continueFrom(s)}
+    />
+  ));
+  return (
+    <>
+      {(continuing.length > 0 || !!jump?.items.length) && (
+        <CollectionList
+          instanceId={instanceId}
+          stack="library"
+          title="Jump back in"
+          head={continuing}
+          items={jump?.items ?? []}
+          limit={Math.max(1, LIBRARY_ROWS - continuing.length)}
+        />
+      )}
+      {!!jump?.tracks?.length && <TrackList instanceId={instanceId} tracks={jump.tracks} limit={3} />}
+      {parts.length > 0 && (
+        <PanelSection title="Your music">
+          {parts.map((t) => (
+            <ListRow
+              key={t.id}
+              leading={<span style={{ fontSize: 16, opacity: 0.85, width: 40, display: "flex", justifyContent: "center" }}>{PART_ICONS[t.id]}</span>}
+              title={t.title}
+              onActivate={() => pushView("library", { type: "library", tab: t.id, title: t.title })}
+            />
+          ))}
+        </PanelSection>
+      )}
+      {!!playlists?.items.length && (
+        <CollectionList instanceId={instanceId} stack="library" title="Your playlists" items={playlists.items} limit={LIBRARY_ROWS} />
+      )}
+      {sources.length > 0 && (
+        <PanelSection title="Sources">
+          {sources.map((s) => (
+            <ListRow
+              key={s.id}
+              leading={<span style={{ fontSize: 16, opacity: 0.85, width: 40, display: "flex", justifyContent: "center" }}>{TYPE_ICONS[s.type]}</span>}
+              title={s.name}
+              subtitle={s.id === state?.active_service ? "Playing from it" : undefined}
+              onActivate={() => pushView("library", { type: "source", instanceId: s.id, title: s.name })}
+            />
+          ))}
+        </PanelSection>
+      )}
+      {result === null && !sessions.length && <Loading result={null} />}
+    </>
+  );
+};
+
+/** One of Your music's parts: every source's (each item its own source's), its collections then its songs. */
+const LibraryPart: FC<{ instanceId: string; tab: string; title: string }> = ({ instanceId, tab, title }) => {
+  const result = useResult<Section[]>(`library:tab:${tab}`, () => libraryTab(tab), true);
+  if (!result?.ok) return <Loading result={result} />;
+  const items = result.data.flatMap((s) => s.items);
+  const tracks = result.data.flatMap((s) => s.tracks ?? []);
+  return (
+    <>
+      <ViewTitle>{title}</ViewTitle>
+      {items.length > 0 && <CollectionList instanceId={instanceId} stack="library" items={items} limit={12} />}
+      {tracks.length > 0 && <TrackList instanceId={instanceId} tracks={tracks} limit={20} />}
+      {!items.length && !tracks.length && <Message>Nothing here yet</Message>}
+    </>
+  );
+};
+
+/** A source's own Home (`title`: its name, over it, when it's one opened from the Library). */
+const HomeView: FC<{ instanceId: string; title?: string }> = ({ instanceId, title }) => {
   const result = useResult<Section[]>(`${instanceId}:home`, () => getHome(instanceId), true);
   if (!result?.ok) return <Loading result={result} />;
   if (!result.data.length) return null;
   return (
     <>
+      {title && <ViewTitle>{title}</ViewTitle>}
       {result.data.map((s) => (
         <Fragment key={s.title}>
           {s.items.length > 0 && (
@@ -302,7 +410,7 @@ const TrackList: FC<{
             ) : undefined
           }
           artInstanceId={showArt ? instanceId : undefined}
-          active={current?.instanceId === instanceId && current.track.id === t.id}
+          active={current?.instanceId === (t.source ?? instanceId) && current.track.id === t.id}
           onPlay={() =>
             // a station from a genre, a country, a search plays on its own; from a list of yours, the list
             t.live && !playlistId
@@ -311,7 +419,7 @@ const TrackList: FC<{
                 ? playFrom(instanceId, from, tracks, i)
                 : player.playList(instanceId, tracks, i)
           }
-          {...trackActions(instanceId, t, { playlistId })}
+          {...trackActions(t.source ?? instanceId, t, { playlistId })}
         />
       ))}
       {limit !== undefined && tracks.length > limit && (
@@ -922,15 +1030,18 @@ export const Browser: FC<{ instanceId: string; stack: StackName }> = ({ instance
   const view = views[views.length - 1] ?? ROOTS[stack];
   if (navInstance !== instanceId || !view) return null;
 
-  // (sections are the media center's Browse pages; the panel's Library is the source's Home)
-  if (view.type === "home" || view.type === "section") return <HomeView instanceId={instanceId} />;
+  // the panel's Library: every source's music (sections are the media center's Browse pages)
+  if (view.type === "home" || view.type === "section") return <LibraryHome instanceId={instanceId} />;
+  if (view.type === "library") return <LibraryPart instanceId={instanceId} tab={view.tab} title={view.title} />;
+  if (view.type === "source") return <HomeView key={view.instanceId} instanceId={view.instanceId} title={view.title} />;
   if (view.type === "search") return <SearchView key={view.query} instanceId={instanceId} query={view.query} />;
   // a search's Show all
   if (view.type === "all") return <AllView instanceId={instanceId} view={view} />;
   return (
     <CollectionView
       key={view.collection.kind + view.collection.id}
-      instanceId={instanceId}
+      // one of another source's (the one library's, a source's own Home): opened there
+      instanceId={view.collection.source ?? instanceId}
       stack={stack}
       collection={view.collection}
     />

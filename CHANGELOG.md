@@ -3,6 +3,19 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.0
+
+- **Playlists mix sources**: a MusicDeck playlist can hold songs from any of your sources (Qobuz, SoundCloud, Local
+  files, YouTube...) side by side, each playing from its own. Add to playlist offers every one of them, from
+  anywhere; a source that keeps playlists of its own (Qobuz, Navidrome) has its own after them, and New playlist or
+  New Qobuz playlist.
+- **Playlists are the same on all your devices**: one made, changed or deleted on the Deck shows on your PC within
+  seconds (and the other way), on every paired device; one that was off catches up when it's back. A streaming
+  service's songs play from that service on each device; Local files' stream from the device that has them.
+- **The Quick Access Library is every source's**, not just the one playing: Jump back in (what your other devices
+  are playing first, then what you played lately, from any source), Your music (Playlists, Albums, Artists and
+  Songs from every source), your playlists, and each source's own Home to open without switching to it.
+
 ## 0.40.2
 
 - **Desktop search in parts**: songs (the first 30, then Show all), stations, episodes and videos, then a row each for

@@ -614,6 +614,8 @@ export const logEvents = callable<[entries: { t: number; event: string; data?: R
 
 // MusicDeck playlists (stored on the device, per source)
 export const localPlaylists = callable<[id: string], Collection[]>("local_playlists");
+/** Every MusicDeck playlist, whatever its songs' sources ("source": where each was made) */
+export const allPlaylists = callable<[], Collection[]>("all_playlists");
 
 /** A smart playlist (desktop Steam's Music section): Local files' songs picked by rules (LocalService.smart). */
 export interface SmartRule {
@@ -637,8 +639,10 @@ export const createPlaylist = callable<[id: string, name: string, tracks: Track[
 export const saveAsPlaylist = callable<[id: string, kind: CollectionKind, collectionId: string], Result<Collection>>(
   "save_as_playlist",
 );
-export const playlistAdd = callable<[playlistId: string, tracks: Track[]], number>("playlist_add");
-export const playlistRemove = callable<[playlistId: string, trackId: string], void>("playlist_remove");
+/** `instanceId`: the source of the tracks that don't say (a playlist holds any mix of sources) */
+export const playlistAdd = callable<[playlistId: string, tracks: Track[], instanceId?: string], number>("playlist_add");
+/** `source`: whose song it is (two sources' songs can share an id) */
+export const playlistRemove = callable<[playlistId: string, trackId: string, source?: string], void>("playlist_remove");
 export const playlistRename = callable<[playlistId: string, name: string], void>("playlist_rename");
 export const playlistDelete = callable<[playlistId: string], void>("playlist_delete");
 export const setPlaylistOffline = callable<[playlistId: string, on: boolean], Result<null>>("set_playlist_offline");

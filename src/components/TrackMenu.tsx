@@ -10,7 +10,7 @@ import {
   createServicePlaylist,
   getUserPlaylists,
   isLocalPlaylist,
-  localPlaylists,
+  allPlaylists,
   playlistAdd,
   playlistClearArt,
   playlistDelete,
@@ -109,8 +109,8 @@ function newPlaylist(instanceId: string, tracks: Track[], what: string, server: 
 }
 
 /**
- * Sources with server-side playlists (Navidrome) add there; everything else uses MusicDeck's own
- * playlists, kept on the device.
+ * Any playlist of MusicDeck's own (they mix sources, and are the same on every paired device), and a source's own
+ * playlists on its service (Qobuz's, Navidrome's) when it keeps them.
  */
 export function showPlaylistPicker(item: Item, parent: EventTarget) {
   return pickPlaylistFor(item.instanceId, [item.track], item.track.title, parent);
@@ -121,37 +121,43 @@ export async function pickPlaylistFor(instanceId: string, tracks: Track[], what:
   if (!tracks.length) return;
   const item = { instanceId, track: tracks[0] };
   const server = hasFeature(instanceId, "playlists");
-  let playlists: Collection[];
-  if (server) {
-    const r = await getUserPlaylists(instanceId);
-    if (!r.ok) {
-      notify("Couldn't load playlists", r.error, item);
-      return;
-    }
-    playlists = r.data;
-  } else {
-    playlists = await localPlaylists(instanceId);
-  }
+  const serviceName = pluginState.get()?.services.find((s) => s.id === instanceId)?.name ?? "";
+  // the service's own (when it keeps them; a failure leaves just MusicDeck's), and every one of MusicDeck's
+  const [onService, ours] = await Promise.all([
+    server ? getUserPlaylists(instanceId).then((r) => (r.ok ? r.data : [])).catch(() => [] as Collection[]) : [],
+    allPlaylists().catch(() => [] as Collection[]),
+  ]);
+  const added = (title: string) => {
+    invalidateBrowserCache();
+    notify(`Added to ${title}`, what, item);
+  };
   showContextMenu(
     <Menu label="Add to playlist">
-      <MenuItem onSelected={() => newPlaylist(instanceId, tracks, what, server)}>New playlist</MenuItem>
-      {playlists.length > 0 && <MenuSeparator />}
-      {playlists.map((p) => (
+      <MenuItem onSelected={() => newPlaylist(instanceId, tracks, what, false)}>New playlist</MenuItem>
+      {server && <MenuItem onSelected={() => newPlaylist(instanceId, tracks, what, true)}>New {serviceName} playlist</MenuItem>}
+      {ours.length > 0 && <MenuSeparator />}
+      {ours.map((p) => (
         <MenuItem
           key={p.id}
           onSelected={async () => {
-            if (server) {
-              const res = await addToPlaylist(instanceId, p.id, tracks.map((t) => t.id));
-              if (!res.ok) return notify("Couldn't add to playlist", res.error, item);
-            } else {
-              const added = await playlistAdd(p.id, tracks);
-              if (!added) return notify(`Already in ${p.title}`, what, item);
-            }
-            invalidateBrowserCache();
-            notify(`Added to ${p.title}`, what, item);
+            if (!(await playlistAdd(p.id, tracks, instanceId))) return notify(`Already in ${p.title}`, what, item);
+            added(p.title);
           }}
         >
           {p.title}
+        </MenuItem>
+      ))}
+      {onService.length > 0 && <MenuSeparator />}
+      {onService.map((p) => (
+        <MenuItem
+          key={`service:${p.id}`}
+          onSelected={async () => {
+            const res = await addToPlaylist(instanceId, p.id, tracks.map((t) => t.id));
+            if (!res.ok) return notify("Couldn't add to playlist", res.error, item);
+            added(p.title);
+          }}
+        >
+          {p.title} · {serviceName}
         </MenuItem>
       ))}
     </Menu>,
@@ -548,7 +554,7 @@ export function showTrackMenu(instanceId: string, track: Track, parent?: EventTa
         <MenuItem
           tone="destructive"
           onSelected={async () => {
-            await playlistRemove(ctx.playlistId!, track.id);
+            await playlistRemove(ctx.playlistId!, track.id, track.source ?? instanceId);
             invalidateBrowserCache();
           }}
         >

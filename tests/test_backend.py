@@ -3782,6 +3782,47 @@ async def run():
               and os.path.isfile(os.path.join(broken, "playlists.json.corrupt")),
               "a cut-short settings or playlists file is kept aside, not overwritten by the next save")
 
+        print("playlists across sources and devices")
+        deck, pc = Playlists(os.path.join(tmp, "pl-deck")), Playlists(os.path.join(tmp, "pl-pc"))
+        pid = deck.create("qz1", "Mix", [{"id": "q1", "title": "Q"}])["id"][3:]
+        deck.add("md:" + pid, [{"id": "s1", "title": "S", "source": "sc1"}, {"id": "l1", "title": "L"}], "loc1")
+        check([t["source"] for t in deck.page("md:" + pid)["tracks"]] == ["qz1", "sc1", "loc1"],
+              "a playlist mixes sources, each song saying its own")
+        check(deck.add("md:" + pid, [{"id": "q1", "source": "qz1"}]) == 0, "a song already in it isn't added twice")
+        kinds = {"qz1": "qobuz", "sc1": "soundcloud", "loc1": "local", "pcqz": "qobuz", "pcsc": "soundcloud"}
+
+        def origin_on(dev):
+            return lambda inst: {"dev": dev, "inst": inst, "type": kinds.get(inst, ""), "name": ""}
+
+        def here_on(dev, streaming):
+            # as main.py's _here: this device's own, the same streaming service, else from the device it's on
+            return lambda o: (o["inst"] if o.get("dev") == dev else streaming.get(o.get("type"))
+                              or f"peer~{o['dev']}~{o['inst']}")
+        on_pc = here_on("pc", {"qobuz": "pcqz", "soundcloud": "pcsc"})
+        on_deck = here_on("deck", {"qobuz": "qz1", "soundcloud": "sc1"})
+        check(pc.take(deck.shared(origin_on("deck")), on_pc), "a paired device takes in a playlist made on another")
+        check([t["source"] for t in pc.page("md:" + pid)["tracks"]] == ["pcqz", "pcsc", "peer~deck~loc1"],
+              "its streaming songs play from the same service there, the rest from the device that has them")
+        check(pc.find(pid)["instance_id"] == "pcqz", "...and it's listed under the same source there")
+        check(not pc.take(deck.shared(origin_on("deck")), on_pc), "taking the same again changes nothing")
+        time.sleep(0.01)
+        pc.rename("md:" + pid, "Mix 2")
+        check(deck.take(pc.shared(origin_on("pc")), on_deck) and deck.find(pid)["name"] == "Mix 2",
+              "the latest change wins, whichever device made it")
+        check([t["source"] for t in deck.page("md:" + pid)["tracks"]] == ["qz1", "sc1", "loc1"],
+              "a device's own songs come back to it as its own")
+        time.sleep(0.01)
+        deck.delete("md:" + pid)
+        pc.take(deck.shared(origin_on("deck")), on_pc)
+        check(pc.find(pid) is None, "deleted on one device, it goes from the others")
+        check(not deck.take(pc.shared(origin_on("pc")), on_deck) and deck.find(pid) is None,
+              "...and doesn't come back from one that had it")
+        old = Playlists(os.path.join(tmp, "pl-old"))
+        write(old.path, '{"version": 1, "playlists": [{"id": "abcdef", "instance_id": "x1", "name": "Old", '
+                        '"tracks": [{"id": "t1", "title": "T"}]}]}')
+        check(Playlists(os.path.dirname(old.path)).page("md:abcdef")["tracks"][0]["source"] == "x1",
+              "a playlist from before they mixed sources: each song its playlist's source's")
+
         print("decky's python")
         import re as _re
         # Decky's frozen interpreter ships without these; a top-level import stops the whole plugin loading
