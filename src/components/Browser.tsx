@@ -196,7 +196,8 @@ const CollectionList: FC<{
             key={`${item.source ?? ""}${item.kind}${item.id}`}
             instanceId={id}
             item={item}
-            onOpen={(c) => pushView(stack, { type: "collection", collection: c })}
+            // opened as its own source's, whichever is playing (a source's Home opened from the Library)
+            onOpen={(c) => pushView(stack, { type: "collection", collection: { ...c, source: c.source ?? id } })}
             onPlay={item.kind === "album" || item.kind === "playlist" ? () => playCollection(id, item) : undefined}
             onOptions={hasCollectionMenu(id, item) ? (e) => showCollectionMenu(id, item, e?.currentTarget) : undefined}
           />
@@ -648,7 +649,7 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
               (copy.copy ? (
                 // saved already (from wherever this was opened): it opens your copy
                 <IconButton label="Saved · open yours" active grow={0.45}
-                            onClick={() => pushView(stack, { type: "collection", collection: copy.copy! })}>
+                            onClick={() => pushView(stack, { type: "collection", collection: { ...copy.copy!, source: copy.copy!.source ?? instanceId } })}>
                   <FaCheck />
                 </IconButton>
               ) : (

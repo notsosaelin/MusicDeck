@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.1
+
+- **A source's playlists, albums and artists open from that source** wherever they're shown: opened from YouTube
+  Music's Home in the Quick Access Library (or another source's search results) while Qobuz played, they were asked
+  of Qobuz ("Qobuz returned HTTP 400").
+
 ## 0.41.0
 
 - **Playlists mix sources**: a MusicDeck playlist can hold songs from any of your sources (Qobuz, SoundCloud, Local

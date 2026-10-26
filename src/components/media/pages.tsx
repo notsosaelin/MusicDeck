@@ -188,7 +188,7 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
               key={c.kind + c.id}
               instanceId={instanceId}
               c={c}
-              onOpen={() => pushCenter(stack, { type: "collection", collection: c })}
+              onOpen={() => pushCenter(stack, { type: "collection", collection: { ...c, source: c.source ?? instanceId } })}
               onPlay={c.kind === "album" || c.kind === "playlist" ? () => playCollection(instanceId, c) : undefined}
               onOptions={
                 hasCollectionMenu(instanceId, c)
@@ -640,7 +640,7 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     return (
       <TileGrid title={<SectionTitle>{s.title}</SectionTitle>}>
         {s.items.map((c) => (
-          <Tile key={c.kind + c.id} c={c} onOpen={() => pushCenter(stack, { type: "collection", collection: c })} />
+          <Tile key={c.kind + c.id} c={c} onOpen={() => pushCenter(stack, { type: "collection", collection: { ...c, source: c.source ?? instanceId } })} />
         ))}
       </TileGrid>
     );
@@ -812,7 +812,7 @@ const CategoryShelf: FC<{ instanceId: string; stack: CenterStack; category: Coll
     );
   if (!result.ok || (!result.data.collections.length && !result.data.tracks.length)) return null;
   const { collections, tracks } = result.data;
-  const open = () => pushCenter(stack, { type: "collection", collection: category });
+  const open = () => pushCenter(stack, { type: "collection", collection: { ...category, source: category.source ?? instanceId } });
   return (
     <Shelf title={category.title}>
       {collections.length
@@ -823,7 +823,7 @@ const CategoryShelf: FC<{ instanceId: string; stack: CenterStack; category: Coll
                 key={c.kind + c.id}
                 instanceId={instanceId}
                 c={c}
-                onOpen={() => pushCenter(stack, { type: "collection", collection: c })}
+                onOpen={() => pushCenter(stack, { type: "collection", collection: { ...c, source: c.source ?? instanceId } })}
                 onPlay={c.kind === "album" || c.kind === "playlist" ? () => playCollection(instanceId, c) : undefined}
               />
             ))
@@ -1018,7 +1018,7 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
             {canSave(instanceId, collection) && page && page.tracks.length > 0 &&
               (copy.copy ? (
                 // saved already (from wherever this was opened): it opens your copy
-                <PageButton active label="Open your saved playlist" onClick={() => pushCenter(stack, { type: "collection", collection: copy.copy! })}>
+                <PageButton active label="Open your saved playlist" onClick={() => pushCenter(stack, { type: "collection", collection: { ...copy.copy!, source: copy.copy!.source ?? instanceId } })}>
                   <FaCheck /> Saved
                 </PageButton>
               ) : (
