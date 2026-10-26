@@ -854,11 +854,32 @@ const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> =
   const { ordered: pages, at, pick: choose } = useSearchChoice(query, found.pages, found.waiting);
   const index = at ? pages.indexOf(at) : 0;
   const pick = (i: number) => pages[i] && choose(pages[i].source.id);
+  // the panel's own document (Quick Access is a window of its own, not the plugin's)
+  const anchor = useRef<HTMLSpanElement>(null);
+  // the first song (or whatever's first), not the Show all in its heading
+  const firstResult = () => {
+    const doc = anchor.current?.ownerDocument;
+    return (
+      doc?.querySelector<HTMLElement>(".md-search-pages .md-list-row") ??
+      doc?.querySelector<HTMLElement>(".md-search-pages .md-part-all")
+    );
+  };
   // into the results: the controller onto the first of them (the pages slide to it)
-  const enter = () =>
-    (window.document.activeElement?.ownerDocument ?? document)
-      .querySelector<HTMLElement>(".md-search-pages .md-list-row, .md-search-pages .md-part-all")
-      ?.focus();
+  const enter = () => firstResult()?.focus();
+  // the results come in: shown at once (the page with them slides up), unless the controller has gone into them (or
+  // onto the switcher) in the meantime
+  const shown = !!at;
+  useEffect(() => {
+    if (!shown) return;
+    const timer = window.setTimeout(() => {
+      const doc = anchor.current?.ownerDocument;
+      const active = doc?.activeElement as HTMLElement | null | undefined;
+      // (the field is drawn anew for the search, so the controller is often on the panel itself by now)
+      const moved = !!active?.closest(".md-search-pages") && !active.closest(".md-search-field");
+      if (!moved) enter();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [shown]);
   const id = at?.source.id ?? instanceId;
   const page = at?.page;
   const all = (title: string, items: Collection[], tracks: Track[]) =>
@@ -866,11 +887,23 @@ const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> =
   const draw = (rows: number) => {
     const first = (
       <>
+        <span ref={anchor} />
         {field}
-        {at && (
+        {at ? (
           <PanelSection>
             <SourceSwitcher sources={pages} at={index} onPick={pick} onEnter={enter} />
           </PanelSection>
+        ) : found.waiting > 0 || found.pages.length ? (
+          // the sources still answering
+          <PanelSection>
+            <PanelSectionRow>
+              <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                <QuietSpinner />
+              </div>
+            </PanelSectionRow>
+          </PanelSection>
+        ) : (
+          <Message>Nothing found for “{query}”</Message>
         )}
       </>
     );
@@ -967,7 +1000,7 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
   const field = (
       <PanelSection>
         <PanelSectionRow>
-          <Focusable flow-children="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Focusable className="md-search-field" flow-children="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <TextField
                 value={draft}

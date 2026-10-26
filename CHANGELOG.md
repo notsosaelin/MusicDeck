@@ -3,6 +3,12 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.2
+
+- **Quick Access search shows its results**: once they come in, the panel slides to them with the first song picked
+  (they were a page down, out of sight, so a search looked as if it had done nothing); a spinner shows while the
+  sources answer, and a search that finds nothing says so. A on the source switcher goes into the results again.
+
 ## 0.41.1
 
 - **A source's playlists, albums and artists open from that source** wherever they're shown: opened from YouTube
