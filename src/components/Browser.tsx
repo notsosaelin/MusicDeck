@@ -294,7 +294,6 @@ const LibraryHome: FC<{ instanceId: string }> = ({ instanceId }) => {
               key={s.id}
               leading={<span style={{ fontSize: 16, opacity: 0.85, width: 40, display: "flex", justifyContent: "center" }}>{TYPE_ICONS[s.type]}</span>}
               title={s.name}
-              subtitle={s.id === state?.active_service ? "Playing from it" : undefined}
               onActivate={() => pushView("library", { type: "source", instanceId: s.id, title: s.name })}
             />
           ))}

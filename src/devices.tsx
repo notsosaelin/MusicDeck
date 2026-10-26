@@ -1,5 +1,5 @@
 import { addEventListener, removeEventListener } from "@decky/api";
-import { ButtonItem, ConfirmModal, Field, PanelSectionRow, showModal } from "@decky/ui";
+import { ButtonItem, ConfirmModal, DialogButton, Field, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
 import { FC, useEffect, useState } from "react";
 import { Devices, OtherSession, Track, reportRenderStatus, allowFirewall, answerPairing, devices, otherSessions, pairDevice, takeOver, unpairDevice } from "./api";
 import { notify } from "./notify";
@@ -139,15 +139,14 @@ export const DeviceRows: FC = () => {
   const [asking, setAsking] = useState(false);
   if (!found || (!found.paired.length && !found.nearby.length && found.firewall !== "blocked")) return null;
   return (
-    <>
+    <PanelSection title="Your devices">
       <PanelSectionRow>
-        <Field label="Your devices" description={found.firewall === "blocked" ? undefined : found.me.name} />
+        <Field label="This device" description={found.me.name} />
       </PanelSectionRow>
       {found.firewall === "blocked" && (
         <PanelSectionRow>
           <ButtonItem
             layout="below"
-            label={found.me.name}
             disabled={asking}
             onClick={async () => {
               setAsking(true);
@@ -156,39 +155,45 @@ export const DeviceRows: FC = () => {
               if (!ok) notify("MusicDeck", "Windows didn't allow it");
             }}
           >
-            {asking ? "Asking Windows…" : "Let your devices reach this PC"}
+            {asking ? "Asking Windows…" : "Allow device connections"}
           </ButtonItem>
         </PanelSectionRow>
       )}
       {found.paired.map((d) => (
         <PanelSectionRow key={d.id}>
-          <ButtonItem
-            layout="inline"
+          <Field
             label={d.name}
-            description={d.online ? "Paired · on now" : "Paired"}
-            onClick={() =>
-              showModal(
-                <ConfirmModal
-                  strTitle={`Unpair ${d.name}?`}
-                  strOKButtonText="Unpair"
-                  bDestructiveWarning
-                  onOK={() => unpairDevice(d.id).catch(() => {})}
-                />,
-              )
-            }
+            description={d.online ? "Online" : "Offline"}
+            verticalAlignment="center"
           >
-            Unpair
-          </ButtonItem>
+            <DialogButton
+              style={{ minWidth: 80, width: 80, padding: "8px 12px" }}
+              onClick={() =>
+                showModal(
+                  <ConfirmModal
+                    strTitle={`Unpair ${d.name}?`}
+                    strOKButtonText="Unpair"
+                    bDestructiveWarning
+                    onOK={() => unpairDevice(d.id).catch(() => {})}
+                  />,
+                )
+              }
+            >
+              Unpair
+            </DialogButton>
+          </Field>
         </PanelSectionRow>
       ))}
       {found.nearby.map((d) => (
         <PanelSectionRow key={d.id}>
-          <ButtonItem layout="inline" label={d.name} onClick={() => pair(d.id)}>
-            Pair
-          </ButtonItem>
+          <Field label={d.name} description="Nearby" verticalAlignment="center">
+            <DialogButton style={{ minWidth: 80, width: 80, padding: "8px 12px" }} onClick={() => pair(d.id)}>
+              Pair
+            </DialogButton>
+          </Field>
         </PanelSectionRow>
       ))}
-    </>
+    </PanelSection>
   );
 };
 

@@ -40,8 +40,10 @@ export const CENTER_CSS =
 /* a source's Browse coming in: faded in where it'll be, the page keeping its height meanwhile */
 /* a source's Browse coming in: hidden until its rows have settled where they'll be, then faded in; the page keeps
    its height meanwhile */
-.mc-browse-stack { display: grid; }
-.mc-browse-stack > .mc-browse-body { grid-area: 1 / 1; }
+/* The overlapping pages must fit the viewport: an auto grid track grows to a shelf's full content
+   width, leaving nothing to scroll inside the shelf while the tab clips the off-screen cards. */
+.mc-browse-stack { display: grid; grid-template-columns: minmax(0, 1fr); }
+.mc-browse-stack > .mc-browse-body { grid-area: 1 / 1; min-width: 0; }
 .mc-browse-body { min-height: 70vh; }
 /* a search's results: room between the dots' line and their first heading */
 .mc-browse-body > .mc-results { padding-top: 14px; }

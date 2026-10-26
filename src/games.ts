@@ -30,9 +30,14 @@ function readRunningGame() {
   return appid ? { appid, name: gameName(appid) } : null;
 }
 
-/** The music set for a game on a source (the live one unless given; only the live source's choices play). */
-export function musicFor(appid: number, instanceId = pluginState.get()?.active_service): GameMusic | undefined {
-  return pluginState.get()?.game_music.find((m) => m.instance_id === instanceId && m.appid === appid);
+/** An explicit source checks its own link; launching uses the latest link across configured sources. */
+export function musicFor(appid: number, instanceId?: string): GameMusic | undefined {
+  const state = pluginState.get();
+  return state?.game_music.slice().reverse().find((m) =>
+    m.appid === appid && (instanceId !== undefined
+      ? m.instance_id === instanceId
+      : state.services.some((s) => s.id === m.instance_id)),
+  );
 }
 
 /**
@@ -46,23 +51,25 @@ let paused: { queue: number; index: number } | null = null;
 const PAUSE_FADE_SECONDS = 1;
 
 async function onGameStart(appid: number) {
-  const live = pluginState.get()?.active_service;
-  const music = live ? musicFor(appid, live) : undefined;
-  if (!live || !music) {
+  const music = musicFor(appid);
+  if (!music) {
     if (pluginState.get()?.playback.game_pause && player.state.get().playing) {
       paused = { queue: player.queueId, index: player.state.get().index };
       void player.fadeOutAndPause(PAUSE_FADE_SECONDS);
     }
     return;
   }
-  const page = await openCollection(live, music.collection.kind, music.collection.id);
-  // switched source while it loaded: it isn't the live source's music any more
-  if (pluginState.get()?.active_service !== live) return;
+  const queue = player.queueId;
+  const page = await openCollection(music.instance_id, music.collection.kind, music.collection.id);
+  // Don't start a stale request after the game closes, the link changes, or the user picks music.
+  const current = musicFor(appid);
+  if (!known.has(appid) || player.queueId !== queue || current?.instance_id !== music.instance_id ||
+      current?.collection.id !== music.collection.id || current?.collection.kind !== music.collection.kind) return;
   if (!page.ok || !page.data.tracks.length) {
     notify(`Game music for ${music.game}`, page.ok ? `${music.collection.title} is empty` : page.error);
     return;
   }
-  playFrom(live, music.collection, page.data.tracks);
+  playFrom(music.instance_id, music.collection, page.data.tracks);
   started = { appid, queue: player.queueId };
   notify(`Playing for ${music.game}`, music.collection.title);
 }

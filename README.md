@@ -40,15 +40,16 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   controls, and Play soundtrack on the page of a game whose soundtrack you own. Windows and Linux desktops.
 - **Steam soundtracks, full circle:** the soundtracks you own on Steam, in the tab Steam made for them. The
   game you're playing puts its soundtrack first, and soundtracks that aren't installed install from there.
-- **Games:** pick an album or playlist for a game and it plays when the game starts; or have the music
+- **Games:** pick an album or playlist from any source for a game and it plays when the game starts
+  (the latest link wins if several sources have one); or have the music
   pause while you play and pick up again when the game closes.
 - **Several accounts:** add a service more than once (two Spotify accounts, a second Navidrome user) and
-  switch between them like any other source.
+  browse them together in your library.
 - **Native Quick Access tab:** Now playing, Library, Search and Settings, with a mini player while you
   browse, built from Steam's own components and controller conventions. Now playing is two pages: the
   player, then below it the song's lyrics (when there are none, the cover as a turning record with the music round it) or the queue. Settings
   has what the media center's has: the equalizer, playback, scrobbling, games and the media center's own
-  choices (sources are picked in Decky → MusicDeck).
+  choices (sources are added, edited and removed in Decky → MusicDeck).
 - **Your music library:** local files as a library, not a folder list: albums (compilations kept whole, discs
   in CD1/CD2 folders together), artists with the songs they appear on elsewhere, genres, years by decade and
   composers, all from the files' tags. MusicDeck counts plays on the Deck for Recently played, Most played and
@@ -98,7 +99,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   sellers and more; Audiobookshelf's Authors and Series...) as rows of their first items ending in a square
   Show all; genres, moods, countries and languages as a row each (Pop/Rock's albums, then Jazz's...); and
   local Folders with how much space the library takes. Grids show whole rows that fit the screen, covers filling the screen edge
-  to edge, and every page scrolls a whole row at a time. Settings has the equalizer; what it opens on, background, cover
+  to edge, and every page scrolls a whole row at a time. Browse's shelves scroll sideways by controller or touch.
+  Settings has the equalizer; what it opens on, background, cover
   and lyrics sizes, screen off when idle; and playback, scrobbling and games, as in Decky. All on the
   controller.
 - **Now Playing for what's playing:** songs show their lyrics and the queue (local files their Info too); a
@@ -141,7 +143,7 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   playlist in Local files → Burn to CD writes it as an audio CD any CD player plays, gapless, with its titles
   (CD-Text) for car stereos and players that show them. It says first how long it is and whether a CD-RW is
   erased. Linux and Windows; cdrskin is bundled for each (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
-- **In your Library:** Decky → MusicDeck → More → Show in your Library puts MusicDeck in the Steam library;
+- **In your Library:** Decky → MusicDeck → Interface → Show in Steam Library puts MusicDeck in the Steam library;
   Play there opens the media center.
 - **Delete, safely:** Y on a song, album, folder or playlist file in Local files deletes it to the trash;
   Local files' Recently deleted puts it back. Devices can be ejected from their card or from Decky → MusicDeck,

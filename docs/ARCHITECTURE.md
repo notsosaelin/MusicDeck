@@ -218,7 +218,7 @@ Details worth knowing:
 | `components/TrackMenu.tsx` | Context menus for tracks and collections (queue, favourites, playlists (new ones on the service when it keeps them), sleep timer, go to, tags and artwork for local files). |
 | `components/TagEditor.tsx` | Managing local files: the tag editor (a track, or an album's shared fields; undo), the release picker (covers and how sure each is, as a grid; `lookupOpener`, which desktop Steam swaps for its own) and its preview of changes, album artwork (set, find, back to the files'). An album renamed keeps its open pages (`retargetAlbum`). |
 | `ratings.ts`, `download.tsx` | Rating songs (`set_rating`: into the file, or kept by MusicDeck for a file that can't hold one, or a CUE song). Downloading any playlist or album wherever it's opened (`collection_offline`, `download_collection`: another source's is saved as a MusicDeck playlist first) and knowing it's saved (`saved_copy`). |
-| `components/Settings.tsx` | The plugin's page in the Decky menu: sources, then `PlaybackSections` (playback, scrobbling with ListenBrainz and Last.fm, games; the media center's Settings shows the same component), downloads, troubleshooting. |
+| `components/Settings.tsx` | The plugin's page in the Decky menu: source management (no manual active-source selection), then `PlaybackSections` (playback, scrobbling with ListenBrainz and Last.fm, games; the media center's Settings shows the same component), downloads, Interface, Your devices and Maintenance. |
 | `components/ServiceModal.tsx` | Add/edit dialog for a source, with a fields component per source type. |
 | `desktop/index.tsx` | MusicDeck in desktop Steam, which Decky doesn't hook (its router patch is the gamepad UI's): started and torn down as Steam's UI mode changes (`SteamClient.UI.RegisterForUIModeChanged`, 7 = desktop); the Music tab (a copy of Steam's own tab, between Library and Community) and its section, drawn over the page area while chosen; the mini player (a window of its own, `window.open` from SharedJSContext as Steam opens its popups, dragged with `SteamClient.Window.MoveTo`); media keys (`navigator.mediaSession`). |
 | `desktop/steamui.ts` | Finding the way in desktop Steam's main window (`SP Desktop_uid0`): its top navigation by shape (the arrows, then tabs sharing a class; Steam's classes are minified and its labels translated), where pages go, its background, its fonts; React 19's `createRoot` (a module of its own, not `SP_REACTDOM`). |
@@ -232,6 +232,10 @@ Details worth knowing:
 | `desktop/dialog.ts` | MusicDeck's dialogs in desktop Steam: Decky's `showModal` popup titled and sized for what it holds. Steam creates a dialog's window fixed (its flags only Hidden) and its content a confirmation box's width: while desktop Steam shows, `window.open` is wrapped so our dialogs' windows (Steam names them by title) are made Resizable with a smallest size, and a style makes their content fill the window. "Decky Dialog" ones (code shared with Game Mode) are renamed MusicDeck's. |
 | `desktop/polish.tsx` | Play soundtrack on a game's page (its owned soundtrack: an app whose parent is the game; the route from `SteamUIStore.WindowStore`), the Music tab's hover menu, keyboard shortcuts and the mouse's side buttons, the visualizer (`player.levels`), the equalizer and settings as dialogs. |
 | `components/common.tsx` | Shared rows, artwork, dialog footer, and `ScrollingText`: a line that ends in "…" and scrolls (Steam's marquee) while its row is focused, or always in headers and the now-playing card. |
+
+Browse and search source pages overlap in `SourcePager`'s grid. Its column uses `minmax(0, 1fr)` and
+each page has `min-width: 0`, so wide shelves overflow inside their own scroll area instead of widening
+the page beyond the screen. Both controller focus scrolling and native touch panning depend on this.
 
 ## Data model
 

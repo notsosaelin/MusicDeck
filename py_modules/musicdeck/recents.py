@@ -24,12 +24,21 @@ def _lists(data: Any) -> dict[str, list]:
     return {k: v for k, v in data.items() if isinstance(v, list)} if isinstance(data, dict) else {}
 
 
+def _temporary_collection(collection: Any) -> bool:
+    """Desktop search/section queues aren't collections a source can reopen."""
+    return (isinstance(collection, dict) and collection.get("kind") == "list"
+            and str(collection.get("id") or "").startswith(("search:", "section:")))
+
+
 class Recents:
     def __init__(self, directory: str):
         self.path = os.path.join(directory, "recents.json")
         data = load_json(self.path)
         first_version = "collections" not in data and "searches" not in data
-        self.collections = _lists(data if first_version else data.get("collections"))
+        self.collections = {
+            source: [c for c in entries if not _temporary_collection(c)]
+            for source, entries in _lists(data if first_version else data.get("collections")).items()
+        }
         self.searches_by_instance = _lists(data.get("searches"))
         self.stations = _lists(data.get("stations"))
 
@@ -41,7 +50,7 @@ class Recents:
 
     def add(self, instance_id: str, collection: dict[str, Any]) -> None:
         """Puts a collection first (moving it there if it's already in the list)."""
-        if not isinstance(collection, dict) or not collection.get("id") or not collection.get("kind"):
+        if not isinstance(collection, dict) or not collection.get("id") or not collection.get("kind") or _temporary_collection(collection):
             return
         entry = {k: collection.get(k) for k in KEYS}
         entry["at"] = int(time.time())  # when: the one library's Jump back in orders every source's by it

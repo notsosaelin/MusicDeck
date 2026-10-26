@@ -24,7 +24,6 @@ import { FC, ReactNode, useEffect, useState } from "react";
 import { SONG_TOASTS, SongToasts } from "../songToasts";
 import {
   FaArchive,
-  FaCheckCircle,
   FaBandcamp,
   FaBroadcastTower,
   FaCompactDisc,
@@ -72,14 +71,15 @@ import {
 import { notify } from "../notify";
 import { installUpdate, lookForUpdate } from "../update";
 import { DeviceRows } from "../devices";
-import { deleteSource, switchSource } from "../sources";
+import { deleteSource } from "../sources";
 import { player } from "../player";
 import { syncLibraryEntry } from "../libraryEntry";
 import { pluginState, refreshState, useStore } from "../store";
 import { invalidateBrowserCache } from "../nav";
-import { ACCENT, DialogActions } from "./common";
+import { DialogActions } from "./common";
 import { browseThenReturn, linkLastfm, readClipboard } from "../signIn";
 import { ServiceModal } from "./ServiceModal";
+import { musicFor } from "../games";
 
 /** How shuffle orders the queue (player.ts: buildOrder) */
 export const SHUFFLE_MODES: [NonNullable<PlaybackSettings["shuffle_mode"]>, string][] = [
@@ -100,7 +100,7 @@ export async function updatePlayback(patch: Partial<PlaybackSettings>) {
 export const SHUFFLE_NOTES: Record<NonNullable<PlaybackSettings["shuffle_mode"]>, string> = {
   songs: "Song by song",
   albums: "Whole albums, in random order",
-  smart: "Your better-rated songs sooner, never the same artist twice in a row",
+  smart: "Favours higher ratings; alternates artists",
 };
 
 /**
@@ -369,6 +369,7 @@ const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
       <Field
         focusable
         highlightOnFocus
+        verticalAlignment="center"
         icon={icon}
         label={device.name}
         description={describeDevice(device)}
@@ -382,7 +383,7 @@ const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
   );
 };
 
-const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }> = ({ service, typeName, active }) => {
+const ServiceRow: FC<{ service: ServiceInfo; typeName: string }> = ({ service, typeName }) => {
   const edit = () => showModal(<ServiceModal type={service.type} typeName={typeName} existing={service} />);
   const test = async () => {
     const r = await testService(service.id);
@@ -399,7 +400,6 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
     invalidateBrowserCache();
     await refreshState();
   };
-  const makeActive = () => switchSource(service.id);
   const findArt = async () => {
     const r = await findMissingArt(service.id);
     if (!r.ok) return notify(service.name, r.error);
@@ -424,7 +424,6 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
   const openMenu = (e: any) =>
     showContextMenu(
       <Menu label={service.name}>
-        {!active && <MenuItem onSelected={makeActive}>Play from this source</MenuItem>}
         <MenuItem onSelected={edit}>Edit</MenuItem>
         {service.type === "local" || service.type === "steam" ? (
           <MenuItem onSelected={doRescan} disabled={!!service.status.scanning}>
@@ -457,13 +456,9 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
       <Field
         focusable
         highlightOnFocus
-        icon={<span style={{ color: active ? ACCENT : undefined }}>{TYPE_ICONS[service.type]}</span>}
-        label={
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {service.name}
-            {active && <FaCheckCircle style={{ color: ACCENT, fontSize: 12 }} />}
-          </span>
-        }
+        verticalAlignment="center"
+        icon={TYPE_ICONS[service.type]}
+        label={service.name}
         // the type only when the user gave it another name ("Home", say)
         description={
           [service.name !== typeName && typeName, describeStatus(service)].filter(Boolean).join(" · ") || undefined
@@ -488,7 +483,7 @@ const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
     return (
       <PanelSectionRow>
         <div style={{ fontSize: 12, opacity: 0.6, padding: "8px 0", lineHeight: 1.4 }}>
-          In a game, press <FaGamepad /> on an album or playlist to play it with that game.
+          Link an album or playlist to a running game with <FaGamepad />.
         </div>
       </PanelSectionRow>
     );
@@ -502,7 +497,8 @@ const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
     <>
       {entries.map((m) => {
         const source = state.services.find((s) => s.id === m.instance_id)?.name ?? "";
-        const live = m.instance_id === state.active_service;
+        const selected = musicFor(m.appid);
+        const live = selected?.instance_id === m.instance_id;
         const open = (e: any) =>
           showContextMenu(
             <Menu label={m.game}>
@@ -518,7 +514,7 @@ const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
               focusable
               highlightOnFocus
               label={m.game}
-              description={`${m.collection.title} · ${source}${live ? "" : " (not active)"}`}
+              description={`${m.collection.title} · ${source}${live ? "" : " (superseded)"}`}
               onActivate={open}
               onClick={open}
             >
@@ -592,10 +588,11 @@ const ListenBrainzRow: FC<{ user: string; pending: number }> = ({ user, pending 
     <PanelSectionRow>
       <Field
         label="ListenBrainz"
-        description={user ? `${user}${pending ? ` · ${pending} waiting` : ""}` : "Scrobble every source"}
+        verticalAlignment="center"
+        description={user ? `${user}${pending ? ` · ${pending} waiting` : ""}` : undefined}
       >
         <DialogButton
-          style={{ minWidth: 0, width: "auto", padding: "8px 18px" }}
+          style={{ minWidth: 80, width: 80, padding: "8px 12px" }}
           onClick={() => (user ? unlink() : showModal(<ListenBrainzModal />))}
         >
           {user ? "Unlink" : "Link"}
@@ -679,10 +676,11 @@ const LastfmRow: FC<{ lastfm: PluginState["lastfm"] }> = ({ lastfm }) => {
     <PanelSectionRow>
       <Field
         label="Last.fm"
-        description={user ? `${user}${pending ? ` · ${pending} waiting` : ""}` : "Scrobble every source"}
+        verticalAlignment="center"
+        description={user ? `${user}${pending ? ` · ${pending} waiting` : ""}` : undefined}
       >
         <DialogButton
-          style={{ minWidth: 0, width: "auto", padding: "8px 18px" }}
+          style={{ minWidth: 80, width: 80, padding: "8px 12px" }}
           onClick={async () => {
             if (!user) {
               showModal(<LastfmModal hasKey={has_key} />);
@@ -708,7 +706,7 @@ const SOURCE_GROUPS: { group: ServiceType["group"]; label: string }[] = [
   { group: "other", label: "Other" },
 ];
 
-/** The plugin's page in the Decky menu: sources, the active source, and QAM placement. */
+/** The plugin's page in the Decky menu: source management and preferences. */
 /** A titled group of settings: Decky's PanelSection in the panel, the media center's own heading there. */
 export type SectionFrame = FC<{ title: string; children?: ReactNode }>;
 
@@ -748,7 +746,7 @@ export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }
         <PanelSectionRow>
           <DropdownItem
             label="Shuffle"
-            description={SHUFFLE_NOTES[state.playback.shuffle_mode ?? "songs"]}
+            description={state.playback.shuffle_mode === "smart" ? SHUFFLE_NOTES.smart : undefined}
             rgOptions={SHUFFLE_MODES.map(([data, label]) => ({ data, label }))}
             selectedOption={state.playback.shuffle_mode ?? "songs"}
             onChange={(o) => setPlayback({ shuffle_mode: o.data })}
@@ -764,7 +762,7 @@ export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }
         </PanelSectionRow>
         <PanelSectionRow>
           <ToggleField
-            label="Resume where you left off"
+            label="Resume playback"
             checked={state.playback.resume}
             onChange={(resume) => setPlayback({ resume })}
           />
@@ -897,20 +895,8 @@ export const Settings: FC = () => {
   return (
     <>
       <PanelSection title="Sources">
-        {services.length > 1 && (
-          <PanelSectionRow>
-            <DropdownItem
-              // under its label, full width: its value (a source's name, a choice) is never cut short
-              layout="below"
-              label="Playing from"
-              rgOptions={services.map((s) => ({ data: s.id, label: s.name }))}
-              selectedOption={state.active_service}
-              onChange={(o) => switchSource(o.data)}
-            />
-          </PanelSectionRow>
-        )}
         {services.map((s) => (
-          <ServiceRow key={s.id} service={s} typeName={typeName(s.type)} active={s.id === state.active_service} />
+          <ServiceRow key={s.id} service={s} typeName={typeName(s.type)} />
         ))}
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={addSource}>
@@ -937,11 +923,11 @@ export const Settings: FC = () => {
         </PanelSection>
       )}
 
-      <PanelSection title="More">
+      <PanelSection title="Interface">
         <PanelSectionRow>
           <DropdownItem
+            layout="below"
             label="Song notifications"
-            description="A toast with the artwork when a new song starts"
             rgOptions={SONG_TOASTS.map(([data, label]) => ({ data, label }))}
             selectedOption={state.song_toasts ?? "games"}
             onChange={async (o: { data: SongToasts }) => {
@@ -964,8 +950,8 @@ export const Settings: FC = () => {
         </PanelSectionRow>
         <PanelSectionRow>
           <ToggleField
-            label="Show in your Library"
-            description="Play opens the media center"
+            label="Show in Steam Library"
+            description="Opens the media center"
             checked={!!state.library_entry?.enabled}
             onChange={async (on) => {
               const entry = { enabled: on, appid: state.library_entry?.appid ?? 0 };
@@ -976,8 +962,10 @@ export const Settings: FC = () => {
             }}
           />
         </PanelSectionRow>
+      </PanelSection>
+      <DeviceRows />
+      <PanelSection title="Maintenance">
         <BackupRows />
-        <DeviceRows />
         <PanelSectionRow>
           <ToggleField
             label="Debug log"

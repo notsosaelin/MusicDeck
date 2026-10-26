@@ -3,6 +3,27 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.8
+
+- **Browse rows scroll again in the media center:** the source pages fit the screen instead of expanding to the
+  width of every card in a row. Controller navigation and touch can reach the rest of each row across sources.
+
+## 0.41.7
+
+- **Jump back in** no longer shows temporary search results or Home sections as albums from the last selected
+  source. Existing stray entries are filtered out; albums, playlists, source lists and search history stay.
+
+## 0.41.6
+
+- **Settings are easier to scan:** redundant helper text removed, account and device buttons aligned,
+  and Interface, Your devices and Maintenance replace the crowded More section. Song notifications
+  shows its full selected value in the Quick Access panel.
+- **Sources are managed, not selected:** removed Playing from, Play from this source and the old active-source
+  markers. Pick music from the unified library; source menus keep Edit, Remove and their maintenance tools.
+- **Game music works across sources:** a game's most recently linked album or playlist plays regardless of the
+  old active source. Older links are marked superseded. Closing the game or choosing other music while its
+  collection loads cancels the pending start.
+
 ## 0.41.5
 
 - **Compact keyboards** (BetterKeyboard's compact mode): the media center knows the keyboard is up from Steam itself,
