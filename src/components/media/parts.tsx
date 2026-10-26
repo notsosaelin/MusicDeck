@@ -40,6 +40,8 @@ export const CENTER_CSS =
 /* a source's Browse coming in: faded in where it'll be, the page keeping its height meanwhile */
 /* a source's Browse coming in: hidden until its rows have settled where they'll be, then faded in; the page keeps
    its height meanwhile */
+/* a search's results page: what was searched for, small, over the source dots */
+.mc-search-query { font-size: 20px; font-weight: 600; margin: 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-browse-stack { display: grid; }
 .mc-browse-stack > .mc-browse-body { grid-area: 1 / 1; }
 .mc-browse-body { min-height: 70vh; opacity: 0; }

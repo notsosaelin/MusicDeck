@@ -55,9 +55,10 @@ import {
   searchHistory,
 } from "../../api";
 import { bestResults, bySource, useLibrarySearch } from "../../library";
+import { SourcePager } from "./sources";
 import { continueFrom, useOtherSessions } from "../../devices";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
-import { View, centerTab, playFrom, resultCache, setOpenInCenter } from "../../nav";
+import { View, centerTab, playFrom, setOpenInCenter } from "../../nav";
 import { notify } from "../../notify";
 import { hasFeature, player } from "../../player";
 import { isMissingArt, useArtLoad } from "../../art";
@@ -1063,17 +1064,25 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
 };
 
 /** A search field (Steam's on-screen keyboard opens on it), recent searches, then results. */
+/** What was last typed in the search field: there again when B comes back to it from the results */
+const searchDraft = new Store<string>("");
+
+/**
+ * Search: the field (and the recent searches under it); a search opens its results as a page of their own, over the
+ * field, which B goes back to.
+ */
 export const SearchPage: FC<{ instanceId: string; stack: CenterStack; query: string }> = ({
   instanceId,
   stack,
   query,
 }) => {
-  const [draft, setDraft] = useState(query);
+  const [draft, setDraft] = useState(query || searchDraft.get());
   const run = (q: string) => {
     if (!q.trim()) return;
-    resultCache.delete(`${instanceId}:search:${q.trim()}`);
-    centerNav.update({ [stack]: [{ type: "search", query: q.trim() }] });
+    searchDraft.set(q.trim());
+    centerNav.update({ [stack]: [{ type: "search", query: "" }, { type: "search", query: q.trim() }] });
   };
+  if (query) return <SearchResults instanceId={instanceId} stack={stack} query={query} />;
   return (
     <>
       <Focusable
@@ -1092,72 +1101,47 @@ export const SearchPage: FC<{ instanceId: string; stack: CenterStack; query: str
           <FaSearch />
         </PageButton>
       </Focusable>
-      {query ? (
-        <SearchResults instanceId={instanceId} stack={stack} query={query} />
-      ) : (
-        <RecentSearches
-          instanceId={instanceId}
-          onSearch={(q) => {
-            setDraft(q);
-            run(q);
-          }}
-        />
-      )}
+      <RecentSearches
+        instanceId={instanceId}
+        onSearch={(q) => {
+          setDraft(q);
+          run(q);
+        }}
+      />
     </>
   );
 };
 
-/** Every source's results, each under its name as it answers (the live source's search history keeps the search). */
-// GamepadButton.TRIGGER_LEFT and TRIGGER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
-const L2 = 7;
-const R2 = 8;
-
 /**
- * Every source's results, one source at a time: dots along the top (as Browse has them), half either side of the
- * name of the one showing; the controller landing on a dot shows that source's results, all of them, and L2/R2 step
- * through the sources from anywhere in the results. Your files' show first, then music services', then the rest.
+ * A search's results, a page of their own: what was searched for, then one source at a time (SourcePager's dots),
+ * all of that source's results, songs first. Your files' show first, then music services', then the rest; it stays on
+ * the one picked. The live source's recent searches keep the search.
  */
 const SearchResults: FC<{ instanceId: string; stack: CenterStack; query: string }> = ({ instanceId, stack, query }) => {
   const { pages } = useLibrarySearch(query, instanceId);
   // until one's picked, the best that's answered so far (your files, then music services...)
   const [chosen, setChosen] = useState<string | null>(null);
-  if (!pages.length) return null;
-  const index = Math.max(0, pages.findIndex((p) => p.source.id === (chosen ?? bestResults(pages)?.source.id)));
-  const at = pages[index];
-  const step = (by: number) => setChosen(pages[(index + by + pages.length) % pages.length].source.id);
-  const dot = (p: (typeof pages)[number]) => (
-    <Focusable
-      key={p.source.id}
-      className={p === at ? "mc-dot mc-on" : "mc-dot"}
-      noFocusRing
-      onGamepadFocus={() => setChosen(p.source.id)}
-      onClick={() => setChosen(p.source.id)}
-    >
-      <span />
-    </Focusable>
-  );
-  const half = Math.ceil(pages.length / 2);
+  const at = pages.find((p) => p.source.id === chosen) ?? bestResults(pages);
   return (
-    <Focusable
-      onButtonDown={(e: any) => {
-        const button = e?.detail?.button;
-        if (button === L2 || button === R2) step(button === R2 ? 1 : -1);
-      }}
-    >
-      {pages.length > 1 && (
-        <Focusable flow-children="row" className="mc-sources" style={{ marginBottom: 6 }}>
-          <div className="mc-sources-side" style={{ justifyContent: "flex-end" }}>
-            {pages.slice(0, half).map(dot)}
-          </div>
-          <div className="mc-sources-name">{at.source.name}</div>
-          <div className="mc-sources-side">{pages.slice(half).map(dot)}</div>
-        </Focusable>
+    <>
+      <div className="mc-search-query">“{query}”</div>
+      {at && (
+        <SourcePager
+          places={pages.map((p) => ({ id: p.source.id, name: p.source.name }))}
+          at={at.source.id}
+          onChoose={setChosen}
+          page={(id) => {
+            const found = pages.find((p) => p.source.id === id);
+            // marked, so the controller lands on the first result
+            return found ? (
+              <div className="mc-results">
+                <PageContent instanceId={id} stack={stack} page={{ ...found.page, tracks_first: true }} />
+              </div>
+            ) : null;
+          }}
+        />
       )}
-      {/* marked, so the controller lands on the first result rather than back in the search field */}
-      <div className="mc-results" key={at.source.id}>
-        <PageContent instanceId={at.source.id} stack={stack} page={{ ...at.page, tracks_first: true }} />
-      </div>
-    </Focusable>
+    </>
   );
 };
 

@@ -3,6 +3,13 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.6
+
+- **A search's results are a page of their own** (media center): what you searched for over the source dots, then
+  that source's results, with the field gone; B goes back to the field, your words still in it. Switching source there
+  works as Browse's does: the results before stay until the next ones are ready, then fade over them; the page holds
+  still, and the controller stays on the dots (or, with L2/R2 from the results, lands on the next source's first).
+
 ## 0.39.5
 
 - **Search one source at a time**: results come with dots for the sources that found something (as Browse has them),
