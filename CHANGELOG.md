@@ -3,6 +3,15 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.5
+
+- **Compact keyboards** (BetterKeyboard's compact mode): the media center knows the keyboard is up from Steam itself,
+  whatever its size, so its page ends right at it; over a compact keyboard the now-playing bar stays, sitting on it,
+  with no gap where Steam's hint bar was. A full keyboard still has the room to itself.
+- **Themes that change Steam's header or hint bar** (CSS Loader's, Footer Editor's): the media center fits between
+  them as they're drawn, each on its own; one a theme takes away leaves no gap, and turning a theme on or off is
+  followed at once.
+
 ## 0.41.4
 
 - **Load more**: a YouTube Music or SoundCloud search's songs and videos go on past the first page. At the end of

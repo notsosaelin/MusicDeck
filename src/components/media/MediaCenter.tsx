@@ -820,11 +820,31 @@ function useAreaHeight(ref: RefObject<HTMLElement | null>): { full: number; shor
 }
 
 /**
+ * Whether Steam's on-screen keyboard is up, as Steam itself says (its VirtualKeyboardManager), whatever its size:
+ * Steam's own, or a plugin's smaller one (BetterKeyboard's compact mode) that shortens the page less. Null where Steam
+ * doesn't say (the page's height decides).
+ */
+function useSteamKeyboard(): boolean | null {
+  const showing = (window as any).SteamUIStore?.WindowStore?.GamepadUIMainWindowInstance?.VirtualKeyboardManager
+    ?.IsShowingVirtualKeyboard;
+  const [up, setUp] = useState<boolean>(!!showing?.Value);
+  useEffect(() => {
+    if (typeof showing?.Subscribe !== "function") return;
+    setUp(!!showing.Value);
+    const sub = showing.Subscribe((value: boolean) => setUp(!!value));
+    return () => sub?.Unsubscribe?.();
+  }, [showing]);
+  return typeof showing?.Subscribe === "function" ? up : null;
+}
+
+/**
  * Where Steam's own header (search, notifications, clock) ends and its hint bar starts, in the media
  * center's own coordinates, as drawn now. Both are a set size in Steam's units, not a share of the
  * screen, so fractions of the height that fit the Steam Deck's screen left a gap above the hint bar on
  * taller ones (2560x1600). The hint bar is Steam's BasicFooter; the header, the bar across the top of the
- * window. Null until they're found (the fractions stand in).
+ * window. Either can be restyled, resized or taken away by a theme (CSS Loader's footer and header themes): each is
+ * measured on its own, one not there once the page has settled takes no room, and they're measured again as themes
+ * come and go. Null until something's found (the fractions stand in).
  */
 function useSteamBars(ref: RefObject<HTMLElement | null>): { top: number; bottom: number } | null {
   const [bars, setBars] = useState<{ top: number; bottom: number } | null>(null);
@@ -855,15 +875,31 @@ function useSteamBars(ref: RefObject<HTMLElement | null>): { top: number; bottom
       const header = barAt(2);
       const bottom =
         footer && footer.height > 8 && footer.top > area.top + area.height / 2 ? area.bottom - footer.top : 0;
-      const top = header ? header.bottom - area.top : 0;
-      setBars(bottom > 0 && top > 0 ? { top: Math.round(top), bottom: Math.round(bottom) } : null);
+      const top = header ? Math.max(0, header.bottom - area.top) : 0;
+      if (top > 0 || bottom > 0 || settled) setBars({ top: Math.round(top), bottom: Math.round(bottom) });
     };
+    let settled = false;
     measure();
-    // Steam lays its bars out after the page arrives; and the screen can change size
-    const later = win.setTimeout(measure, 500);
+    // Steam lays its bars out after the page arrives: by then, one that isn't there is one a theme took away
+    const later = win.setTimeout(() => {
+      settled = true;
+      measure();
+    }, 500);
     const stop = watchSize(el, measure);
+    // a theme turned on or off (CSS Loader adds and removes its styles in the page's head), the window resized
+    let soon = 0;
+    const restyled = () => {
+      win.clearTimeout(soon);
+      soon = win.setTimeout(measure, 150);
+    };
+    const themes = new win.MutationObserver(restyled);
+    themes.observe(doc.head, { childList: true, subtree: true, characterData: true });
+    win.addEventListener("resize", restyled);
     return () => {
       win.clearTimeout(later);
+      win.clearTimeout(soon);
+      themes.disconnect();
+      win.removeEventListener("resize", restyled);
       stop();
     };
   }, []);
@@ -1208,6 +1244,8 @@ export const MediaCenter: FC = () => {
   const root = useRef<HTMLDivElement>(null);
   const { full, short } = useAreaHeight(root);
   const bars = useSteamBars(root);
+  // the keyboard up (Steam's, or a plugin's compact one): the page ends at it, the hint bar behind it
+  const keyboard = useSteamKeyboard() ?? short;
   const item = queue[index];
   const art = item?.track.art ? mediaUrl("art", item.instanceId, item.track.art) : undefined;
   const preview = useStore(browsePreview).id;
@@ -1282,7 +1320,7 @@ export const MediaCenter: FC = () => {
           // screen they take on a Steam Deck); with the keyboard up (the page shorter, the hint bar behind
           // the keyboard), down to the keyboard
           top: bars ? bars.top : full ? full * 0.086 : "8.6vh",
-          bottom: short ? 0 : bars ? bars.bottom : full ? full * 0.088 : "8.8vh",
+          bottom: keyboard ? 0 : bars ? bars.bottom : full ? full * 0.088 : "8.8vh",
           left: 0,
           right: 0,
           display: "flex",
@@ -1308,8 +1346,8 @@ export const MediaCenter: FC = () => {
             }))}
           />
         </div>
-        {/* not while the keyboard's up: the room is the search field's */}
-        {shown !== "playing" && !short && <NowPlayingBar />}
+        {/* not while a full keyboard's up (the room is the search field's); over a compact one, right on it */}
+        {shown !== "playing" && !(keyboard && short) && <NowPlayingBar />}
       </div>
       {screenOff && <Blackout onWake={wake} />}
     </Focusable>
