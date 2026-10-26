@@ -6,7 +6,6 @@ import {
   Navigation,
   PanelSection,
   PanelSectionRow,
-  Spinner,
   TextField,
 } from "@decky/ui";
 import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
@@ -68,6 +67,7 @@ import {
   IconButton,
   ListRow,
   Message,
+  QuietSpinner,
   RowText,
   ScrollingText,
   TrackNumber,
@@ -119,7 +119,7 @@ const Loading: FC<{ result: Result<any> | null }> = ({ result }) =>
     <PanelSection>
       <PanelSectionRow>
         <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
-          <Spinner style={{ width: 32, height: 32 }} />
+          <QuietSpinner />
         </div>
       </PanelSectionRow>
     </PanelSection>

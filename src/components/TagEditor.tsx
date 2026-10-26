@@ -8,7 +8,6 @@ import {
   MenuItem,
   MenuSeparator,
   ModalRoot,
-  Spinner,
   TextField,
   showModal,
 } from "@decky/ui";
@@ -39,7 +38,7 @@ import { View, invalidateBrowserCache, navigation, setStack } from "../nav";
 import { notify } from "../notify";
 import { hasFeature } from "../player";
 import { pluginState, refreshState, relayUrl } from "../store";
-import { DialogActions } from "./common";
+import { DialogActions, QuietSpinner } from "./common";
 import { centerNav } from "./media/pages";
 
 // FileSelectionType.FILE from @decky/api (a const enum, which isolated builds can't import)
@@ -93,7 +92,7 @@ const CancelOnly: FC<{ onCancel?: () => void }> = ({ onCancel }) => (
 
 const Loading: FC = () => (
   <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-    <Spinner style={{ width: 32, height: 32 }} />
+    <QuietSpinner />
   </div>
 );
 

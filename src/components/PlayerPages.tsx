@@ -1,4 +1,4 @@
-import { Focusable, PanelSection, PanelSectionRow, Spinner } from "@decky/ui";
+import { Focusable, PanelSection, PanelSectionRow } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { openMediaCenter, showTab } from "../nav";
 import { player } from "../player";
@@ -7,7 +7,7 @@ import { ScrollingPlainLyrics, SyncedLyrics, useLyrics } from "./LyricsView";
 import { NowPlaying } from "./NowPlaying";
 import { Queue, confirmClearQueue } from "./Queue";
 import { Visualizer } from "./media/nowplaying";
-import { ButtonRow, IconButton, watchSize } from "./common";
+import { ButtonRow, IconButton, QuietSpinner, watchSize } from "./common";
 import { FaMusic, FaSearch } from "react-icons/fa";
 import { saveQueue } from "./TrackMenu";
 
@@ -267,7 +267,7 @@ const PanelLyrics: FC<{ height: number }> = ({ height }) => {
   if (lyrics === undefined)
     return focusable(
       <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Spinner style={{ width: 32, height: 32 }} />
+        <QuietSpinner />
       </div>,
     );
   if (!lyrics || "error" in lyrics) {

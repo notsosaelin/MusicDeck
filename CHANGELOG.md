@@ -3,6 +3,15 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.40.1
+
+- **Like the song from Now Playing** (media center): a plus at the right of the controls, a tick once it's liked, in
+  the source's own words (Save to Liked Songs, Like...); for sources that keep likes. A station's favourite stays in
+  its own controls.
+- **Your other devices lead Jump back in** on Home (media center and desktop): what each was playing is the row's
+  first card, "On <device>" under it, instead of a Continue listening row of its own.
+- **Loading is quiet**: a spinner only shows when something takes longer than a moment, and fades in.
+
 ## 0.40.0
 
 - **Song notifications**: a toast with the artwork, the song's name and its artist and album when a new song

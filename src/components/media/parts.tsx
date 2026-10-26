@@ -1,11 +1,11 @@
-import { Focusable, Spinner, gamepadDialogClasses } from "@decky/ui";
+import { Focusable, gamepadDialogClasses } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, createContext, useContext, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUsb, FaUser } from "react-icons/fa";
 import { Collection, Result, Track } from "../../api";
 import { player } from "../../player";
 import { useArtLoad } from "../../art";
 import { mediaUrl, pluginState, useStore } from "../../store";
-import { ACCENT, ScrollingText, formatTime } from "../common";
+import { ACCENT, QuietSpinner, ScrollingText, formatTime } from "../common";
 import { GRID_GAP, GRID_SHARE, gridShape } from "./grid";
 
 /**
@@ -483,7 +483,7 @@ export const PageButton: FC<{
 export const Loading: FC<{ result: Result<any> | null }> = ({ result }) =>
   result === null ? (
     <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
-      <Spinner style={{ width: 40, height: 40 }} />
+      <QuietSpinner size={40} />
     </div>
   ) : !result.ok ? (
     <Notice>{result.error}</Notice>

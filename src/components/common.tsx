@@ -10,6 +10,7 @@ import {
   Marquee,
   PanelSection,
   PanelSectionRow,
+  Spinner,
 } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaSort, FaUsb, FaUser } from "react-icons/fa";
@@ -18,6 +19,28 @@ import { useArtLoad } from "../art";
 import { mediaUrl } from "../store";
 
 export const ACCENT = "#1a9fff";
+
+/** How long something loads before a spinner shows: most loads are done by then, and nothing flashes up */
+const SPINNER_AFTER_MS = 400;
+
+/** A spinner that shows only if loading takes a while, faded in. */
+export const QuietSpinner: FC<{ size?: number }> = ({ size = 32 }) => {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShown(true), SPINNER_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const [lit, setLit] = useState(false);
+  // drawn clear first, then lit: the transition fades it in
+  useEffect(() => {
+    if (!shown) return;
+    const frame = window.requestAnimationFrame(() => setLit(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [shown]);
+  return (
+    <Spinner style={{ width: size, height: size, opacity: lit ? 0.8 : 0, transition: "opacity 0.3s", visibility: shown ? "visible" : "hidden" }} />
+  );
+};
 
 /** A country's name from its ISO code, in English (the browser's own list). */
 export const countryName = (code: string) => {

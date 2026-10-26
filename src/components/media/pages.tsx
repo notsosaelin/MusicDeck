@@ -524,10 +524,14 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack; 
     () => (ours === "home" ? libraryHome() : ours ? libraryTab(ours) : getCenterTab(instanceId, tab)),
     true,
   );
+  // Home: what your other devices were playing leads Jump back in (a row of its own when there's none)
+  const sessions = useOtherSessions();
+  const lead = ours === "home" && sessions.length ? continueCards(sessions) : null;
   if (!result) return null;
   if (!result.ok) return after ? <>{after}</> : <Loading result={result} />;
   const sections = result.data.filter((s) => s.items.length || s.tracks?.length);
-  const home = ours === "home" ? <ContinueShelf /> : null;
+  const jump = lead ? sections.find((s) => s.title === JUMP_BACK_IN && s.items.length) : undefined;
+  const home = lead && !jump ? <Shelf title={JUMP_BACK_IN}>{lead}</Shelf> : null;
   const notes = result.data.filter((s) => s.notice);
   if (!sections.length)
     return (
@@ -542,7 +546,7 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack; 
     <>
       {home}
       {sections.map((s) => (
-        <SectionView key={s.title} instanceId={instanceId} stack={stack} section={s} headed={headed} />
+        <SectionView key={s.title} instanceId={instanceId} stack={stack} section={s} headed={headed} lead={s === jump ? lead : undefined} />
       ))}
       {after}
     </>
@@ -571,23 +575,21 @@ export const DevicesShelf: FC<{ instanceId: string; stack: CenterStack }> = ({ i
   );
 };
 
-const ContinueShelf: FC = () => {
-  const sessions = useOtherSessions();
-  if (!sessions.length) return null;
-  return (
-    <Shelf title="Continue listening">
-      {sessions.map((s) => (
-        <TrackCard key={s.peer} instanceId={s.instanceId} track={{ ...s.track, artist: s.name }} onPlay={() => continueFrom(s)} />
-      ))}
-    </Shelf>
-  );
-};
+const JUMP_BACK_IN = "Jump back in";
 
-const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean }> = ({
+/** What your other devices were playing, a card each (the device under the song), played here from where it was */
+const continueCards = (sessions: ReturnType<typeof useOtherSessions>) =>
+  sessions.map((s) => (
+    <TrackCard key={`peer:${s.peer}`} instanceId={s.instanceId} track={{ ...s.track, artist: `On ${s.name}` }} onPlay={() => continueFrom(s)} />
+  ));
+
+/** `lead`: cards ahead of the section's own in its row (Home's Jump back in: your other devices') */
+const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean; lead?: ReactNode }> = ({
   instanceId,
   stack,
   section: s,
   headed,
+  lead,
 }) => {
   // the one library's songs from several sources: a list for each, under its name (a list plays from one source)
   const parts = bySource(s.tracks ?? [], instanceId);
@@ -596,7 +598,7 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     const name = (id: string) => names.find((x) => x.id === id)?.name ?? "";
     return (
       <>
-        {s.items.length > 0 && <SectionView instanceId={instanceId} stack={stack} section={{ ...s, tracks: [] }} headed={headed} />}
+        {s.items.length > 0 && <SectionView instanceId={instanceId} stack={stack} section={{ ...s, tracks: [] }} headed={headed} lead={lead} />}
         {parts.map((p) => (
           <SectionView
             key={p.source}
@@ -610,7 +612,7 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     );
   }
   if (parts.length === 1 && parts[0].source !== instanceId)
-    return <SectionView instanceId={parts[0].source} stack={stack} section={s} headed={headed} />;
+    return <SectionView instanceId={parts[0].source} stack={stack} section={s} headed={headed} lead={lead} />;
   const tracks = s.tracks ?? [];
   const songs = tracks.length > 0 && (
     <div style={{ marginBottom: 28 }}>
@@ -645,6 +647,7 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
   if (s.display === "covers")
     return (
       <Shelf title={s.title}>
+        {lead}
         {s.items.slice(0, rowCut(s.items.length + tracks.length)).map((c) => collectionCard(instanceId, stack, c))}
         {tracks.slice(0, Math.max(0, rowCut(s.items.length + tracks.length) - s.items.length)).map((t, i) =>
           t.live ? (
@@ -684,6 +687,7 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
     <>
       {s.items.length > 0 && (
         <Shelf title={s.title}>
+          {lead}
           {s.items.slice(0, rowCut(s.items.length)).map((c) => collectionCard(instanceId, stack, c))}
           {s.items.length > ROW_SIZE && rowEnd(stack, s.title, s.items, [])}
         </Shelf>

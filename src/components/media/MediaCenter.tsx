@@ -2,6 +2,7 @@ import { DropdownItem, Focusable, SliderField, Tabs, footerClasses } from "@deck
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { showingMusicDeck } from "../../songToasts";
 import {
+  FaCheck,
   FaHeart,
   FaMoon,
   FaPause,
@@ -31,7 +32,7 @@ import {
 } from "../../api";
 import { CenterTab, browsePreview, centerTab, leaveMediaCenter } from "../../nav";
 import { hasFeature, player } from "../../player";
-import { showPlaylistPicker, toggleStar } from "../TrackMenu";
+import { likeWords, showPlaylistPicker, toggleStar } from "../TrackMenu";
 import { useLoadedArt } from "../../art";
 import { Store, mediaUrl, pluginState, useStore } from "../../store";
 import { openMusicDeck } from "../../qam";
@@ -347,6 +348,29 @@ const RadioTransport: FC<{ big: boolean; focusPlay?: boolean }> = ({ big, focusP
         <FaPlus />
       </IconButton>
     </Focusable>
+  );
+};
+
+/**
+ * Likes the song, in the source's own words (Save to Liked Songs, Like, Add to favourites): a plus, a tick in the accent
+ * once it's liked. Only for a source that keeps likes.
+ */
+const LikeButton: FC = () => {
+  const { queue, index } = useStore(player.state);
+  const item = queue[index];
+  if (!item || !hasFeature(item.instanceId, "star")) return null;
+  const liked = !!item.track.starred;
+  const words = likeWords(item.instanceId);
+  return (
+    <IconButton
+      look="plain"
+      label={liked ? words.remove : words.add}
+      active={liked}
+      onClick={() => toggleStar(item.instanceId, item.track)}
+      style={{ height: 48, fontSize: 17 }}
+    >
+      {liked ? <FaCheck /> : <FaPlus />}
+    </IconButton>
   );
 };
 
@@ -761,10 +785,12 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
             <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: "2vw" }}>
               <Volume />
               <Transport focusPlay kind={kind} />
-              {/* balances the volume, so the transport sits in the middle (talk's speed at its end) */}
-              <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+              {/* balances the volume, so the transport sits in the middle (like, and talk's speed, at its end; a
+                  station's favourite is in its transport) */}
+              <Focusable flow-children="row" style={{ flex: 1, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12 }}>
+                {kind !== "radio" && <LikeButton />}
                 {isTalk(kind) && <SpeedButton />}
-              </div>
+              </Focusable>
             </Focusable>
           </Focusable>
         </Focusable>

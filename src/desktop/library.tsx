@@ -467,6 +467,9 @@ const SectionsPage: FC<{ id: string; title: string; what: string; fetch: () => P
   useEffect(() => setOnly(""), [what]);
   const sources = merged && result?.ok ? sourcesIn(result.data, services) : [];
   const shown = result?.ok ? (merged ? filterLibrary(result.data, only, sort, services) : result.data) : [];
+  const sessions = useOtherSessions();
+  const lead = what === "library:home" && sessions.length ? continueCards(sessions) : null;
+  const jump = lead ? shown.find((s) => s.title === "Jump back in" && s.items.length) : undefined;
   return (
     <>
       <div className="md-page-head">
@@ -492,41 +495,40 @@ const SectionsPage: FC<{ id: string; title: string; what: string; fetch: () => P
           </div>
         )}
       </div>
-      {what === "library:home" && <ContinueRow />}
       <Loading result={result} />
-      {shown.map((s, i) => <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home" || what === "library:home"} />)}
+      {/* Home: what your other devices were playing leads Jump back in (a row of its own when there's none) */}
+      {lead && !jump && (
+        <section className="md-section">
+          <h2 className="md-heading">Jump back in</h2>
+          <Cards id={id} items={[]} row lead={lead} />
+        </section>
+      )}
+      {shown.map((s, i) => (
+        <SectionView key={`${s.title}-${i}`} id={id} section={s} shelves={what === "home" || what === "library:home"} lead={s === jump ? lead : undefined} />
+      ))}
     </>
   );
 };
 
 /** What the user's other devices were playing: a card each, played here from where it was (the other stops). */
-const ContinueRow: FC = () => {
-  const sessions = useOtherSessions();
-  if (!sessions.length) return null;
-  return (
-    <section className="md-section">
-      <h2 className="md-heading">Continue listening</h2>
-      <div className="md-shelf">
-        {sessions.map((s) => (
-          <div key={s.peer} className="md-card" title={`${s.track.title} · ${s.name}`} onClick={() => continueFrom(s)}>
-            <div className="md-card-art" style={{ borderRadius: 3 }}>
-              <ArtOrIcon url={art(s.instanceId, s.track.art)} />
-              <button className="md-card-play" aria-label={`Play ${s.track.title} here`}>
-                <FaPlay />
-              </button>
-            </div>
-            <div className="md-card-title">{s.track.title}</div>
-            <div className="md-card-sub">{[s.track.artist, s.name].filter(Boolean).join(" · ")}</div>
-          </div>
-        ))}
+const continueCards = (sessions: ReturnType<typeof useOtherSessions>) =>
+  sessions.map((s) => (
+    <div key={`peer:${s.peer}`} className="md-card" title={`${s.track.title} · ${s.name}`} onClick={() => continueFrom(s)}>
+      <div className="md-card-art" style={{ borderRadius: 3 }}>
+        <ArtOrIcon url={art(s.instanceId, s.track.art)} />
+        <button className="md-card-play" aria-label={`Play ${s.track.title} here`}>
+          <FaPlay />
+        </button>
       </div>
-    </section>
-  );
-};
+      <div className="md-card-title">{s.track.title}</div>
+      <div className="md-card-sub">{[s.track.artist, `on ${s.name}`].filter(Boolean).join(" · ")}</div>
+    </div>
+  ));
 
 /** A section: on Home, its cards a row that scrolls (as Steam's library home has them); elsewhere, a grid
  *  using the room there is. */
-const SectionView: FC<{ id: string; section: Section; shelves?: boolean }> = ({ id, section, shelves }) => {
+/** `lead`: cards ahead of the section's own in its row (Home's Jump back in: your other devices') */
+const SectionView: FC<{ id: string; section: Section; shelves?: boolean; lead?: ReactNode }> = ({ id, section, shelves, lead }) => {
   if (section.notice) return <Notice text={section.notice} />;
   const from: Collection = { id: `section:${section.title}`, kind: "list", title: section.title, subtitle: "", art: null };
   return (
@@ -536,7 +538,7 @@ const SectionView: FC<{ id: string; section: Section; shelves?: boolean }> = ({ 
         (section.display === "tiles" || section.display === "rows" ? (
           <Tiles id={id} items={section.items} />
         ) : (
-          <Cards id={id} items={section.items} row={!!shelves && (!section.display || section.display === "shelf")} />
+          <Cards id={id} items={section.items} row={!!shelves && (!section.display || section.display === "shelf")} lead={lead} />
         ))}
       {!!section.tracks?.length && <TrackTable id={id} tracks={section.tracks} from={from} />}
     </section>
@@ -691,7 +693,7 @@ const PageBody: FC<{ id: string; page: Page; from: Collection; skipHeader?: bool
 
 /** Albums, artists, playlists as covers: a row that scrolls (Home's shelves: no scrollbar, arrows at its
  *  ends on hover, as Steam's and Spotify's have) or a wrapping grid. */
-const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, items, row }) => {
+const Cards: FC<{ id: string; items: Collection[]; row?: boolean; lead?: ReactNode }> = ({ id, items, row, lead }) => {
   const shelf = useRef<HTMLDivElement>(null);
   // more to see either way: its arrows show
   const [more, setMore] = useState<[boolean, boolean]>([false, false]);
@@ -726,10 +728,17 @@ const Cards: FC<{ id: string; items: Collection[]; row?: boolean }> = ({ id, ite
     return () => el.removeEventListener("wheel", wheel);
   }, [row]);
   const cards = items.map((c) => <Card key={`${c.source ?? ""}:${c.kind}:${c.id}`} id={c.source ?? id} item={c} />);
-  if (!row) return <div className="md-grid">{cards}</div>;
+  if (!row)
+    return (
+      <div className="md-grid">
+        {lead}
+        {cards}
+      </div>
+    );
   return (
     <div className="md-shelf-box">
       <div ref={shelf} className="md-shelf" onScroll={measure}>
+        {lead}
         {cards}
       </div>
       {more[0] && (
