@@ -46,30 +46,21 @@ export function bySource<T extends { source?: string }>(list: T[], fallback: str
   return parts;
 }
 
-/** A merged page back into each source's own (for views that show one source at a time), in `order` (the
- *  sources' ids) where given. */
-export function splitPage(page: Page, fallback: string, order: string[] = []): { source: string; page: Page }[] {
-  const sources: string[] = [];
-  const add = (s: string) => !sources.includes(s) && sources.push(s);
-  page.tracks.forEach((t) => add(t.source ?? fallback));
-  page.collections.forEach((c) => add(c.source ?? fallback));
-  (page.extra ?? []).forEach((x) => x.tracks.forEach((t) => add(t.source ?? fallback)));
-  const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
-  sources.sort((a, b) => rank(a) - rank(b));
-  return sources.map((source) => ({
-    source,
-    page: {
-      ...page,
-      tracks: page.tracks.filter((t) => (t.source ?? fallback) === source),
-      collections: page.collections.filter((c) => (c.source ?? fallback) === source),
-      extra: (page.extra ?? []).filter((x) => x.tracks.some((t) => (t.source ?? fallback) === source)),
-    },
-  }));
-}
+/** Which source's results show first: your own files, then music services, then the rest (radio, podcasts, books). */
+const SEARCH_FIRST = ["local", "qobuz", "spotify", "tidal", "subsonic", "jellyfin", "emby", "plex", "soulsync", "youtube",
+  "soundcloud", "bandcamp", "steam"];
+const searchRank = (type: string) => (SEARCH_FIRST.includes(type) ? SEARCH_FIRST.indexOf(type) : SEARCH_FIRST.length);
+
+/** Of the sources that found something, the one to show first. */
+export const bestResults = <T extends { source: ServiceInfo }>(pages: T[]): T | undefined =>
+  [...pages].sort((a, b) => searchRank(a.source.type) - searchRank(b.source.type))[0];
 
 /** Every source searched at once: the page so far (null until one answers), and how many are still looking.
  *  `rememberIn`: the source whose recent searches keep it (the media center's live one). */
-export function useLibrarySearch(query: string, rememberIn?: string): { page: Page | null; waiting: number } {
+export function useLibrarySearch(
+  query: string,
+  rememberIn?: string,
+): { page: Page | null; waiting: number; pages: { source: ServiceInfo; page: Page }[] } {
   const services = useStore(pluginState)?.services ?? [];
   const ids = services.map((s) => s.id).join(",");
   const [found, setFound] = useState<{ query: string; pages: Record<string, Page | null> }>({ query, pages: {} });
@@ -93,6 +84,8 @@ export function useLibrarySearch(query: string, rememberIn?: string): { page: Pa
   return {
     page: answered.length ? mergeSearch(query, answered) : null,
     waiting: services.filter((s) => !(s.id in pages)).length,
+    // each source that found something, its whole results (the media center and the panel show one source at a time)
+    pages: answered.filter(({ page }) => page.tracks.length || page.collections.length || page.extra?.some((x) => x.tracks.length)),
   };
 }
 

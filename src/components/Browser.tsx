@@ -38,7 +38,6 @@ import {
   isLocalPlaylist,
   openCollection,
   saveToLibrary,
-  search,
   searchHistory,
 } from "../api";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../games";
@@ -70,6 +69,7 @@ import {
   TrackRow,
 } from "./common";
 import { useDownload, useSavedCopy } from "../download";
+import { bestResults, useLibrarySearch } from "../library";
 
 /**
  * A view's data, cached per key so going back doesn't refetch (shared with the media center). With `revalidate` (the home view, whose
@@ -603,10 +603,53 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
   );
 };
 
+// the panel's source dots, as Now Playing's are in the media center (the panel has its own small copy of them)
+const DOTS_CSS = `
+.md-qdots { display: flex; justify-content: center; align-items: center; padding: 4px 0 0; }
+.md-qdot { display: flex; align-items: center; height: 22px; padding: 0 3px; outline: none; }
+.md-qdot > span { display: block; width: 7px; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.28);
+  transition: width 0.22s ease, background 0.15s, transform 0.15s; }
+.md-qdot.gpfocus > span { background: rgba(255, 255, 255, 0.75); transform: scale(1.3); }
+.md-qdot[data-on] > span { width: 20px; background: #fff; transform: none; }
+.md-qdots-name { text-align: center; font-size: 12px; opacity: 0.6; padding: 2px 0 6px; }
+`;
+
+/**
+ * Every source's results, one source at a time, songs first: small dots for the sources that found something (the
+ * D-pad along them shows each one's), the one showing named under them. Your files' show first, then music services', then the rest.
+ */
 const SearchResults: FC<{ instanceId: string; query: string }> = ({ instanceId, query }) => {
-  const result = useResult<Page>(`${instanceId}:search:${query}`, () => search(instanceId, query));
-  if (!result?.ok) return <Loading result={result} />;
-  return <PageBody instanceId={instanceId} stack="search" page={result.data} />;
+  const { pages } = useLibrarySearch(query, instanceId);
+  // until one's picked, the best that's answered so far (your files, then music services...)
+  const [chosen, setChosen] = useState<string | null>(null);
+  if (!pages.length) return null;
+  const at = pages.find((p) => p.source.id === chosen) ?? bestResults(pages)!;
+  return (
+    <>
+      {pages.length > 1 && (
+        // a row of its own, not a section: no section's padding around a line of dots
+        <div style={{ margin: "-10px 0 -6px" }}>
+          <style>{DOTS_CSS}</style>
+          <Focusable flow-children="row" className="md-qdots">
+            {pages.map((p) => (
+              <Focusable
+                key={p.source.id}
+                className="md-qdot"
+                data-on={p === at ? "" : undefined}
+                noFocusRing
+                onGamepadFocus={() => setChosen(p.source.id)}
+                onClick={() => setChosen(p.source.id)}
+              >
+                <span />
+              </Focusable>
+            ))}
+          </Focusable>
+          <div className="md-qdots-name">{at.source.name}</div>
+        </div>
+      )}
+      <PageBody key={at.source.id} instanceId={at.source.id} stack="search" page={{ ...at.page, tracks_first: true }} />
+    </>
+  );
 };
 
 /** Under an empty search field: the source's last searches. A searches again, X forgets one. */

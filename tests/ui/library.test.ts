@@ -1,7 +1,7 @@
 /** The one library's search, filter and order (src/library.ts). */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bySource, filterLibrary, librarySources, mergeSearch, sourcesIn, splitPage } from "../../src/library";
+import { bySource, filterLibrary, librarySources, mergeSearch, sourcesIn } from "../../src/library";
 import type { Page, Section, ServiceInfo } from "../../src/api";
 
 const service = (id: string, type: string, name: string) => ({ id, type, name }) as unknown as ServiceInfo;
@@ -16,15 +16,13 @@ test("Local files comes first, the rest as they're listed", () => {
   assert.deepEqual(librarySources(SERVICES).map((s) => s.id), ["lf", "qz", "st"]);
 });
 
-test("search: each source's songs and albums, each saying its source; split back the same", () => {
+test("search: each source's songs and albums, each saying its source", () => {
   const merged = mergeSearch("q", [
     { source: SERVICES[1], page: page(["a", "b"], ["A"]) },
     { source: SERVICES[0], page: page(["c"], []) },
   ]);
   assert.deepEqual(merged.tracks.map((t) => [t.id, t.source]), [["a", "lf"], ["b", "lf"], ["c", "qz"]]);
   assert.equal(merged.collections[0].source, "lf");
-  const parts = splitPage(merged, "lf", ["qz", "lf"]);
-  assert.deepEqual(parts.map((p) => [p.source, p.page.tracks.length]), [["qz", 1], ["lf", 2]]);
   assert.deepEqual(bySource(merged.tracks, "x").map((p) => p.source), ["lf", "qz"]);
 });
 

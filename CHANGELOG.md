@@ -3,6 +3,14 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.39.5
+
+- **Search one source at a time**: results come with dots for the sources that found something (as Browse has them),
+  each showing all of that source's results: the media center's with the name between them (the D-pad along them, or
+  L2/R2 from anywhere in the results), the Quick Access panel's small, the name under them. Songs come first. Your
+  own files' results show first, then music services', then radio, podcasts and the rest; it stays on the one you
+  pick.
+
 ## 0.39.4
 
 - Windows: the log no longer shows an error when another device drops its connection (it restarting, a speaker going

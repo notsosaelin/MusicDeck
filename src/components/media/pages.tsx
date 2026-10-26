@@ -1,5 +1,5 @@
 import { Focusable, TextField } from "@decky/ui";
-import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
+import { FC, ReactNode, useEffect, useRef, useState } from "react";
 import {
   FaCalendarAlt,
   FaChartLine,
@@ -54,7 +54,7 @@ import {
   openCollection,
   searchHistory,
 } from "../../api";
-import { bySource, librarySources, splitPage, useLibrarySearch } from "../../library";
+import { bestResults, bySource, useLibrarySearch } from "../../library";
 import { continueFrom, useOtherSessions } from "../../devices";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
 import { View, centerTab, playFrom, resultCache, setOpenInCenter } from "../../nav";
@@ -1108,21 +1108,56 @@ export const SearchPage: FC<{ instanceId: string; stack: CenterStack; query: str
 };
 
 /** Every source's results, each under its name as it answers (the live source's search history keeps the search). */
+// GamepadButton.TRIGGER_LEFT and TRIGGER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
+const L2 = 7;
+const R2 = 8;
+
+/**
+ * Every source's results, one source at a time: dots along the top (as Browse has them), half either side of the
+ * name of the one showing; the controller landing on a dot shows that source's results, all of them, and L2/R2 step
+ * through the sources from anywhere in the results. Your files' show first, then music services', then the rest.
+ */
 const SearchResults: FC<{ instanceId: string; stack: CenterStack; query: string }> = ({ instanceId, stack, query }) => {
-  const { page } = useLibrarySearch(query, instanceId);
-  const services = useStore(pluginState)?.services ?? [];
-  if (!page) return null;
-  const parts = splitPage(page, instanceId, librarySources(services).map((s) => s.id));
+  const { pages } = useLibrarySearch(query, instanceId);
+  // until one's picked, the best that's answered so far (your files, then music services...)
+  const [chosen, setChosen] = useState<string | null>(null);
+  if (!pages.length) return null;
+  const index = Math.max(0, pages.findIndex((p) => p.source.id === (chosen ?? bestResults(pages)?.source.id)));
+  const at = pages[index];
+  const step = (by: number) => setChosen(pages[(index + by + pages.length) % pages.length].source.id);
+  const dot = (p: (typeof pages)[number]) => (
+    <Focusable
+      key={p.source.id}
+      className={p === at ? "mc-dot mc-on" : "mc-dot"}
+      noFocusRing
+      onGamepadFocus={() => setChosen(p.source.id)}
+      onClick={() => setChosen(p.source.id)}
+    >
+      <span />
+    </Focusable>
+  );
+  const half = Math.ceil(pages.length / 2);
   return (
-    // marked, so the controller lands on the first result rather than back in the search field
-    <div className="mc-results">
-      {parts.map((p) => (
-        <Fragment key={p.source}>
-          {parts.length > 1 && <GroupTitle>{services.find((s) => s.id === p.source)?.name ?? ""}</GroupTitle>}
-          <PageContent instanceId={p.source} stack={stack} page={p.page} />
-        </Fragment>
-      ))}
-    </div>
+    <Focusable
+      onButtonDown={(e: any) => {
+        const button = e?.detail?.button;
+        if (button === L2 || button === R2) step(button === R2 ? 1 : -1);
+      }}
+    >
+      {pages.length > 1 && (
+        <Focusable flow-children="row" className="mc-sources" style={{ marginBottom: 6 }}>
+          <div className="mc-sources-side" style={{ justifyContent: "flex-end" }}>
+            {pages.slice(0, half).map(dot)}
+          </div>
+          <div className="mc-sources-name">{at.source.name}</div>
+          <div className="mc-sources-side">{pages.slice(half).map(dot)}</div>
+        </Focusable>
+      )}
+      {/* marked, so the controller lands on the first result rather than back in the search field */}
+      <div className="mc-results" key={at.source.id}>
+        <PageContent instanceId={at.source.id} stack={stack} page={{ ...at.page, tracks_first: true }} />
+      </div>
+    </Focusable>
   );
 };
 
