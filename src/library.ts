@@ -23,11 +23,12 @@ const tagCollections = (items: Collection[], source: string) => items.map((c) =>
 
 /** Each source's results as one page: its best songs, then its albums, artists and playlists, source by source; a
  *  source's other lists (videos) under its name. */
-export function mergeSearch(query: string, pages: { source: ServiceInfo; page: Page }[]): Page {
+export function mergeSearch(query: string, pages: { source: ServiceInfo; page: Page }[], whole = false): Page {
   const merged: Page = { title: query, subtitle: "", art: null, collections: [], tracks: [], extra: [], tracks_first: true };
+  // `whole`: every result of each (a page that shows a part of them and a Show all), else each one's first few
   for (const { source, page } of pages) {
-    merged.tracks.push(...tagTracks(page.tracks.slice(0, SEARCH_TRACKS), source.id));
-    merged.collections.push(...tagCollections(page.collections.slice(0, SEARCH_COLLECTIONS), source.id));
+    merged.tracks.push(...tagTracks(whole ? page.tracks : page.tracks.slice(0, SEARCH_TRACKS), source.id));
+    merged.collections.push(...tagCollections(whole ? page.collections : page.collections.slice(0, SEARCH_COLLECTIONS), source.id));
     for (const x of page.extra ?? [])
       if (x.tracks.length) merged.extra!.push({ title: `${x.title || "More"} · ${source.name}`, tracks: tagTracks(x.tracks, source.id) });
   }

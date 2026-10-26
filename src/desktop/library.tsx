@@ -9,6 +9,7 @@ import { FaChevronLeft, FaChevronRight, FaDownload, FaCompactDisc, FaEject, FaEl
 import * as api from "../api";
 import { Collection, Page, Section, SmartPlaylist, Track } from "../api";
 import { showCollectionMenu, showTrackMenu } from "../components/TrackMenu";
+import { KIND_TITLES, groupByKind } from "../components/Browser";
 import { lookupOpener } from "../components/TagEditor";
 import { NameModal } from "../components/NameModal";
 import { dataVersion, invalidateBrowserCache, playFrom } from "../nav";
@@ -37,7 +38,7 @@ import { StatsPage } from "./stats";
 import { ToolsPage } from "./tools";
 import { ColumnsPage } from "./columns";
 import { useDownload } from "../download";
-import { LIBRARY_SORTS, LibrarySort, filterLibrary, sourcesIn, useLibrarySearch, useSearchChoice } from "../library";
+import { LIBRARY_SORTS, LibrarySort, filterLibrary, mergeSearch, sourcesIn, useLibrarySearch, useSearchChoice } from "../library";
 import { continueFrom, useOtherSessions } from "../devices";
 
 /** Where a right-click was, for a menu to open there: Steam's menus take the mouse event itself in place of an
@@ -545,14 +546,18 @@ const SectionView: FC<{ id: string; section: Section; shelves?: boolean; lead?: 
   );
 };
 
-/** How much a source's results hold, for its tab: "24" */
+/** How much a source's results hold: "24" */
 const foundCount = (page: Page) =>
   page.tracks.length + page.collections.length + (page.extra ?? []).reduce((n, x) => n + x.tracks.length, 0);
 
+/** Songs a search's list shows before its Show all */
+const SEARCH_SONGS = 30;
+
 /**
  * A search: every source at once, each adding to All as it answers (a field search, artist:nirvana, is Local files'
- * own: the others just find nothing); a tab for each source that found something, its whole results, in a steady order
- * (the best first, ones answering later after them).
+ * own: the others just find nothing); a list of sources to pick one from (each with how much it found), in a steady
+ * order (the best first, ones answering later after them). The results in parts, each under its name and count:
+ * songs (30, then Show all), then a row for each kind of thing found (artists, albums, playlists...).
  */
 const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
   const found = useLibrarySearch(query);
@@ -560,32 +565,77 @@ const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
   const [only, setOnly] = useState("");
   useEffect(() => setOnly(""), [query]);
   const one = ordered.find((p) => p.source.id === only);
-  const from: Collection = { id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null };
+  // all of every source's (the songs' Show all is for that), in the sources' steady order once there is one
+  const all = useMemo(() => (ordered.length ? mergeSearch(query, ordered, true) : found.page), [ordered, found.page, query]);
+  const page = one?.page ?? all;
   return (
     <>
       <div className="md-page-head">
         <h1 className="md-title">“{query}”</h1>
         {ordered.length > 1 && (
           <div className="md-page-tools">
-            <div className="st-periods" role="tablist">
-              {[{ id: "", name: "All", count: 0 }, ...ordered.map((p) => ({ id: p.source.id, name: p.source.name, count: foundCount(p.page) }))].map((x) => (
-                <button key={x.id} role="tab" aria-selected={only === x.id} data-on={only === x.id ? "" : undefined} onClick={() => setOnly(x.id)}>
-                  {x.name}
-                  {x.count > 0 && <span className="md-dim" style={{ marginLeft: 6 }}>{x.count}</span>}
-                </button>
+            <select className="md-select md-sort" value={only} onChange={(e) => setOnly(e.target.value)} aria-label="Source">
+              <option value="">All sources</option>
+              {ordered.map((p) => (
+                <option key={p.source.id} value={p.source.id}>
+                  {p.source.name} ({foundCount(p.page)})
+                </option>
               ))}
-            </div>
+            </select>
           </div>
         )}
       </div>
-      {one ? (
-        <PageBody key={one.source.id} id={one.source.id} page={one.page} from={from} />
-      ) : (
-        found.page && <PageBody id={id} page={found.page} from={from} />
-      )}
+      {page && <SearchParts key={one?.source.id ?? ""} id={one?.source.id ?? id} page={page} query={query} />}
       {!found.page && found.waiting > 0 && <Loading result={null} />}
       {!found.page && !found.waiting && <Notice text={`Nothing found for “${query}”`} />}
     </>
+  );
+};
+
+/** One search's results, a part for each kind, each under its name and how many. */
+const SearchParts: FC<{ id: string; page: Page; query: string }> = ({ id, page, query }) => {
+  const from: Collection = { id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null };
+  // songs, and stations apart from them
+  const songs = page.tracks.filter((t) => !t.live);
+  const stations = page.tracks.filter((t) => t.live);
+  const lists = [
+    ...(songs.length ? [{ title: "Songs", tracks: songs }] : []),
+    ...(stations.length ? [{ title: "Stations", tracks: stations }] : []),
+    ...(page.extra ?? []).filter((x) => x.tracks.length),
+  ];
+  return (
+    <>
+      {lists.map((x) => (
+        <SongPart key={x.title} id={id} title={x.title} tracks={x.tracks} from={from} />
+      ))}
+      {groupByKind(page.collections).map(([kind, items]) => (
+        <section className="md-section" key={kind}>
+          <h2 className="md-heading">
+            {KIND_TITLES[kind]} <span className="md-count">{items.length}</span>
+          </h2>
+          <Cards id={id} items={items} row />
+        </section>
+      ))}
+    </>
+  );
+};
+
+/** A search's songs (or episodes...): the first 30, then Show all. */
+const SongPart: FC<{ id: string; title: string; tracks: Track[]; from: Collection }> = ({ id, title, tracks, from }) => {
+  const [all, setAll] = useState(false);
+  const shown = all ? tracks : tracks.slice(0, SEARCH_SONGS);
+  return (
+    <section className="md-section">
+      <h2 className="md-heading">
+        {title} <span className="md-count">{tracks.length}</span>
+      </h2>
+      <TrackTable id={id} tracks={shown} from={from} mixed={new Set(tracks.map((t) => t.source ?? id)).size > 1} />
+      {tracks.length > SEARCH_SONGS && (
+        <button className="md-button md-more" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${tracks.length}`}
+        </button>
+      )}
+    </section>
   );
 };
 
@@ -829,10 +879,12 @@ const ROW = 32;
 /** longer lists than this scroll in a box of their own, drawing only the rows in sight */
 const VIRTUAL_FROM = 200;
 
-export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onRow?: (t: Track, i: number) => void }> = ({
+/** `mixed`: whether the whole list is several sources' (a part of one shown: it says where each is from all the same) */
+export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onRow?: (t: Track, i: number) => void; mixed?: boolean }> = ({
   id,
   tracks,
   from,
+  mixed: mixedList,
 }) => {
   const [sort, setSort] = useState<{ by: Column; down: boolean } | null>(null);
   // rows chosen, by their place as shown; the anchor is where a Shift-click range starts
@@ -847,7 +899,7 @@ export const TrackTable: FC<{ id: string; tracks: Track[]; from: Collection; onR
   const rates = tracks.some((t) => canRate(of(t)));
   // a list of several sources' songs says where each is from
   const services = useStore(pluginState)?.services ?? [];
-  const mixed = new Set(tracks.map(of)).size > 1;
+  const mixed = mixedList ?? new Set(tracks.map(of)).size > 1;
   const sourceName = (t: Track) => services.find((s) => s.id === of(t))?.name ?? "";
   const order = useMemo(() => {
     const idx = tracks.map((_, i) => i);
@@ -1024,6 +1076,8 @@ export const LIBRARY_CSS = `
 .md-page { flex: 1; overflow-y: auto; padding: 0 32px 32px; min-width: 0; }
 .md-title { font-size: 26px; font-weight: 400; color: #fff; margin: 24px 0 12px; }
 .md-heading { font-size: 13px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; color: #8b929a; margin: 20px 0 10px; }
+.md-count { margin-left: 6px; opacity: 0.6; letter-spacing: 0; }
+.md-more { margin-top: 12px; }
 .md-notice { color: #8b929a; padding: 24px 0; font-size: 14px; }
 .md-dim { color: #8b929a; }
 .md-section { margin-bottom: 8px; }

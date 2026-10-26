@@ -53,6 +53,12 @@ async def main() -> None:
             x, y = (float(v) for v in sys.argv[sys.argv.index("--hover") + 1].split(","))
             await call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
             await asyncio.sleep(0.4)
+        if "--click" in sys.argv:  # a click at x,y, pressed and let go as a person's is (menus open from it)
+            x, y = (float(v) for v in sys.argv[sys.argv.index("--click") + 1].split(","))
+            await call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+            for kind in ("mousePressed", "mouseReleased"):
+                await call("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left", clickCount=1)
+            await asyncio.sleep(0.8)
         if "--shot" in sys.argv:
             out = sys.argv[sys.argv.index("--shot") + 1]
             shot = await call("Page.captureScreenshot", format="png")

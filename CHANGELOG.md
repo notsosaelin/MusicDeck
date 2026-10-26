@@ -3,6 +3,14 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.40.2
+
+- **Desktop search in parts**: songs (the first 30, then Show all), stations, episodes and videos, then a row each for
+  artists, albums and playlists, each under its name and how many; All holds every source's results, not each one's
+  first few. The source is picked from a list (All sources, then each with how much it found).
+- **Desktop Settings' menus stay in the window**: a source's menu and Add a source open where you click, never off
+  the window's right edge.
+
 ## 0.40.1
 
 - **Like the song from Now Playing** (media center): a plus at the right of the controls, a tick once it's liked, in

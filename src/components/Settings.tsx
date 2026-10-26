@@ -103,6 +103,15 @@ export const SHUFFLE_NOTES: Record<NonNullable<PlaybackSettings["shuffle_mode"]>
   smart: "Your better-rated songs sooner, never the same artist twice in a row",
 };
 
+/**
+ * Where a menu opens: at the mouse when it was clicked (Steam takes the click itself in place of an element; from a
+ * whole row, a menu opens past its far end, off a desktop window's edge), else from the row (the controller).
+ */
+const menuAt = (e: any): any =>
+  e?.nativeEvent && typeof e.nativeEvent.clientX === "number" && (e.nativeEvent.clientX || e.nativeEvent.clientY)
+    ? e.nativeEvent
+    : (e?.currentTarget ?? window);
+
 export const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,
   steam: <FaSteam />,
@@ -343,7 +352,7 @@ const DeviceRow: FC<{ device: DeviceInfo }> = ({ device }) => {
         <MenuItem onSelected={eject}>{device.kind === "cd" ? "Eject disc" : "Eject"}</MenuItem>
         {device.kind !== "cd" && device.kind !== "disc" && <MenuItem onSelected={rename}>Rename</MenuItem>}
       </Menu>,
-      e?.currentTarget ?? window,
+      menuAt(e),
     );
   const icon =
     device.kind === "mtp" ? (
@@ -440,7 +449,7 @@ const ServiceRow: FC<{ service: ServiceInfo; typeName: string; active: boolean }
           Remove
         </MenuItem>
       </Menu>,
-      e?.currentTarget ?? window,
+      menuAt(e),
     );
 
   return (
@@ -501,7 +510,7 @@ const GameMusicRows: FC<{ state: PluginState }> = ({ state }) => {
                 Don't play with {m.game}
               </MenuItem>
             </Menu>,
-            e?.currentTarget ?? window,
+            menuAt(e),
           );
         return (
           <PanelSectionRow key={`${m.instance_id}:${m.appid}`}>
@@ -881,7 +890,7 @@ export const Settings: FC = () => {
           );
         })}
       </Menu>,
-      e?.currentTarget ?? window,
+      menuAt(e),
     );
   const downloads = state.offline.tracks > 0 || state.offline.pending > 0 || state.offline.failed > 0;
 
