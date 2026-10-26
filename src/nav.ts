@@ -40,6 +40,40 @@ export function showTab(tab: PanelTab) {
   if (tabStrip) focusTabButton(tabStrip, tab);
   focusOnStrip = newStrip ? tab : null;
   panelTab.set({ tab });
+  holdOnTab(tab);
+}
+
+/** How long after a tab change its button keeps the controller against the new tab's own focusing */
+const TAB_HOLD_MS = 500;
+let stopHolding: (() => void) | null = null;
+
+/**
+ * Keeps the controller on a tab's button just after the tab changes: the new tab's content, as it appears, can take
+ * focus (Now playing's Play, Steam's own pick of the first thing), and the focus would bounce from the button into
+ * it. Anything taking focus outside the tab strip in that moment is undone; a button pressed ends it (the user's
+ * own moves are never undone).
+ */
+function holdOnTab(tab: PanelTab) {
+  stopHolding?.();
+  const doc = tabStrip?.ownerDocument;
+  const win = doc?.defaultView;
+  if (!doc || !win) return;
+  const back = (e: FocusEvent) => {
+    const strip = tabStrip;
+    if (!strip || strip.contains(e.target as Node)) return;
+    win.setTimeout(() => tabStrip && focusTabButton(tabStrip, tab), 0);
+  };
+  const stop = () => {
+    doc.removeEventListener("focusin", back, true);
+    doc.removeEventListener("vgp_onbuttondown", stop, true);
+    win.clearTimeout(timer);
+    if (stopHolding === stop) stopHolding = null;
+  };
+  doc.addEventListener("focusin", back, true);
+  // Steam's controller presses reach the page as these
+  doc.addEventListener("vgp_onbuttondown", stop, true);
+  const timer = win.setTimeout(stop, TAB_HOLD_MS);
+  stopHolding = stop;
 }
 
 export type View =

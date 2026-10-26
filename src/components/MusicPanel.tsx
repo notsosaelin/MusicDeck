@@ -1,5 +1,6 @@
 import { Focusable, PanelSection, PanelSectionRow } from "@decky/ui";
-import { FC, ReactNode, useEffect } from "react";
+import { useQuickAccessVisible } from "@decky/api";
+import { FC, ReactNode, useEffect, useRef } from "react";
 import { showingMusicDeck } from "../songToasts";
 import { FaCompactDisc, FaExpand, FaMusic, FaSearch, FaSlidersH } from "react-icons/fa";
 import { pluginState, useStore } from "../store";
@@ -109,6 +110,17 @@ export const MusicPanel: FC = () => {
   useEffect(showingMusicDeck, []);
   const state = useStore(pluginState);
   const { tab } = useStore(panelTab);
+  // a search is for now: leaving the Search tab, or closing Quick Access (the panel stays loaded behind it), goes
+  // back to its empty field
+  const lastTab = useRef(tab);
+  useEffect(() => {
+    if (lastTab.current === "search" && tab !== "search") resetStack("search");
+    lastTab.current = tab;
+  }, [tab]);
+  const open = useQuickAccessVisible();
+  useEffect(() => {
+    if (!open) resetStack("search");
+  }, [open]);
   const active = state?.services.find((s) => s.id === state.active_service);
   const browsing = tab === "library" || tab === "search";
 

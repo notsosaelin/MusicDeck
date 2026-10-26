@@ -458,11 +458,11 @@ class YouTubeService(LocalLikes, MusicService):
         """Both catalogs at once, each category searched on its own so none is starved: YouTube Music's
         songs, albums, artists and playlists, plus YouTube's videos (any upload, music-labelled or not)."""
         jobs = {
-            "songs": self._music("search", query, filter="songs", limit=40),
+            "songs": self._music("search", query, filter="songs", limit=80),
             "music_videos": self._music("search", query, filter="videos", limit=20),
-            "albums": self._music("search", query, filter="albums", limit=20),
-            "artists": self._music("search", query, filter="artists", limit=10),
-            "playlists": self._music("search", query, filter="community_playlists", limit=20),
+            "albums": self._music("search", query, filter="albums", limit=40),
+            "artists": self._music("search", query, filter="artists", limit=20),
+            "playlists": self._music("search", query, filter="community_playlists", limit=40),
         }
         if self.config.get("include_videos", True):
             jobs["youtube"] = self._youtube_search(query, 40)

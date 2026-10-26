@@ -211,10 +211,23 @@ class BandcampService(LocalLikes, MusicService):
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:
-        data = await self._post(SEARCH, {"search_text": query, "search_filter": "", "full_page": False,
-                                         "fan_id": None})
+        """Bandcamp's search as its own site's: everything (artists and albums, mostly), and tracks on their own (the
+        first hardly ever has any)."""
+        async def ask(only: str) -> list[dict[str, Any]]:
+            data = await self._post(SEARCH, {"search_text": query, "search_filter": only, "full_page": False,
+                                             "fan_id": None})
+            return (data.get("auto") or {}).get("results") or []
+        everything, songs = await asyncio.gather(ask(""), ask("t"), return_exceptions=True)
+        if isinstance(everything, Exception) and isinstance(songs, Exception):
+            raise everything
+        found = [x for part in (everything, songs) if isinstance(part, list) for x in part]
         artists, albums, tracks = [], [], []
-        for x in (data.get("auto") or {}).get("results") or []:
+        seen: set[str] = set()
+        for x in found:
+            key = str(x.get("type")) + str(x.get("item_url_path") or x.get("item_url_root"))
+            if key in seen:
+                continue
+            seen.add(key)
             if x.get("type") == "b" and x.get("item_url_root"):
                 artists.append(models.collection(x["item_url_root"], "artist", x.get("name", ""), "Artist", x.get("img")))
             elif x.get("type") == "a" and x.get("item_url_path"):

@@ -3,6 +3,17 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.41.3
+
+- **Quick Access search can always search again**: the results take the controller only right after you search;
+  coming back to them leaves you where you are, so Up reaches the field. Leaving the Search tab or closing Quick
+  Access goes back to the empty field (your recent searches under it); B from the results does too.
+- **L1/R1 land on the tab**: the controller stays on the new tab's button instead of bouncing into the tab's first
+  item as it appears.
+- **More search results**: Bandcamp finds songs (it found almost none: its search is asked for them on their own
+  now, up to 50); SoundCloud up to 200 songs and twice the artists, albums and playlists; YouTube Music twice the
+  songs, albums, artists and playlists.
+
 ## 0.41.2
 
 - **Quick Access search shows its results**: once they come in, the panel slides to them with the first song picked

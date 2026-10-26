@@ -287,10 +287,10 @@ class SoundCloudService(LocalLikes, MusicService):
         # plenty of each: songs that can't be played signed out (Go+, DRM-only) are left out afterwards,
         # and the media center ends long rows in Show all
         tracks, users, playlists, albums = await asyncio.gather(
-            self._get("/search/tracks", q=query, limit=120),
-            self._get("/search/users", q=query, limit=16),
-            self._get("/search/playlists_without_albums", q=query, limit=24),
-            self._get("/search/albums", q=query, limit=16))
+            self._get("/search/tracks", q=query, limit=200),
+            self._get("/search/users", q=query, limit=30),
+            self._get("/search/playlists_without_albums", q=query, limit=40),
+            self._get("/search/albums", q=query, limit=30))
         return models.page(f"Results for “{query}”",
                            collections=[self._user(u) for u in users.get("collection", [])]
                            + [self._playlist(p) for p in albums.get("collection", []) + playlists.get("collection", [])],

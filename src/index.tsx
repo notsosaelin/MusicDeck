@@ -22,6 +22,7 @@ import {
   openMediaCenter,
   panelTab,
   reopenMediaCenterIfShowing,
+  showTab,
 } from "./nav";
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
@@ -100,6 +101,8 @@ export default definePlugin(() => {
     player,
     pluginState,
     panelTab,
+    // the panel's tab change as L1/R1 make it (the controller onto the tab's button)
+    showTab,
     // the media center: centerTab.set({ tab: "playing" }) shows a tab, openMediaCenter() opens it
     centerTab,
     // the media center's page history per tab (centerNav.update({ "<source>/search": [...] }) opens a results page)

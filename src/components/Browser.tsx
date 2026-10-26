@@ -866,19 +866,22 @@ const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> =
   };
   // into the results: the controller onto the first of them (the pages slide to it)
   const enter = () => firstResult()?.focus();
-  // the results come in: shown at once (the page with them slides up), unless the controller has gone into them (or
-  // onto the switcher) in the meantime
+  // the results of a search just run come in: shown at once (the page with them slides up), unless the controller has
+  // gone into them (or onto the switcher) in the meantime; results shown again (coming back to the tab) stay put, the
+  // field above them
   const shown = !!at;
   useEffect(() => {
-    if (!shown) return;
-    const timer = window.setTimeout(() => {
-      const doc = anchor.current?.ownerDocument;
-      const active = doc?.activeElement as HTMLElement | null | undefined;
-      // (the field is drawn anew for the search, so the controller is often on the panel itself by now)
-      const moved = !!active?.closest(".md-search-pages") && !active.closest(".md-search-field");
-      if (!moved) enter();
-    }, 0);
-    return () => window.clearTimeout(timer);
+    if (!shown || justSearched !== query) return;
+    justSearched = null;
+    // (the field is drawn anew for the search, so Steam puts the controller somewhere of its choosing, the panel
+    // itself or the switcher, and can do so after this: tried again a few times, until it's on a result)
+    const timers = [0, 150, 400].map((ms) =>
+      window.setTimeout(() => {
+        const active = anchor.current?.ownerDocument.activeElement as HTMLElement | null | undefined;
+        if (!active?.closest(".md-list-row, .md-part-all")) enter();
+      }, ms),
+    );
+    return () => timers.forEach((t) => window.clearTimeout(t));
   }, [shown]);
   const id = at?.source.id ?? instanceId;
   const page = at?.page;
@@ -942,6 +945,9 @@ const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> =
   );
 };
 
+/** The search the user just ran (its results take the controller when they come in); null once they have */
+let justSearched: string | null = null;
+
 /** A part's Show all: every song, video or album of it, a page of their own. */
 const AllView: FC<{ instanceId: string; view: Extract<View, { type: "all" }> }> = ({ instanceId, view }) => {
   const id = view.instanceId ?? instanceId;
@@ -991,7 +997,9 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
   const run = (q: string) => {
     // searching again fetches afresh (and so counts as the latest search), rather than reusing old results
     resultCache.delete(`${instanceId}:search:${q}`);
-    setStack("search", [{ type: "search", query: q }]);
+    justSearched = q;
+    // over the empty field: B (or leaving the tab) goes back to it
+    setStack("search", [ROOTS.search, { type: "search", query: q }]);
   };
   const submit = () => {
     const q = draft.trim();
