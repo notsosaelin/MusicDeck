@@ -1,5 +1,6 @@
 import { DropdownItem, Focusable, SliderField, Tabs, footerClasses } from "@decky/ui";
 import { FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
+import { showingMusicDeck } from "../../songToasts";
 import {
   FaHeart,
   FaMoon,
@@ -956,7 +957,7 @@ const Browse: FC<{
       ) : view.type === "all" ? (
         <AllPage
           key={allKey(view.title)}
-          instanceId={instanceId}
+          instanceId={view.instanceId ?? instanceId}
           stack={stack}
           title={view.title}
           items={view.items}
@@ -1170,6 +1171,8 @@ const SettingsPage: FC = () => {
  * through a tab's pages, then up to the tabs, then to the Quick Access panel; so does View, at once.
  */
 export const MediaCenter: FC = () => {
+  // on screen: no song toasts over it
+  useEffect(showingMusicDeck, []);
   const { tab } = useStore(centerTab);
   const state = useStore(pluginState);
   const center = { ...DEFAULT_CENTER, ...state?.center };

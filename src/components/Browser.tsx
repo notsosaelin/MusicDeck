@@ -2,6 +2,7 @@ import {
   DialogButton,
   Field,
   Focusable,
+  GamepadButton,
   Navigation,
   PanelSection,
   PanelSectionRow,
@@ -11,6 +12,8 @@ import {
 import { FC, Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import {
   FaCheck,
+  FaChevronLeft,
+  FaChevronRight,
   FaDownload,
   FaExternalLinkAlt,
   FaGamepad,
@@ -28,6 +31,7 @@ import {
   Collection,
   CollectionKind,
   Page,
+  ServiceInfo,
   Result,
   SaveState,
   Section,
@@ -53,6 +57,7 @@ import {
   pushView,
   resultCache,
   setStack,
+  View,
 } from "../nav";
 import { notify } from "../notify";
 import { MenuContext, canCopy, canDelete, showCollectionMenu, showTrackMenu } from "./TrackMenu";
@@ -69,7 +74,9 @@ import {
   TrackRow,
 } from "./common";
 import { useDownload, useSavedCopy } from "../download";
-import { bestResults, useLibrarySearch } from "../library";
+import { useLibrarySearch, useSearchChoice } from "../library";
+import { PanelPages } from "./PanelPages";
+import { TYPE_ICONS } from "./Settings";
 
 /**
  * A view's data, cached per key so going back doesn't refetch (shared with the media center). With `revalidate` (the home view, whose
@@ -165,12 +172,15 @@ const CollectionList: FC<{
   title?: string;
   items: Collection[];
   limit?: number;
-}> = ({ instanceId, stack, title, items, limit = 5 }) => {
+  /** a header of the list's own, inside its section (in place of `title`) */
+  head?: ReactNode;
+}> = ({ instanceId, stack, title, items, limit = 5, head }) => {
   const [expanded, setExpanded] = useState(false);
   useStore(runningGame); // rows get a menu (play with the game) while one runs
   const shown = expanded ? items : items.slice(0, limit);
   return (
     <PanelSection title={title}>
+      {head}
       {shown.map((item) => (
         <CollectionRow
           key={item.kind + item.id}
@@ -264,7 +274,9 @@ const TrackList: FC<{
   from?: Collection;
   /** one album's tracks: numbered, and its artist not repeated on each */
   album?: boolean;
-}> = ({ instanceId, title, tracks, limit, showAlbum = true, playlistId, showArt = true, from, album }) => {
+  /** a header of the list's own, inside its section (in place of `title`) */
+  head?: ReactNode;
+}> = ({ instanceId, title, tracks, limit, showAlbum = true, playlistId, showArt = true, from, album, head }) => {
   const [expanded, setExpanded] = useState(false);
   const { queue, index } = useStore(player.state);
   const current = queue[index];
@@ -273,6 +285,7 @@ const TrackList: FC<{
   const albumArtist = album ? mostCommon(tracks.map((t) => t.artist)) : undefined;
   return (
     <PanelSection title={title}>
+      {head}
       {shown.map((t, i) => (
         <TrackRow
           key={t.id + i}
@@ -603,52 +616,197 @@ const CollectionView: FC<{ instanceId: string; stack: StackName; collection: Col
   );
 };
 
-// the panel's source dots, as Now Playing's are in the media center (the panel has its own small copy of them)
-const DOTS_CSS = `
-.md-qdots { display: flex; justify-content: center; align-items: center; padding: 4px 0 0; }
-.md-qdot { display: flex; align-items: center; height: 22px; padding: 0 3px; outline: none; }
-.md-qdot > span { display: block; width: 7px; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.28);
-  transition: width 0.22s ease, background 0.15s, transform 0.15s; }
-.md-qdot.gpfocus > span { background: rgba(255, 255, 255, 0.75); transform: scale(1.3); }
-.md-qdot[data-on] > span { width: 20px; background: #fff; transform: none; }
-.md-qdots-name { text-align: center; font-size: 12px; opacity: 0.6; padding: 2px 0 6px; }
+// GamepadButton.TRIGGER_LEFT and TRIGGER_RIGHT from @decky/ui (an ambient enum, which isolated builds can't import)
+const L2 = 7;
+const R2 = 8;
+
+/** The panel's source switcher and part headers */
+const SWITCHER_CSS = `
+.md-switcher { position: relative; display: flex; align-items: center; gap: 4px; padding: 10px 6px 8px; border-radius: 8px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)); outline: none;
+  transition: background 0.2s, box-shadow 0.2s; }
+.md-switcher.gpfocus { background: linear-gradient(135deg, rgba(26, 159, 255, 0.28), rgba(26, 159, 255, 0.08));
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
+.md-switcher-arrow { flex-shrink: 0; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  border-radius: 13px; color: rgba(255, 255, 255, 0.55); font-size: 12px; transition: color 0.15s, background 0.15s; }
+.md-switcher.gpfocus .md-switcher-arrow { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.md-switcher-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.md-switcher-name { display: flex; align-items: center; gap: 8px; max-width: 100%; font-size: 16px; font-weight: 700; color: #fff; }
+.md-switcher-name > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-switcher-name > svg { flex-shrink: 0; font-size: 18px; opacity: 0.9; }
+.md-switcher-what { font-size: 11px; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.md-switcher-dots { display: flex; gap: 5px; margin-top: 3px; }
+.md-switcher-dots > span { width: 5px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.28);
+  transition: width 0.22s ease, background 0.15s; }
+.md-switcher-dots > span[data-on] { width: 16px; background: #fff; }
+.md-switcher-name, .md-switcher-what { animation: md-switch-in 0.22s ease both; }
+@keyframes md-switch-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.md-part-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0 0; }
+.md-part-title { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
+.md-part-all { font-size: 12px; padding: 4px 8px; border-radius: 4px; opacity: 0.75; outline: none; white-space: nowrap; }
+.md-part-all.gpfocus { opacity: 1; background: rgba(255, 255, 255, 0.15); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
 `;
 
+/** What a source found, in a few words: "18 songs · 6 albums · 3 artists" */
+function foundWords(page: Page): string {
+  const parts: string[] = [];
+  const n = page.tracks.length;
+  const stations = n > 0 && page.tracks.every((t) => t.live);
+  if (n) parts.push(`${n} ${stations ? (n === 1 ? "station" : "stations") : n === 1 ? "song" : "songs"}`);
+  for (const [kind, items] of groupByKind(page.collections)) parts.push(`${items.length} ${KIND_TITLES[kind].toLowerCase()}`);
+  for (const x of page.extra ?? []) if (x.tracks.length) parts.push(`${x.tracks.length} ${x.title.toLowerCase()}`);
+  return parts.slice(0, 3).join(" · ");
+}
+
 /**
- * Every source's results, one source at a time, songs first: small dots for the sources that found something (the
- * D-pad along them shows each one's), the one showing named under them. Your files' show first, then music services', then the rest.
+ * Where the results are from, as one control: the source's icon and name between two arrows, what it found under
+ * them, and dots for where it is among the sources that found something. Left and right on it go to the source
+ * before or after (round from the last to the first), as do L2/R2 from anywhere in the results, and a tap on an arrow;
+ * A goes into its results.
  */
-const SearchResults: FC<{ instanceId: string; query: string }> = ({ instanceId, query }) => {
-  const { pages } = useLibrarySearch(query, instanceId);
-  // until one's picked, the best that's answered so far (your files, then music services...)
-  const [chosen, setChosen] = useState<string | null>(null);
-  if (!pages.length) return null;
-  const at = pages.find((p) => p.source.id === chosen) ?? bestResults(pages)!;
+const SourceSwitcher: FC<{
+  sources: { source: ServiceInfo; page: Page }[];
+  at: number;
+  onPick: (i: number) => void;
+  onEnter: () => void;
+}> = ({ sources, at, onPick, onEnter }) => {
+  const n = sources.length;
+  const go = (by: number) => onPick((at + by + n) % n);
+  const here = sources[at];
+  // left and right, however Steam hands them over (as a direction, or as the D-pad's buttons)
+  const sideways = (e: any) => {
+    const button = e?.detail?.button;
+    const by = button === GamepadButton.DIR_LEFT ? -1 : button === GamepadButton.DIR_RIGHT ? 1 : 0;
+    if (!by || n < 2) return;
+    e.preventDefault?.();
+    e.stopPropagation?.();
+    go(by);
+  };
   return (
-    <>
-      {pages.length > 1 && (
-        // a row of its own, not a section: no section's padding around a line of dots
-        <div style={{ margin: "-10px 0 -6px" }}>
-          <style>{DOTS_CSS}</style>
-          <Focusable flow-children="row" className="md-qdots">
-            {pages.map((p) => (
-              <Focusable
-                key={p.source.id}
-                className="md-qdot"
-                data-on={p === at ? "" : undefined}
-                noFocusRing
-                onGamepadFocus={() => setChosen(p.source.id)}
-                onClick={() => setChosen(p.source.id)}
-              >
-                <span />
-              </Focusable>
-            ))}
-          </Focusable>
-          <div className="md-qdots-name">{at.source.name}</div>
+    <PanelSectionRow>
+      <style>{SWITCHER_CSS}</style>
+      <Focusable
+        className="md-switcher"
+        noFocusRing
+        onGamepadDirection={sideways}
+        onButtonDown={sideways}
+        onOKActionDescription="Results"
+        onActivate={onEnter}
+      >
+        <span className="md-switcher-arrow" onClick={() => go(-1)} style={{ visibility: n > 1 ? "visible" : "hidden" }}>
+          <FaChevronLeft />
+        </span>
+        <div className="md-switcher-mid">
+          {/* keyed: the name and its words come in fresh with each source */}
+          <div className="md-switcher-name" key={`n${here.source.id}`}>
+            {TYPE_ICONS[here.source.type]}
+            <span>{here.source.name}</span>
+          </div>
+          <div className="md-switcher-what" key={`w${here.source.id}`}>{foundWords(here.page)}</div>
+          {n > 1 && (
+            <div className="md-switcher-dots">
+              {sources.map((s, i) => (
+                <span key={s.source.id} data-on={i === at ? "" : undefined} />
+              ))}
+            </div>
+          )}
         </div>
+        <span className="md-switcher-arrow" onClick={() => go(1)} style={{ visibility: n > 1 ? "visible" : "hidden" }}>
+          <FaChevronRight />
+        </span>
+      </Focusable>
+    </PanelSectionRow>
+  );
+};
+
+/** A part's header: its name, and its Show all at the other end of the line (no row of its own under the part). */
+const PartHead: FC<{ title: string; count: number; shown: number; open: () => void }> = ({ title, count, shown, open }) => (
+  <PanelSectionRow>
+    <Focusable flow-children="row" className="md-part-head">
+      <span className="md-part-title">{title}</span>
+      {count > shown && (
+        <Focusable className="md-part-all" noFocusRing onActivate={open} onClick={open} onOKActionDescription="Show all">
+          Show all {count} ›
+        </Focusable>
       )}
-      <PageBody key={at.source.id} instanceId={at.source.id} stack="search" page={{ ...at.page, tracks_first: true }} />
-    </>
+    </Focusable>
+  </PanelSectionRow>
+);
+
+/**
+ * A search in the panel, as pages (as Now Playing's are): the field and where the results are from (SourceSwitcher);
+ * then a page for each kind found (songs first, then videos, albums, artists, playlists...), each as many as fit, its
+ * Show all in its header. Your files' results show first, then music services', then the rest; it stays on the one
+ * picked.
+ */
+const SearchPages: FC<{ instanceId: string; query: string; field: ReactNode }> = ({ instanceId, query, field }) => {
+  const found = useLibrarySearch(query, instanceId);
+  // the sources in a steady order, the best showing first (useSearchChoice)
+  const { ordered: pages, at, pick: choose } = useSearchChoice(query, found.pages, found.waiting);
+  const index = at ? pages.indexOf(at) : 0;
+  const pick = (i: number) => pages[i] && choose(pages[i].source.id);
+  // into the results: the controller onto the first of them (the pages slide to it)
+  const enter = () =>
+    (window.document.activeElement?.ownerDocument ?? document)
+      .querySelector<HTMLElement>(".md-search-pages .md-list-row, .md-search-pages .md-part-all")
+      ?.focus();
+  const id = at?.source.id ?? instanceId;
+  const page = at?.page;
+  const all = (title: string, items: Collection[], tracks: Track[]) =>
+    pushView("search", { type: "all", title, items, tracks, instanceId: id });
+  const draw = (rows: number) => {
+    const first = (
+      <>
+        {field}
+        {at && (
+          <PanelSection>
+            <SourceSwitcher sources={pages} at={index} onPick={pick} onEnter={enter} />
+          </PanelSection>
+        )}
+      </>
+    );
+    const more: ReactNode[] = [];
+    const head = (title: string, count: number, open: () => void) => <PartHead title={title} count={count} shown={rows} open={open} />;
+    const songs = page?.tracks ?? [];
+    // a radio source's are stations, not songs
+    const songsTitle = songs.length && songs.every((t) => t.live) ? "Stations" : "Songs";
+    if (songs.length)
+      more.push(
+        <TrackList key={`${id}:songs`} instanceId={id} tracks={songs.slice(0, rows)}
+                   head={head(songsTitle, songs.length, () => all(songsTitle, [], songs))} />,
+      );
+    for (const x of page?.extra ?? [])
+      if (x.tracks.length)
+        more.push(
+          <TrackList key={`${id}:${x.title}`} instanceId={id} tracks={x.tracks.slice(0, rows)}
+                     head={head(x.title, x.tracks.length, () => all(x.title, [], x.tracks))} />,
+        );
+    for (const [kind, items] of groupByKind(page?.collections ?? []))
+      more.push(
+        <CollectionList key={`${id}:${kind}`} instanceId={id} stack="search" items={items.slice(0, rows)} limit={rows}
+                        head={head(KIND_TITLES[kind], items.length, () => all(KIND_TITLES[kind], items, []))} />,
+      );
+    return [first, ...more];
+  };
+  return (
+    <PanelPages
+      className="md-search-pages"
+      pages={draw}
+      onButtonDown={(e: any) => {
+        const button = e?.detail?.button;
+        if ((button === L2 || button === R2) && pages.length > 1) pick((index + (button === R2 ? 1 : -1) + pages.length) % pages.length);
+      }}
+    />
+  );
+};
+
+/** A part's Show all: every song, video or album of it, a page of their own. */
+const AllView: FC<{ instanceId: string; view: Extract<View, { type: "all" }> }> = ({ instanceId, view }) => {
+  const id = view.instanceId ?? instanceId;
+  return view.tracks.length ? (
+    <TrackList instanceId={id} title={view.title} tracks={view.tracks} />
+  ) : (
+    <CollectionList instanceId={id} stack="search" title={view.title} items={view.items} limit={view.items.length} />
   );
 };
 
@@ -697,8 +855,7 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
     const q = draft.trim();
     if (q) run(q);
   };
-  return (
-    <>
+  const field = (
       <PanelSection>
         <PanelSectionRow>
           <Focusable flow-children="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -734,17 +891,18 @@ const SearchView: FC<{ instanceId: string; query: string }> = ({ instanceId, que
           </PanelSectionRow>
         )}
       </PanelSection>
-      {query ? (
-        <SearchResults instanceId={instanceId} query={query} />
-      ) : (
-        <RecentSearches
-          instanceId={instanceId}
-          onSearch={(q) => {
-            setDraft(q);
-            run(q);
-          }}
-        />
-      )}
+  );
+  if (query) return <SearchPages instanceId={instanceId} query={query} field={field} />;
+  return (
+    <>
+      {field}
+      <RecentSearches
+        instanceId={instanceId}
+        onSearch={(q) => {
+          setDraft(q);
+          run(q);
+        }}
+      />
     </>
   );
 };
@@ -767,8 +925,8 @@ export const Browser: FC<{ instanceId: string; stack: StackName }> = ({ instance
   // (sections are the media center's Browse pages; the panel's Library is the source's Home)
   if (view.type === "home" || view.type === "section") return <HomeView instanceId={instanceId} />;
   if (view.type === "search") return <SearchView key={view.query} instanceId={instanceId} query={view.query} />;
-  // (a row's Show all is the media center's; the panel never opens one)
-  if (view.type === "all") return <HomeView instanceId={instanceId} />;
+  // a search's Show all
+  if (view.type === "all") return <AllView instanceId={instanceId} view={view} />;
   return (
     <CollectionView
       key={view.collection.kind + view.collection.id}

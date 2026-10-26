@@ -11,6 +11,8 @@ DEFAULTS: dict[str, Any] = {
     "active_service": None,
     # "replace" takes over the Soundtracks tab; "separate" adds an extra QAM tab instead
     "qam_mode": "replace",
+    # a toast when a new song starts (src/songToasts.ts): "off", "games" (while a game runs) or "always"
+    "song_toasts": "games",
     "volume": 0.8,
     "debug_log": False,
     "eq": {"enabled": False, "preset": "Flat", "gains": [0.0] * 10, "preamp": 0.0},

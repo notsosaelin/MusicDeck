@@ -44,7 +44,7 @@ SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "se
 # Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
 RESTORED_SIGNED_OUT = "sign_in_again"
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
-FRONTEND_SETTINGS = {"qam_mode", "volume", "eq", "eq_per_output", "playback", "debug_log", "center", "library_entry"}
+FRONTEND_SETTINGS = {"qam_mode", "song_toasts", "volume", "eq", "eq_per_output", "playback", "debug_log", "center", "library_entry"}
 # the media center's choices (settings.DEFAULTS["center"]); anything else is refused
 CENTER_CHOICES = {"open_on": {"last", "playing", "home", "library"}, "background": {"art", "plain"},
                   "cards": {"small", "medium", "large"}, "lyrics": {"small", "medium", "large"},
@@ -415,6 +415,7 @@ class Plugin:
                         for d in self._shelf()],
             "active_service": self.settings.get("active_service"),
             "qam_mode": self.settings.get("qam_mode"),
+            "song_toasts": self.settings.get("song_toasts"),
             "volume": self.settings.get("volume"),
             # the EQ for the output in use when each output has its own (eq_per_output), else the one EQ
             "eq": self._current_eq(),
@@ -2105,6 +2106,8 @@ def _valid_setting(key: str, value: Any) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
     if key == "qam_mode":
         return value in ("replace", "separate")
+    if key == "song_toasts":
+        return value in ("off", "games", "always")
     if key == "playback" and isinstance(value, dict) and value.get("shuffle_mode", "songs") not in ("songs", "albums", "smart"):
         return False
     if key == "center" and isinstance(value, dict):

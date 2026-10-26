@@ -242,6 +242,8 @@ export interface PluginState {
   devices: DeviceInfo[];
   active_service: string | null;
   qam_mode: QamMode;
+  /** a toast when a new song starts (src/songToasts.ts) */
+  song_toasts?: "off" | "games" | "always";
   volume: number;
   /** the EQ that applies now: the output's own when each output has one, else the one EQ */
   eq: EqSettings;

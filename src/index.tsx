@@ -4,9 +4,11 @@ import { FaMusic } from "react-icons/fa";
 import * as api from "./api";
 import { MusicPanel } from "./components/MusicPanel";
 import { MediaCenter } from "./components/media/MediaCenter";
+import { centerNav } from "./components/media/pages";
 import { showTrackMenu } from "./components/TrackMenu";
 import { lookupOpener } from "./components/TagEditor";
 import { notify, releaseToastHooks } from "./notify";
+import { watchSongToasts } from "./songToasts";
 import { watchForUpdates } from "./update";
 import { watchDevices } from "./devices";
 import { followState, switchSource } from "./sources";
@@ -73,6 +75,8 @@ export default definePlugin(() => {
   const unwatchUpdates = watchForUpdates();
   // the user's other devices: pairing prompts, and one taking over the music
   const unwatchDevices = watchDevices();
+  // a new song: a toast, as often as Settings says
+  const unwatchSongs = watchSongToasts();
   // desktop Steam: the Music tab, the mini player and media keys (src/desktop)
   const stopDesktop = startDesktop();
   // a source's own news (local files: what new albums got): a toast, and lists that show it again
@@ -98,6 +102,8 @@ export default definePlugin(() => {
     panelTab,
     // the media center: centerTab.set({ tab: "playing" }) shows a tab, openMediaCenter() opens it
     centerTab,
+    // the media center's page history per tab (centerNav.update({ "<source>/search": [...] }) opens a results page)
+    centerNav,
     openMediaCenter,
     // an album's, artist's or playlist's page ({ id, kind, title }), in the media center when it's showing
     openInLibrary,
@@ -145,6 +151,7 @@ export default definePlugin(() => {
       unwatchLibraryEntry();
       unwatchUpdates();
       unwatchDevices();
+      unwatchSongs();
       stopDesktop();
       removeEventListener("source_note", sourceNote);
       setSleepTimer(null);

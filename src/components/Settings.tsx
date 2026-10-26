@@ -21,6 +21,7 @@ import {
   showModal,
 } from "@decky/ui";
 import { FC, ReactNode, useEffect, useState } from "react";
+import { SONG_TOASTS, SongToasts } from "../songToasts";
 import {
   FaArchive,
   FaCheckCircle,
@@ -102,7 +103,7 @@ export const SHUFFLE_NOTES: Record<NonNullable<PlaybackSettings["shuffle_mode"]>
   smart: "Your better-rated songs sooner, never the same artist twice in a row",
 };
 
-const TYPE_ICONS: Record<string, ReactNode> = {
+export const TYPE_ICONS: Record<string, ReactNode> = {
   local: <FaFolderOpen />,
   steam: <FaSteam />,
   subsonic: <FaServer />,
@@ -928,6 +929,18 @@ export const Settings: FC = () => {
       )}
 
       <PanelSection title="More">
+        <PanelSectionRow>
+          <DropdownItem
+            label="Song notifications"
+            description="A toast with the artwork when a new song starts"
+            rgOptions={SONG_TOASTS.map(([data, label]) => ({ data, label }))}
+            selectedOption={state.song_toasts ?? "games"}
+            onChange={async (o: { data: SongToasts }) => {
+              pluginState.set({ ...state, song_toasts: o.data });
+              await setSetting("song_toasts", o.data);
+            }}
+          />
+        </PanelSectionRow>
         <PanelSectionRow>
           <ToggleField
             label="Replace Soundtracks tab"

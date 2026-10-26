@@ -1,5 +1,5 @@
 import { Focusable, TextField } from "@decky/ui";
-import { FC, ReactNode, useEffect, useRef, useState } from "react";
+import { FC, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   FaCalendarAlt,
   FaChartLine,
@@ -54,7 +54,7 @@ import {
   openCollection,
   searchHistory,
 } from "../../api";
-import { bestResults, bySource, useLibrarySearch } from "../../library";
+import { bySource, useLibrarySearch, useSearchChoice } from "../../library";
 import { SourcePager } from "./sources";
 import { continueFrom, useOtherSessions } from "../../devices";
 import { canPlayWithGame, musicFor, runningGame, toggleGameMusic } from "../../games";
@@ -99,7 +99,11 @@ import {
   TrackTable,
   useCardSize,
   useNear,
+  TAB_BAR,
+  isFirstRow,
+  scrollParent,
 } from "./parts";
+import { watchSize } from "../common";
 import { useDownload, useSavedCopy } from "../../download";
 
 /**
@@ -193,7 +197,7 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
               }
             />
           ))}
-          {list.length > ROW_SIZE && rowEnd(stack, KIND_TITLES[kind], list, [])}
+          {list.length > ROW_SIZE && rowEnd(stack, KIND_TITLES[kind], list, [], instanceId)}
         </Shelf>
       ))}
     </>
@@ -696,7 +700,7 @@ const ROW_SIZE = 16;
 const rowCut = (n: number) => (n > ROW_SIZE ? ROW_SIZE - 1 : n);
 
 /** A long row's last card: Show all, opening every item as a grid (songs as a list) */
-const rowEnd = (stack: CenterStack, title: string, items: Collection[], tracks: Track[]) => {
+const rowEnd = (stack: CenterStack, title: string, items: Collection[], tracks: Track[], instanceId?: string) => {
   const kinds = new Set(items.map((c) => c.kind));
   const noun = items.length
     ? kinds.size === 1 && ["album", "artist", "playlist"].includes(items[0].kind)
@@ -709,7 +713,7 @@ const rowEnd = (stack: CenterStack, title: string, items: Collection[], tracks: 
     <ShowAllCard
       key="all"
       mcKey={allKey(title)}
-      onOpen={() => pushCenter(stack, { type: "all", title, items, tracks })}
+      onOpen={() => pushCenter(stack, { type: "all", title, items, tracks, instanceId })}
       count={countOf(items.length + tracks.length, noun)}
     />
   );
@@ -1118,30 +1122,121 @@ export const SearchPage: FC<{ instanceId: string; stack: CenterStack; query: str
  * the one picked. The live source's recent searches keep the search.
  */
 const SearchResults: FC<{ instanceId: string; stack: CenterStack; query: string }> = ({ instanceId, stack, query }) => {
-  const { pages } = useLibrarySearch(query, instanceId);
-  // until one's picked, the best that's answered so far (your files, then music services...)
-  const [chosen, setChosen] = useState<string | null>(null);
-  const at = pages.find((p) => p.source.id === chosen) ?? bestResults(pages);
+  const found = useLibrarySearch(query, instanceId);
+  // the sources in a steady order, the best showing first (your files, then music services...): nothing moves under
+  // the controller as slower ones answer
+  const { ordered: pages, at, pick } = useSearchChoice(query, found.pages, found.waiting);
   return (
     <>
-      <div className="mc-search-query">“{query}”</div>
+      {/* still looking: a spinner; every source answered and none found anything: said so */}
+      {!at && (found.waiting > 0 || found.pages.length ? <Loading result={null} /> : <Notice>Nothing found for "{query}"</Notice>)}
       {at && (
         <SourcePager
+          // what was searched for, at the start of the dots' line
+          leading={
+            <>
+              <FaSearch style={{ flexShrink: 0, fontSize: 12 }} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{query}</span>
+            </>
+          }
           places={pages.map((p) => ({ id: p.source.id, name: p.source.name }))}
           at={at.source.id}
-          onChoose={setChosen}
+          onChoose={pick}
           page={(id) => {
             const found = pages.find((p) => p.source.id === id);
             // marked, so the controller lands on the first result
             return found ? (
               <div className="mc-results">
-                <PageContent instanceId={id} stack={stack} page={{ ...found.page, tracks_first: true }} />
+                <ResultsContent instanceId={id} stack={stack} page={found.page} />
               </div>
             ) : null;
           }}
         />
       )}
     </>
+  );
+};
+
+/**
+ * One source's results, as screens the controller goes down a whole one at a time (each a row block to snapRows,
+ * never a line of a list at a time, nor half of one): its songs (and each other list of tracks it has, episodes...),
+ * as many as fit on a screen and a Show all; then a row for each kind of thing found, its Show all at its end.
+ */
+const ResultsContent: FC<{ instanceId: string; stack: CenterStack; page: Page }> = ({ instanceId, stack, page }) => {
+  // stations: their own fitted grid
+  if (allStations(page.tracks)) return <PageContent instanceId={instanceId} stack={stack} page={{ ...page, tracks_first: true }} />;
+  const lists = [
+    ...(page.tracks.length ? [{ title: "Songs", tracks: page.tracks }] : []),
+    ...(page.extra ?? []).filter((x) => x.tracks.length),
+  ];
+  return (
+    <>
+      {page.notice && <Notice>{page.notice}</Notice>}
+      {lists.map((x) => (
+        <FittedTracks key={x.title} instanceId={instanceId} stack={stack} title={x.title} tracks={x.tracks} />
+      ))}
+      <Shelves instanceId={instanceId} stack={stack} items={page.collections} titled />
+      {!lists.length && !page.collections.length && !page.notice && <Notice>Nothing found</Notice>}
+    </>
+  );
+};
+
+/**
+ * A titled list of tracks that fits on one screen: as many as fit (measured, so on any screen, scale or text size; the
+ * page's first part shares its screen with what's above it, the source dots), then Show all, opening every one.
+ */
+const FittedTracks: FC<{ instanceId: string; stack: CenterStack; title: string; tracks: Track[] }> = ({
+  instanceId,
+  stack,
+  title,
+  tracks,
+}) => {
+  const block = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(3);
+  const [room, setRoom] = useState(0);
+  const showAlbum = new Set(tracks.map((t) => t.album)).size > 1;
+  // the room changes with the window
+  useEffect(() => {
+    const scroller = block.current && scrollParent(block.current);
+    if (!scroller) return;
+    const measure = () => setRoom(scroller.clientHeight);
+    measure();
+    return watchSize(scroller, measure);
+  }, []);
+  // what's drawn against the room it has: lines added or taken away to fit
+  useLayoutEffect(() => {
+    const box = block.current;
+    const inner = content.current;
+    const scroller = box && scrollParent(box);
+    if (!box || !inner || !scroller || !room) return;
+    const lines = [...inner.querySelectorAll<HTMLElement>(".mc-list > .mc-row")];
+    if (!lines.length) return;
+    const pitch = lines.length > 1 ? lines[1].getBoundingClientRect().top - lines[0].getBoundingClientRect().top : lines[0].offsetHeight;
+    if (pitch <= 0) return;
+    const top = scroller.scrollTop + box.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    const space = isFirstRow(scroller, box) ? room - top - 16 : room - TAB_BAR - 16;
+    const next = Math.max(1, Math.min(tracks.length, fit + Math.floor((space - inner.offsetHeight) / pitch)));
+    if (next !== fit) setFit(next);
+  });
+  return (
+    // a row block (entered whole), not a slot: a slot's room is shared out and its content centred in it, which left a gap
+    // over the songs under the dots
+    <div ref={block} className="mc-row-block" style={{ marginBottom: 28 }}>
+      <div ref={content}>
+        <SectionTitle>{title}</SectionTitle>
+        <TrackTable
+          instanceId={instanceId}
+          tracks={tracks}
+          showAlbum={showAlbum}
+          limit={fit}
+          onShowAll={() => pushCenter(stack, { type: "all", title, items: [], tracks, instanceId })}
+          onPlay={(i) => player.playList(instanceId, tracks, i)}
+          onSecondary={(i) => addToQueue(instanceId, tracks[i])}
+          onOptions={(i, e) => showTrackMenu(instanceId, tracks[i], e?.currentTarget)}
+        />
+      </div>
+    </div>
   );
 };
 

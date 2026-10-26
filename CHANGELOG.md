@@ -3,6 +3,27 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.40.0
+
+- **Song notifications**: a toast with the artwork, the song's name and its artist and album when a new song
+  starts, while MusicDeck isn't on screen. **Settings → Song notifications**: off, while a game runs (the default), or
+  always. Skipping through songs tells only the one you stay on. Every MusicDeck toast now keeps its title (it could
+  come up empty).
+- **Search results by the screenful** (media center): each source's songs fill one screen, as many as fit on yours,
+  with **Show all** after them, then a row each for its artists, albums, playlists and the rest, their Show all at the
+  end; the controller goes down a whole part at a time. The source dots are reached with Up again, and land on the
+  source showing; L2/R2 from the results take the controller with them to the next source's first result.
+- **Search's sources stay put**: results show once every source has answered (or a moment after the first), the
+  best first, and stay on it; a slow source's dot joins at the end, so nothing changes under you. The same in the
+  Quick Access panel and on the desktop.
+- **Search in the Quick Access panel**, in pages as Now playing's: the field and the source switcher (left and right
+  change source, A goes to the results; L2/R2 from anywhere), then a page for each kind found with its Show all.
+- **Desktop search by source**: All, then a tab for each source with how much it found.
+- **Browse switches sources from a cache**: the last few sources looked at come back at once; one source shows at a
+  time, never one behind another.
+- **Your Steam library entry isn't duplicated** any more: extra MusicDeck shortcuts are removed, keeping the one with
+  the artwork.
+
 ## 0.39.6
 
 - **A search's results are a page of their own** (media center): what you searched for over the source dots, then

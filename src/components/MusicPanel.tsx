@@ -1,5 +1,6 @@
 import { Focusable, PanelSection, PanelSectionRow } from "@decky/ui";
-import { FC, ReactNode } from "react";
+import { FC, ReactNode, useEffect } from "react";
+import { showingMusicDeck } from "../songToasts";
 import { FaCompactDisc, FaExpand, FaMusic, FaSearch, FaSlidersH } from "react-icons/fa";
 import { pluginState, useStore } from "../store";
 import { Browser } from "./Browser";
@@ -104,6 +105,8 @@ const PanelSettings: FC = () => {
  * Search, so browsing gets the space.
  */
 export const MusicPanel: FC = () => {
+  // on screen: no song toasts over it
+  useEffect(showingMusicDeck, []);
   const state = useStore(pluginState);
   const { tab } = useStore(panelTab);
   const active = state?.services.find((s) => s.id === state.active_service);

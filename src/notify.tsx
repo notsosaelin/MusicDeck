@@ -22,8 +22,9 @@ const PERSONA_BASE = 0xdd000000;
 const PERSONA_MASK = 0xffff;
 /** Steam keeps a toast up about this long; it leaves the notification list after. */
 const TOAST_MS = 6000;
-/** Steam refreshes an unknown persona shortly after it's created, wiping its name; set it again until then. */
-const NAME_RETRIES_MS = [100, 300, 800, 1500, 2500, 4000];
+/** Steam refreshes an unknown persona while its toast is up, wiping its name (the toast's title): put back this often
+ *  (it's observed: the toast shows it again at once) */
+const NAME_EVERY_MS = 50;
 const FRIEND_CHAT_MESSAGE = 2; // EClientNotificationType: a private message, the style with a sender's avatar
 const TOAST_SOUND = "/sounds/deck_ui_toast.wav";
 
@@ -62,8 +63,8 @@ function hash(text: string): number {
 
 /**
  * Names the stand-in persona and gives it the artwork. The avatar is a getter (Steam reads it when
- * drawing); the name is a MobX field Steam overwrites when it refreshes the unknown account, so it's
- * set again a few times while the toast is up.
+ * drawing); the name is a MobX field Steam overwrites when it refreshes the unknown account, so it is
+ * kept set while the toast is up.
  */
 function dressPersona(accountid: number, steamid: string, name: string, avatar: string) {
   const persona = (window as any).friendStore?.GetFriendState?.({
@@ -78,7 +79,9 @@ function dressPersona(accountid: number, steamid: string, name: string, avatar: 
     if (persona.m_strPlayerName !== name) persona.m_strPlayerName = name;
   };
   setName();
-  for (const ms of NAME_RETRIES_MS) window.setTimeout(setName, ms);
+  // for as long as the toast is up (Steam's refresh comes at no fixed time)
+  const keep = window.setInterval(setName, NAME_EVERY_MS);
+  window.setTimeout(() => window.clearInterval(keep), TOAST_MS + 1000);
 }
 
 /** Whether a Steam notification (or a click's steam id) is one of MusicDeck's stand-ins. */

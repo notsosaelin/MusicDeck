@@ -107,6 +107,8 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   show's other episodes, with skip and speed controls; a book its chapters and blurb; a concert from the
   Live Music Archive its setlist and recording notes.
 - **Screen off:** in the media center, **Y** darkens the screen while the music plays; any button wakes it.
+- **Song notifications:** a toast with the artwork when a new song starts, while you're in a game (or always, or
+  never: Settings → Song notifications).
 - **Cast to speakers and TVs:** Chromecast, Google/Nest speakers and anything with Google Cast, UPnP/DLNA
   devices (Sonos, AV receivers, smart TVs, an Xbox's Media Player) and Rokus. The speaker fetches the music itself; the queue, play reports and
   controls stay on the Deck.

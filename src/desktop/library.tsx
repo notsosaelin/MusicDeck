@@ -37,7 +37,7 @@ import { StatsPage } from "./stats";
 import { ToolsPage } from "./tools";
 import { ColumnsPage } from "./columns";
 import { useDownload } from "../download";
-import { LIBRARY_SORTS, LibrarySort, filterLibrary, sourcesIn, useLibrarySearch } from "../library";
+import { LIBRARY_SORTS, LibrarySort, filterLibrary, sourcesIn, useLibrarySearch, useSearchChoice } from "../library";
 import { continueFrom, useOtherSessions } from "../devices";
 
 /** Where a right-click was, for a menu to open there: Steam's menus take the mouse event itself in place of an
@@ -543,14 +543,46 @@ const SectionView: FC<{ id: string; section: Section; shelves?: boolean }> = ({ 
   );
 };
 
+/** How much a source's results hold, for its tab: "24" */
+const foundCount = (page: Page) =>
+  page.tracks.length + page.collections.length + (page.extra ?? []).reduce((n, x) => n + x.tracks.length, 0);
+
+/**
+ * A search: every source at once, each adding to All as it answers (a field search, artist:nirvana, is Local files'
+ * own: the others just find nothing); a tab for each source that found something, its whole results, in a steady order
+ * (the best first, ones answering later after them).
+ */
 const SearchPage: FC<{ id: string; query: string }> = ({ id, query }) => {
-  // every source at once, each adding to the page as it answers (a field search, artist:nirvana, is Local files'
-  // own: the others just find nothing)
-  const { page } = useLibrarySearch(query);
+  const found = useLibrarySearch(query);
+  const { ordered } = useSearchChoice(query, found.pages, found.waiting);
+  const [only, setOnly] = useState("");
+  useEffect(() => setOnly(""), [query]);
+  const one = ordered.find((p) => p.source.id === only);
+  const from: Collection = { id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null };
   return (
     <>
-      <h1 className="md-title">“{query}”</h1>
-      {page && <PageBody id={id} page={page} from={{ id: `search:${query}`, kind: "list", title: query, subtitle: "", art: null }} />}
+      <div className="md-page-head">
+        <h1 className="md-title">“{query}”</h1>
+        {ordered.length > 1 && (
+          <div className="md-page-tools">
+            <div className="st-periods" role="tablist">
+              {[{ id: "", name: "All", count: 0 }, ...ordered.map((p) => ({ id: p.source.id, name: p.source.name, count: foundCount(p.page) }))].map((x) => (
+                <button key={x.id} role="tab" aria-selected={only === x.id} data-on={only === x.id ? "" : undefined} onClick={() => setOnly(x.id)}>
+                  {x.name}
+                  {x.count > 0 && <span className="md-dim" style={{ marginLeft: 6 }}>{x.count}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {one ? (
+        <PageBody key={one.source.id} id={one.source.id} page={one.page} from={from} />
+      ) : (
+        found.page && <PageBody id={id} page={found.page} from={from} />
+      )}
+      {!found.page && found.waiting > 0 && <Loading result={null} />}
+      {!found.page && !found.waiting && <Notice text={`Nothing found for “${query}”`} />}
     </>
   );
 };

@@ -40,12 +40,17 @@ export const CENTER_CSS =
 /* a source's Browse coming in: faded in where it'll be, the page keeping its height meanwhile */
 /* a source's Browse coming in: hidden until its rows have settled where they'll be, then faded in; the page keeps
    its height meanwhile */
-/* a search's results page: what was searched for, small, over the source dots */
-.mc-search-query { font-size: 20px; font-weight: 600; margin: 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-browse-stack { display: grid; }
 .mc-browse-stack > .mc-browse-body { grid-area: 1 / 1; }
-.mc-browse-body { min-height: 70vh; opacity: 0; }
-.mc-browse-body[data-ready] { opacity: 1; transition: opacity 0.22s ease; }
+.mc-browse-body { min-height: 70vh; }
+/* a search's results: room between the dots' line and their first heading */
+.mc-browse-body > .mc-results { padding-top: 14px; }
+/* the one swapped in fades in where it'll stay */
+.mc-in-sight { animation: mc-swap-in 0.18s ease both; }
+@keyframes mc-swap-in { from { opacity: 0; } to { opacity: 1; } }
+/* either end of the dots' line: what was searched for at the start, the same room at the end */
+.mc-sources-end { flex: 0 0 220px; min-width: 0; font-size: 14px; opacity: 0.75; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; display: flex; align-items: center; gap: 8px; }
 /* the browser's scroll anchoring moved the page as rows and covers came in above where it was looking: off here, where
    the page's own scrolling (snapRows) decides */
 .mc-center, .mc-center * { overflow-anchor: none; }
@@ -340,7 +345,9 @@ export const TrackTable: FC<{
   showAlbum?: boolean;
   /** shown first; "Show all" reveals the rest */
   limit?: number;
-}> = ({ instanceId, tracks, onPlay, onSecondary, secondaryLabel, onOptions, numbered, showAlbum = true, limit }) => {
+  /** what "Show all" does instead of showing the rest here (opens them on a page of their own) */
+  onShowAll?: () => void;
+}> = ({ instanceId, tracks, onPlay, onSecondary, secondaryLabel, onOptions, numbered, showAlbum = true, limit, onShowAll }) => {
   const [expanded, setExpanded] = useState(false);
   const [made, setMade] = useState(LIST_STEP);
   const { queue, index } = useStore(player.state);
@@ -366,8 +373,8 @@ export const TrackTable: FC<{
         <Focusable
           className="mc-row"
           noFocusRing
-          onActivate={() => setExpanded(!expanded)}
-          onClick={() => setExpanded(!expanded)}
+          onActivate={onShowAll ?? (() => setExpanded(!expanded))}
+          onClick={onShowAll ?? (() => setExpanded(!expanded))}
           style={{ padding: "10px 12px", fontSize: 15, opacity: 0.75 }}
         >
           {expanded ? "Show less" : `Show all ${tracks.length}`}
@@ -544,11 +551,13 @@ export function focusInto(container: HTMLElement | null, key?: string): () => vo
   return () => window.clearInterval(timer);
 }
 
-/** Whether a row is its page's first: of the scrolling tab, or of the Browse it's in (while one source's Browse
- *  comes in over another's, its own first row, not the one going). */
+/** Whether a row is the first thing on its page to go to (of the scrolling tab, or of the Browse or results it's in,
+ *  while one source's come in over another's): nothing the controller can land on comes before it (a search's first
+ *  row of albums is under its songs: not the first). */
 export function isFirstRow(scroller: HTMLElement, block: HTMLElement): boolean {
   const page = (block.closest(".mc-browse-body") as HTMLElement | null) ?? scroller;
-  return page.querySelector(".mc-row-block") === block;
+  const first = page.querySelector(".mc-row, .mc-card, .mc-tile, .mc-line");
+  return !!first && block.contains(first);
 }
 
 /** The nearest ancestor of `el` that scrolls (in the media center, the tab's contents). */
@@ -853,7 +862,7 @@ export const CardBlanks: FC<{ count?: number }> = ({ count = 6 }) => {
 };
 
 /** The height of Steam's tab bar over the top of a tab's scrolling area */
-const TAB_BAR = 58;
+export const TAB_BAR = 58;
 
 /** How long the page takes to glide to a row */
 const GLIDE_MS = 200;

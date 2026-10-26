@@ -49,7 +49,7 @@ export type View =
   /** one of a source's own sections (its albums, genres, charts...), opened from the media center's Browse */
   | { type: "section"; tab: string; title: string }
   /** a row's every item, from its Show all: a grid of them (a list, for songs) */
-  | { type: "all"; title: string; items: Collection[]; tracks: Track[] };
+  | { type: "all"; title: string; items: Collection[]; tracks: Track[]; /** whose they are, when not the live source's */ instanceId?: string };
 
 export type StackName = "library" | "search";
 

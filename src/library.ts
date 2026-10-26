@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Collection, Page, Section, ServiceInfo, Track, search } from "./api";
 import { pluginState, useStore } from "./store";
 
@@ -54,6 +54,46 @@ const searchRank = (type: string) => (SEARCH_FIRST.includes(type) ? SEARCH_FIRST
 /** Of the sources that found something, the one to show first. */
 export const bestResults = <T extends { source: ServiceInfo }>(pages: T[]): T | undefined =>
   [...pages].sort((a, b) => searchRank(a.source.type) - searchRank(b.source.type))[0];
+
+/** How long after the first source answers a search waits for better ones before its results show */
+const SEARCH_SETTLE_MS = 1200;
+
+/**
+ * Which of a search's sources shows, and the order they're in (the dots'), steady under the controller: once every
+ * source has answered (or a moment after the first did), the best first and on show; from then on it stays, and one
+ * answering later goes at the end, nothing moving. `pick` shows another. Nothing until then.
+ */
+export function useSearchChoice<T extends { source: ServiceInfo }>(
+  query: string,
+  pages: T[],
+  waiting: number,
+): { ordered: T[]; at: T | undefined; pick: (id: string) => void } {
+  const [fixed, setFixed] = useState<{ query: string; order: string[]; chosen: string } | null>(null);
+  const latest = useRef(pages);
+  latest.current = pages;
+  const mine = fixed?.query === query ? fixed : null;
+  const answered = pages.length > 0;
+  useEffect(() => {
+    if (mine || !answered) return;
+    const fix = () => {
+      const ranked = [...latest.current].sort((a, b) => searchRank(a.source.type) - searchRank(b.source.type));
+      if (ranked.length) setFixed({ query, order: ranked.map((p) => p.source.id), chosen: ranked[0].source.id });
+    };
+    if (!waiting) return fix();
+    const timer = setTimeout(fix, SEARCH_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [query, !!mine, answered, waiting === 0]);
+  if (!mine) return { ordered: [], at: undefined, pick: () => {} };
+  const ordered = [
+    ...mine.order.map((id) => pages.find((p) => p.source.id === id)).filter((p): p is T => !!p),
+    ...pages.filter((p) => !mine.order.includes(p.source.id)),
+  ];
+  return {
+    ordered,
+    at: ordered.find((p) => p.source.id === mine.chosen) ?? ordered[0],
+    pick: (id) => setFixed({ ...mine, chosen: id }),
+  };
+}
 
 /** Every source searched at once: the page so far (null until one answers), and how many are still looking.
  *  `rememberIn`: the source whose recent searches keep it (the media center's live one). */

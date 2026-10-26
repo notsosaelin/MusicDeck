@@ -26,8 +26,24 @@ function standIn(platform: string | undefined): { exe: string; dir: string; opti
     : { exe: "/usr/bin/true", dir: "/usr/bin", options: "" };
 }
 
-function shortcutExists(appid: number): boolean {
-  return !!appid && !!(window as any).appStore?.GetAppOverviewByAppID?.(appid);
+// EAppType for a non-Steam shortcut
+const SHORTCUT_TYPE = 0x40000000;
+// how long to wait at most for Steam's library to have loaded its shortcuts
+const LIBRARY_WAIT_MS = 20_000;
+
+/** Every MusicDeck shortcut in the library (there should be one; earlier versions could leave several), once Steam has
+ *  loaded its apps; null when it never did (nothing's decided then). */
+async function ourShortcuts(): Promise<number[] | null> {
+  for (let waited = 0; waited <= LIBRARY_WAIT_MS; waited += 500) {
+    const map = (window as any).appStore?.m_mapApps;
+    if (map?.size) {
+      return [...map.values()]
+        .filter((a: any) => a?.app_type === SHORTCUT_TYPE && a?.display_name === NAME)
+        .map((a: any) => a.appid as number);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return null;
 }
 
 /** A record at rest, the media center's turntable: drawn at (x, y), radius r. */
@@ -96,35 +112,62 @@ function artwork(): Record<keyof typeof ASSET, string> {
   return { grid: png(grid), hero: png(hero), logo: png(logo), wide: png(wide) };
 }
 
-/** Adds or removes the Library entry to match the setting (at start, and when it's switched). */
-export async function syncLibraryEntry(): Promise<void> {
+async function setArtwork(apps: any, appid: number) {
+  const art = artwork();
+  for (const [kind, data] of Object.entries(art) as [keyof typeof ASSET, string][]) {
+    try {
+      await apps.SetCustomArtworkForApp?.(appid, data, "png", ASSET[kind]);
+    } catch (e) {
+      console.warn("[MusicDeck] Library entry artwork", kind, e);
+    }
+  }
+}
+
+let syncing: Promise<void> | null = null;
+
+/** Adds or removes the Library entry to match the setting (at start, and when it's switched): one entry, with its
+ *  artwork; any more of them (left by earlier versions, which could add one before Steam had loaded its library) go.
+ *  One sync at a time: a second asked for meanwhile waits for it. */
+export function syncLibraryEntry(): Promise<void> {
+  syncing ??= sync().finally(() => {
+    syncing = null;
+  });
+  return syncing;
+}
+
+async function sync(): Promise<void> {
   const state = pluginState.get();
   const apps = steamApps();
   if (!state || !apps?.AddShortcut) return;
   const entry: LibraryEntry = state.library_entry ?? { enabled: false, appid: 0 };
-  const exists = shortcutExists(entry.appid);
-  if (entry.enabled && !exists) {
-    const { exe, dir, options } = standIn(state.platform);
-    const appid: number = await apps.AddShortcut(NAME, exe, dir, options);
-    if (!appid) return;
-    // set one by one: what AddShortcut itself takes differs between Steam versions
-    apps.SetShortcutName?.(appid, NAME);
-    apps.SetShortcutExe?.(appid, exe);
-    apps.SetShortcutStartDir?.(appid, dir);
-    apps.SetShortcutLaunchOptions?.(appid, options);
-    const art = artwork();
-    for (const [kind, data] of Object.entries(art) as [keyof typeof ASSET, string][]) {
-      try {
-        await apps.SetCustomArtworkForApp?.(appid, data, "png", ASSET[kind]);
-      } catch (e) {
-        console.warn("[MusicDeck] Library entry artwork", kind, e);
-      }
-    }
-    await setSetting("library_entry", { enabled: true, appid });
-  } else if (!entry.enabled && entry.appid) {
-    if (exists) apps.RemoveShortcut?.(entry.appid);
-    await setSetting("library_entry", { enabled: false, appid: 0 });
+  const ours = await ourShortcuts();
+  if (ours === null) return; // Steam's library never loaded: nothing is added or removed on a guess
+  if (!entry.enabled) {
+    for (const appid of ours) apps.RemoveShortcut?.(appid);
+    if (entry.appid) await setSetting("library_entry", { enabled: false, appid: 0 });
+    return;
   }
+  const keep = ours.includes(entry.appid) ? entry.appid : ours[0];
+  const extra = ours.filter((a) => a !== keep);
+  for (const appid of extra) apps.RemoveShortcut?.(appid);
+  if (keep) {
+    // the one kept may be one made without its pictures: given them again when anything was off
+    if (keep !== entry.appid || extra.length) {
+      await setArtwork(apps, keep);
+      await setSetting("library_entry", { enabled: true, appid: keep });
+    }
+    return;
+  }
+  const { exe, dir, options } = standIn(state.platform);
+  const appid: number = await apps.AddShortcut(NAME, exe, dir, options);
+  if (!appid) return;
+  // set one by one: what AddShortcut itself takes differs between Steam versions
+  apps.SetShortcutName?.(appid, NAME);
+  apps.SetShortcutExe?.(appid, exe);
+  apps.SetShortcutStartDir?.(appid, dir);
+  apps.SetShortcutLaunchOptions?.(appid, options);
+  await setArtwork(apps, appid);
+  await setSetting("library_entry", { enabled: true, appid });
 }
 
 /** Whether a launch is the Library entry's: Steam gives a shortcut's 64-bit game id (its app id << 32,

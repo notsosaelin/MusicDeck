@@ -297,6 +297,7 @@ export const ListRow: FC<
   return (
     <PanelSectionRow>
       <Field
+        className="md-list-row"
         focusable
         highlightOnFocus
         bottomSeparator="standard"
