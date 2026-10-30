@@ -147,6 +147,8 @@ class Plugin:
         self.last_homes_path = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "last-homes.json")
         self.last_homes: dict[str, list[dict[str, Any]]] = _read_json(self.last_homes_path)
         self.last_homes_saving = False
+        self.last_homes_at: dict[str, float] = {}  # when each came (monotonic): this session's only
+        self.home_jobs: dict[str, asyncio.Future] = {}  # each source's Home being fetched
         # every listen, from every source, for the stats page (a user's own history: kept with the settings)
         self.play_log = stats.PlayLog(os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "plays.jsonl"))
         debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(self.settings.get("debug_log")))
@@ -204,6 +206,7 @@ class Plugin:
                 decky.logger.warning(f"Your devices: couldn't start ({e})")
                 self.peers = None
             spawn(self._follow_all(), "saved copies")
+            spawn(_watch_loop(), "held-up watch")
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
@@ -838,6 +841,7 @@ class Plugin:
         """Home for every source at once: what was played lately, the user's playlists, then a little of each
         source's own Home."""
         async def work():
+            began = time.monotonic()
             sources = self._library_sources()
             played: list[dict[str, Any]] = []
             playlists: list[dict[str, Any]] = []
@@ -859,26 +863,59 @@ class Plugin:
                     # a source that answered before isn't waited for long: past HOME_WAIT its last Home shows, and
                     # the fresh one is kept for next time when it comes (a slow or failing source doesn't hold
                     # every other's up)
-                    fresh = asyncio.ensure_future(self.instances[sid].cached_tab("home"))
-                    fresh.add_done_callback(lambda f: f.cancelled() or f.exception() or self._keep_home(sid, f.result()))
+                    # fetched a moment ago (another visit to Home): as it was
+                    if time.monotonic() - self.last_homes_at.get(sid, -HOME_FRESH) < HOME_FRESH and sid in self.last_homes:
+                        return self._liked(sid, self.last_homes[sid])
+                    # one on its way already (Home asked again before a slow source answered): that one
+                    fresh = self.home_jobs.get(sid)
+                    if fresh is None or fresh.done():
+                        fresh = self.home_jobs[sid] = asyncio.ensure_future(self.instances[sid].cached_tab("home"))
+                        # what came is kept; a Home that failed counts as an empty one (so it isn't waited for again)
+                        fresh.add_done_callback(lambda f: f.cancelled() or self._keep_home(sid, [] if f.exception() else f.result()))
                     last = self.last_homes.get(sid)
+                    started = time.monotonic()
                     if last is None:
-                        return self._liked(sid, await fresh)
+                        try:
+                            return self._liked(sid, await fresh)
+                        finally:
+                            if time.monotonic() - started > HOME_SLOW:
+                                debuglog.debug("home", "slow source, nothing before", sid=sid,
+                                               seconds=round(time.monotonic() - started, 2))
                     try:
                         return self._liked(sid, await asyncio.wait_for(asyncio.shield(fresh), HOME_WAIT))
-                    except Exception:  # noqa: BLE001 - slow or failing this time: its last Home
+                    except Exception as e:  # noqa: BLE001 - slow or failing this time: its last Home
+                        debuglog.debug("home", "its last Home shown", sid=sid, why=type(e).__name__)
                         return self._liked(sid, last)
-                return get
+
+                async def timed():
+                    began_one = time.monotonic()
+                    try:
+                        return await get()
+                    finally:
+                        if time.monotonic() - began_one > HOME_SLOW:
+                            debuglog.debug("home", "slow source", sid=sid, seconds=round(time.monotonic() - began_one, 2))
+                return timed
+            ours_done = time.monotonic()
             homes = await library.gather([(s["id"], home(s["id"])) for s in sources], log=decky.logger)
-            return library.merge_home(played, playlists, [(sid, names[sid], sections) for sid, sections in homes])
+            homes_done = time.monotonic()
+            merged = library.merge_home(played, playlists, [(sid, names[sid], sections) for sid, sections in homes])
+            debuglog.debug("home", "built", ours=round(ours_done - began, 3), sources=round(homes_done - ours_done, 3),
+                           merge=round(time.monotonic() - homes_done, 3))
+            return merged
         return await _result(work())
 
     def _keep_home(self, sid: str, sections: list[dict[str, Any]]) -> None:
         """A source's Home that came: kept for when it's slow next time, written to disk a moment later (one write for
         every source's that come together)."""
-        if not isinstance(sections, list) or not any(s.get("items") or s.get("tracks") for s in sections):
+        if not isinstance(sections, list):
+            return
+        # it answered (an empty Home, or none, too): shown as it is for a while, without asking again; an empty one
+        # doesn't take the place of one with something in it on disk
+        if not sections and self.last_homes.get(sid):
+            self.last_homes_at[sid] = time.monotonic()
             return
         self.last_homes[sid] = sections
+        self.last_homes_at[sid] = time.monotonic()
         if self.last_homes_saving:
             return
         self.last_homes_saving = True
@@ -1031,6 +1068,11 @@ class Plugin:
         """Speakers and TVs on the network, after the user's other devices that are on: [{"id", "name", "model",
         "kind"}] ("musicdeck" for those: cast/peer.py)."""
         return await _result(self.cast.search())
+
+    @_when_ready
+    async def cast_known(self) -> dict[str, Any]:
+        """The devices found lately, at once (no search): what Play on opens with while it searches again."""
+        return {"ok": True, "data": self.cast.known()}
 
     # --- another device playing on this one (cast/peer.py there, peers.py here) ---
 
@@ -2269,7 +2311,10 @@ FOLLOW_AGAIN = 300
 FOLLOW_ALL_EVERY = 6 * 3600
 #: another device's music is offered to continue here for this long after it was last played
 HANDOFF_FRESH = 12 * 3600
-HOME_WAIT = 3.0  # seconds Home waits for a source it has an earlier Home of
+HOME_WAIT = 0.3  # seconds Home waits for a source it has an earlier Home of (its fresh one is there next time)
+HOME_FRESH = 120  # seconds a source's Home is shown again as it was, without asking it
+HOME_SLOW = 0.5  # seconds past which a source's Home is noted as slow (debug log)
+LOOP_CHECK, LOOP_HELD = 0.5, 0.3  # the held-up watch: how often it looks, and how late counts (debug log)
 HOME_SAVE_AFTER = 5  # seconds after a source's Home came that the last Homes are written
 
 
@@ -2286,6 +2331,17 @@ def _quiet_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
         else:
             loop.default_exception_handler(context)
     loop.set_exception_handler(handle)
+
+
+async def _watch_loop() -> None:
+    """With the debug log on: notes when the backend was held up (something worked without letting anything else
+    run, as reading a big podcast feed did), so what makes everything slow can be found."""
+    while True:
+        before = time.monotonic()
+        await asyncio.sleep(LOOP_CHECK)
+        late = time.monotonic() - before - LOOP_CHECK
+        if late > LOOP_HELD and debuglog.enabled():
+            debuglog.debug("backend", "held up", seconds=round(late, 2))
 
 
 def _read_json(path: str) -> dict[str, Any]:

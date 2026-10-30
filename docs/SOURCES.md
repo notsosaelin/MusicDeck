@@ -429,7 +429,14 @@ source (`MusicService.remove`).
 ## Internet radio (`radio.py`)
 
 - **Directory**: Radio Browser (radio-browser.info), a community directory with an open API. A
-  mirror is picked at random from `/json/servers`, as the project asks.
+  mirror is picked at random from `/json/servers`, as the project asks. A mirror that fails (5xx, no answer) is
+  tried once more on another, then rests a minute (`RESTING`) while the last good answer of each request shows.
+  Stations saved or played are kept in `radio-<id>.json` and play without asking the directory.
+- **TuneIn, when Radio Browser can't answer** (and has nothing from before): TuneIn's public OPML directory as JSON
+  (`opml.radiotime.com`, `render=json`, no account or key): `Browse.ashx?c=local` (stations near you),
+  `c=music` (genres, opened with `Browse.ashx?id=`), `Search.ashx?types=station`, `Describe.ashx` (a station),
+  and `Tune.ashx` for its stream when played (its addresses expire: asked each time, the last kept for when TuneIn
+  can't answer). Its stations' ids are `ti:<guide_id>`.
 - **Home**: popular near you (optional country), trending, most listened, genres (tags).
 - **Audio**: the station's own stream; HLS stations go through the HLS rewriter (plain-HTTP segments
   allowed for these). Each play is counted with `/json/url/{uuid}`, per Radio Browser's etiquette.

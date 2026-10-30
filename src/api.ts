@@ -770,6 +770,8 @@ export interface CastStatus {
 }
 
 export const castDevices = callable<[], Result<CastDevice[]>>("cast_devices");
+/** The devices found lately, without searching (Play on opens with them at once) */
+export const castKnown = callable<[], Result<CastDevice[]>>("cast_known");
 export const castStart = callable<[deviceId: string], Result<CastSession>>("cast_start");
 export const castLoad = callable<[id: string, track: Track, start: number, autoplay: boolean], Result<null>>(
   "cast_load",

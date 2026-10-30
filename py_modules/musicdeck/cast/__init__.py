@@ -15,6 +15,7 @@ passed on to the frontend as "cast_status" events; {"gone": reason} means the se
 without the user ending it (the device went away, or something else started playing on it).
 """
 import asyncio
+import time
 from typing import Any, Awaitable, Callable, Optional, Union
 
 import aiohttp
@@ -29,6 +30,10 @@ from .upnp import Renderer, UpnpError
 
 GOOGLECAST = "_googlecast._tcp.local"
 SEARCH_SECONDS = 2.5
+# a speaker or TV found is offered this long after it last answered (Play on opens with them at once)
+KEPT_SECONDS = 600
+# a renderer's description (its name, control addresses) is fetched again after this long
+DESCRIBED_SECONDS = 1800
 CONTROLS = {"play", "pause", "seek", "stop", "volume"}
 
 Device = Union[Chromecast, Renderer, Roku, PeerRenderer]
@@ -47,6 +52,9 @@ class CastManager:
         self.logger = logger
         # what the last search found, by id: {"id", "name", "model", "kind", "host", ...}
         self.found: dict[str, dict] = {}
+        # each device found: (when it last answered, monotonic; it); and renderers' descriptions by address
+        self.seen: dict[str, tuple[float, dict]] = {}
+        self.described: dict[str, tuple[float, Optional[dict]]] = {}
         self.device: Optional[Device] = None
         self.info: Optional[dict] = None
         self.lock = asyncio.Lock()
@@ -69,8 +77,7 @@ class CastManager:
                                 "model": txt.get("md") or "", "kind": "chromecast",
                                 "host": entry["host"], "port": entry["port"]}
         if isinstance(renderers, dict):
-            described = await asyncio.gather(*(upnp.describe(self.http, location, host)
-                                               for location, host in renderers.items()))
+            described = await asyncio.gather(*(self._describe(location, host) for location, host in renderers.items()))
             cast_hosts = {d["host"] for d in found.values()}
             for device in described:
                 # a device that does both is better driven over Cast
@@ -86,14 +93,35 @@ class CastManager:
         for error in (casts, renderers, rokus):
             if isinstance(error, BaseException):
                 debuglog.debug("cast", "search failed", error=repr(error))
+        now = time.monotonic()
+        for device_id, device in found.items():
+            self.seen[device_id] = (now, device)
+        return self.known()
+
+    def known(self) -> list[dict]:
+        """The devices found lately (no searching, so at once): speakers and TVs that answered in the last
+        KEPT_SECONDS, your other MusicDeck devices that are on now, and the one playing. The user's own devices
+        first, then by name."""
+        now = time.monotonic()
+        self.seen = {k: v for k, v in self.seen.items() if now - v[0] < KEPT_SECONDS}
+        found = {k: d for k, (_, d) in self.seen.items()}
         for target in self.peers.targets() if self.peers else []:
             found[target["id"]] = {**target, "peer": target["id"].split(":", 1)[1]}
         if self.info:
             found.setdefault(self.info["id"], self.info)
         self.found = found
-        # the user's own devices first, then by name
         return sorted(({k: d[k] for k in ("id", "name", "model", "kind")} for d in found.values()),
                       key=lambda d: (d["kind"] != "musicdeck", d["name"].lower()))
+
+    async def _describe(self, location: str, host: str) -> Optional[dict]:
+        """A renderer's description, fetched once in a while rather than every search (a TV that's asleep takes
+        seconds to answer)."""
+        hit = self.described.get(location)
+        if hit and time.monotonic() - hit[0] < DESCRIBED_SECONDS and hit[1]:
+            return hit[1]
+        device = await upnp.describe(self.http, location, host)
+        self.described[location] = (time.monotonic(), device)
+        return device
 
     # --- the session ---
 

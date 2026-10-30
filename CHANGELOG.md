@@ -24,6 +24,18 @@ What changed in each version, newest first. Every build put on a device has its 
   or played kept so they play at once. Home doesn't wait on it (or on any slow source: past 3 seconds a source shows
   its last Home, also right after a restart).
 - **Windows, Big Picture**: the media center's tabs no longer go under Steam's top bar.
+- **Home opens at once**: reading a big podcast feed held the whole backend up for a second or more on a
+  handheld (Home, Play on and everything else waited on it): it's read aside now. A source that's slow (YouTube
+  starting up) or failing shows its last Home (kept on disk, so after a restart too) instead of holding the page;
+  one from the last two minutes shows as it was. Home ~0.3 s at most (was 2.5-8 s). With the debug log on, anything
+  that holds the backend up is noted ("held up").
+- **Play on opens at once**: with the speakers and TVs found lately (and your other devices as they are now),
+  looking again behind it; it used to wait for a whole search (2.5 s or more) whenever the last was a minute old.
+- **Internet radio's second directory**: when Radio Browser can't answer, TuneIn's (no account): stations near you,
+  genres and search; its stations play, are saved and kept like any other.
+- **Albums known by how they sound**: Local files' Look up listens to a few of an album's songs (Chromaprint's
+  fpcalc and AcoustID, as MusicBrainz Picard does) when the tags don't say what it is, or its name finds nothing,
+  and searches by what they are. Needs MusicDeck's AcoustID key (fingerprint.APP_KEY); until then it's off.
 
 ## 0.42.0
 

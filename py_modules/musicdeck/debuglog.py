@@ -73,7 +73,8 @@ def enabled() -> bool:
     return _handler is not None
 
 
-def debug(source: str, event: str, **data: Any) -> None:
+def debug(source: str, event: str, /, **data: Any) -> None:
+    # positional only: a field named "source" or "event" is just a field (it raised before, and lost what it was in)
     if _handler is None:
         return
     extra = " " + json.dumps(redact(data), default=str, ensure_ascii=False) if data else ""

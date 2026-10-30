@@ -31,9 +31,10 @@ if newer:
     raise SystemExit(f"dist/index.js is older than {newer[0].relative_to(ROOT)}; run `pnpm build` again")
 # every platform the zip is for (musicdeck/native.py): Linux x86_64 and arm64, Windows x86_64 (which
 # Windows on Arm runs too)
-HELPERS = {"linux-x86_64": ["qjs", "spotify-helper", "hashab", "musicdeck-net"],
-           "linux-arm64": ["qjs", "spotify-helper", "hashab", "musicdeck-net"],
-           "windows-x86_64": ["qjs.exe", "spotify-helper.exe", "hashab.exe", "musicdeck-net.exe", "python/python.exe"]}
+HELPERS = {"linux-x86_64": ["qjs", "spotify-helper", "hashab", "musicdeck-net", "fpcalc"],
+           "linux-arm64": ["qjs", "spotify-helper", "hashab", "musicdeck-net", "fpcalc"],
+           "windows-x86_64": ["qjs.exe", "spotify-helper.exe", "hashab.exe", "musicdeck-net.exe", "fpcalc.exe",
+                              "python/python.exe"]}
 if not (ROOT / "py_modules" / "yt_dlp").exists():
     raise SystemExit("vendored files missing; run `python scripts/vendor.py` first")
 for platform_name, names in HELPERS.items():

@@ -3006,10 +3006,99 @@ async def run():
               "after a restart, with the directory down, it still plays at once")
         await asyncio.sleep(0.2)
         check(len(directory["asked"]) > asked, "its play is still counted, in the background")
+        # Radio Browser down with nothing to show from before: TuneIn's directory stands in
+        async def tunein(request):
+            name = request.path.rsplit("/", 1)[-1]
+            if name == "Browse.ashx" and request.query.get("c") == "local":
+                return aioweb.json_response({"head": {"title": "Local"}, "body": [{"text": "FM", "children": [
+                    {"type": "audio", "item": "station", "guide_id": "s1", "text": "Jazz 88", "image": "https://x/j.png",
+                     "bitrate": "128", "subtext": "Smooth jazz"}]}]})
+            if name == "Browse.ashx" and request.query.get("c") == "music":
+                return aioweb.json_response({"body": [{"type": "link", "guide_id": "g22", "text": "Jazz"}]})
+            if name == "Browse.ashx":
+                return aioweb.json_response({"head": {"title": "Jazz"}, "body": [{"text": "Stations", "children": [
+                    {"type": "audio", "item": "station", "guide_id": "s2", "text": "Blue Note FM"}]}]})
+            if name == "Search.ashx":
+                return aioweb.json_response({"body": [{"type": "audio", "item": "station", "guide_id": "s3",
+                                                        "text": request.query.get("query", "") + " radio"}]})
+            if name == "Tune.ashx":
+                return aioweb.json_response({"body": [{"element": "audio", "url": f"https://x/{request.query['id']}.m3u8",
+                                                        "media_type": "hls"}]})
+            return aioweb.Response(status=404)
+        real_tunein = radiomod.TUNEIN
+        ti_app = aioweb.Application()
+        ti_app.router.add_get("/{tail:.*}", tunein)
+        ti_runner = aioweb.AppRunner(ti_app)
+        await ti_runner.setup()
+        ti_site = aioweb.TCPSite(ti_runner, "127.0.0.1", 0)
+        await ti_site.start()
+        radiomod.TUNEIN = f"http://127.0.0.1:{ti_site._server.sockets[0].getsockname()[1]}"
+        down = RadioService("rd2", {"favourites": []}, tmp)
+        down.session = rs.session
+        directory["fail"] = 999
+        home = await down.home()
+        titles = [s["title"] for s in home]
+        near = next((s for s in home if s["title"] == "Stations near you"), None)
+        check(near and near["tracks"][0]["id"] == "ti:s1" and "Genres" in titles,
+              f"Radio Browser down, nothing from before: TuneIn's stations near you and its genres ({titles})")
+        genre = await down.open("list", "ti:g22")
+        check(genre["title"] == "Jazz" and genre["tracks"][0]["id"] == "ti:s2", "a TuneIn genre opens to its stations")
+        found_ti = await down.search("blue")
+        check(found_ti["tracks"] and found_ti["tracks"][0]["id"] == "ti:s3", "and Search searches TuneIn")
+        played_ti = await down.stream("ti:s1")
+        check(played_ti.url == "https://x/s1.m3u8" and played_ti.hls and "ti:s1" in down.kept,
+              "a TuneIn station plays (its stream asked of TuneIn) and is kept")
+        radiomod.TUNEIN = "http://127.0.0.1:9"
+        again_ti = await down.stream("ti:s1")
+        check(again_ti.url == "https://x/s1.m3u8", "TuneIn unreachable: its last stream address")
+        radiomod.TUNEIN = real_tunein
+        await ti_runner.cleanup()
         radiomod.DIRECTORY, radiomod.RETRY_AFTER = real_dir, real_retry
         await dir_runner.cleanup()
         await rs.stop()
         await icy_runner.cleanup()
+
+        print("fingerprints")
+        from musicdeck import fingerprint as fpmod
+        asked_ac = []
+
+        async def acoustid(request):
+            form = await request.post()
+            asked_ac.append((time.monotonic(), dict(form)))
+            song = form["fingerprint"]
+            albums = {"fp-a": ["Nevermind"], "fp-b": ["Nevermind", "Nirvana Live"], "fp-c": ["Some Single"]}
+            if song == "fp-x":
+                return aioweb.json_response({"status": "ok", "results": []})
+            return aioweb.json_response({"status": "ok", "results": [{"score": 0.93, "recordings": [{
+                "title": f"Song {song}", "artists": [{"name": "Nirvana"}],
+                "releasegroups": [{"title": t, "type": "Album"} for t in albums[song]]}]}]})
+        ac_app = aioweb.Application()
+        ac_app.router.add_post("/v2/lookup", acoustid)
+        ac_runner = aioweb.AppRunner(ac_app)
+        await ac_runner.setup()
+        ac_site = aioweb.TCPSite(ac_runner, "127.0.0.1", 0)
+        await ac_site.start()
+        real_lookup, fpmod.LOOKUP = fpmod.LOOKUP, f"http://127.0.0.1:{ac_site._server.sockets[0].getsockname()[1]}/v2/lookup"
+        async with aiohttp.ClientSession() as ac_http:
+            check(not fpmod.Fingerprinter(ac_http, tmp, key="").ready or fpmod.APP_KEY,
+                  "without an AcoustID key nothing is fingerprinted")
+            listener = fpmod.Fingerprinter(ac_http, tmp, key="test-key")
+            listener.exe = "fpcalc"  # stood in for: what it would print for each song
+
+            async def heard(path):
+                return (200, os.path.basename(path)) if not path.endswith("fp-none") else None
+            listener.fingerprint = heard
+            match = await listener.lookup(200, "fp-b")
+            check(match and match[0]["artist"] == "Nirvana" and match[0]["albums"] == ["Nevermind", "Nirvana Live"]
+                  and asked_ac[-1][1]["client"] == "test-key", f"AcoustID's answer read: {match}")
+            album = await listener.album_of(["/m/fp-a", "/m/fp-b", "/m/fp-c"])
+            check(album == ("Nirvana", "Nevermind"), f"the songs agree on the album they're from: {album}")
+            gaps = [b[0] - a[0] for a, b in zip(asked_ac[-3:], asked_ac[-2:])]
+            check(all(g >= fpmod.LOOKUP_GAP - 0.02 for g in gaps), f"three lookups a second at most: {gaps}")
+            check(await listener.album_of(["/m/fp-x", "/m/fp-none"]) is None, "nothing known: nothing said")
+            check(await listener.album_of(["/m/fp-c", "/m/fp-a"]) is None, "two songs that disagree: nothing said")
+        fpmod.LOOKUP = real_lookup
+        await ac_runner.cleanup()
 
         print("listenbrainz")
         from aiohttp import web as lbweb
@@ -4654,6 +4743,30 @@ async def run():
         one_home = await plugin.library_home()
         check(one_home["ok"], f"the one library's Home: {one_home.get('error')}")
         check(not (await plugin.library_tab("nonsense"))["ok"], "a part the one library doesn't have is refused")
+        # a source that's slow this time, with a Home from before: that one shows, and Home doesn't wait for it
+        slow_sid = next(iter(plugin.instances))
+        slow_instance = plugin.instances[slow_sid]
+        real_cached = slow_instance.cached_tab
+        earlier = [{"title": "Earlier picks", "items": [{"id": "e1", "kind": "album", "title": "Kept", "subtitle": ""}],
+                    "tracks": []}]
+
+        async def slow_home(tab_id):
+            await asyncio.sleep(3)
+            return earlier
+        slow_instance.cached_tab = slow_home
+        plugin.last_homes[slow_sid], plugin.last_homes_at[slow_sid] = earlier, 0.0
+        plugin.home_jobs.pop(slow_sid, None)
+        from musicdeck import debuglog
+        debuglog.configure(tmp, True)
+        started = time.monotonic()
+        waited = await plugin.library_home()
+        took = time.monotonic() - started
+        debuglog.configure(tmp, False)
+        shown = json.dumps(waited.get("data"))
+        check(waited["ok"] and took < 2.5 and "Kept" in shown,
+              f"a slow source's last Home shows without holding Home up ({took:.1f}s; its Home kept: {'Kept' in shown})")
+        slow_instance.cached_tab = real_cached
+        plugin.home_jobs.pop(slow_sid, None)
 
         print("endpoints")
         api_ts = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "api.ts"), encoding="utf-8").read()

@@ -37,7 +37,7 @@ decky.pyi                  type stubs for Decky's `decky` module (from the plugi
 ```sh
 pnpm install
 pnpm build                              # src/ -> dist/index.js
-python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/<platform>/
+python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG and Chromaprint's fpcalc into bin/<platform>/
 bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static musl for x86_64 and arm64 Linux, Windows .exe
 bash scripts/build_net_helper.sh        # bin/<platform>/musicdeck-net (the internet link): the same three; also from Git Bash on Windows
 bash scripts/build_hashab.sh            # bin/<platform>/hashab (the iPod nano 6G/7G signature), checked against its test vectors

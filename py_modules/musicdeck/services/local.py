@@ -34,6 +34,7 @@ from ..query import has_fields as query_has_fields, holds as query_holds, parse 
 from .local_tools import LibraryTools
 from ..background import spawn
 from ..catalogues import Catalogues
+from ..fingerprint import Fingerprinter
 from ..musicbrainz import MusicBrainz
 from ..pictures import plain
 from ..watch import FolderWatcher
@@ -628,6 +629,7 @@ class LocalService(LibraryTools, MusicService):
         self.edit_lock = asyncio.Lock()
         self.mb: Optional[MusicBrainz] = None
         self.catalogues: Optional[Catalogues] = None
+        self.fingerprinter: Optional[Fingerprinter] = None
         self.http: Optional[aiohttp.ClientSession] = None
         self.art_task: Optional[asyncio.Task[None]] = None
         self.art_progress = {"running": False, "done": 0, "total": 0, "found": 0}
@@ -1682,6 +1684,23 @@ class LocalService(LibraryTools, MusicService):
             self.mb = MusicBrainz(self._http())
         return self.mb
 
+    def _fingerprinter(self) -> Fingerprinter:
+        if self.fingerprinter is None:
+            self.fingerprinter = Fingerprinter(self._http(), self.runtime_dir)
+        return self.fingerprinter
+
+    #: how many of an album's songs are listened to (fingerprinted) when its tags don't say what it is
+    LISTEN_TO = 3
+
+    async def _heard_as(self, items: list[tuple[str, dict[str, Any]]]) -> Optional[tuple[str, str]]:
+        """(artist, album) by how a few of the album's songs sound (fingerprint.py), or None (no AcoustID key, no
+        fpcalc for this platform, nothing it knows)."""
+        listener = self._fingerprinter()
+        if not listener.ready:
+            return None
+        paths = [t["path"] for _, t in items if not t.get("cue") and t.get("path")][:self.LISTEN_TO]
+        return await listener.album_of(paths)
+
     #: how many of each catalogue's likeliest albums are fetched whole to weigh against the files
     LOOKUP_FETCH = {"MusicBrainz": 3, "Apple Music": 2, "Deezer": 2}
 
@@ -1694,10 +1713,24 @@ class LocalService(LibraryTools, MusicService):
         items = self._target("album", album_id)
         first = items[0][1]
         owner = self._album_owner(items)
+        asked = bool(album or artist)
+        # tags that don't say what the album is (no album name, or no artist; a compilation named is named enough):
+        # how it sounds says
+        if not asked and (not first["album"] or not owner or owner == UNKNOWN):
+            heard = await self._heard_as(items)
+            if heard:
+                artist, album = heard
         album = album or first["album"] or os.path.basename(self._album_folder(first))
         artist = artist or ("" if owner == VARIOUS else owner)
         found = await asyncio.gather(self._musicbrainz().search(artist, album, len(items)),
                                      self._catalogues().search(artist, album), return_exceptions=True)
+        if not asked and not any(isinstance(f, list) and f for f in found):
+            # nothing by its name (a folder's name, tags that are wrong): searched again by how it sounds
+            heard = await self._heard_as(items)
+            if heard and heard != (artist, album):
+                artist, album = heard
+                found = await asyncio.gather(self._musicbrainz().search(artist, album, len(items)),
+                                             self._catalogues().search(artist, album), return_exceptions=True)
         if isinstance(found[0], BaseException) and isinstance(found[1], BaseException):
             raise found[0] if isinstance(found[0], ServiceError) else ServiceError("Couldn't look the album up")
         hits = [{**r, "source": "MusicBrainz"} for r in found[0]] if isinstance(found[0], list) else []

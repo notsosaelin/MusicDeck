@@ -26,6 +26,10 @@ from .base import MusicService, ServiceError, StreamSource, as_rows
 from ..version import USER_AGENT
 
 DIRECTORY = "https://all.api.radio-browser.info"
+# TuneIn's public directory (OPML, as JSON): no account or key. Used when Radio Browser can't answer; its stations'
+# ids are "ti:<TuneIn's id>"
+TUNEIN = "https://opml.radiotime.com"
+TUNEIN_FORMATS = "mp3,aac,ogg,hls"
 SERVER_TTL = 6 * 3600
 STATION_TTL = 3600
 STATIONS_KEPT = 1000
@@ -201,6 +205,7 @@ class RadioService(MusicService):
         # the last good answer to each request (path and query), shown when the directory fails
         self.answers: dict[str, Any] = {}
         self.failed_at = 0.0
+        self.tunein_title = ""
         self.kept_path = os.path.join(runtime_dir, f"radio-{instance_id}.json")
         self.kept: dict[str, dict[str, Any]] = self._load_kept()
 
@@ -237,9 +242,9 @@ class RadioService(MusicService):
         if not uuid:
             return
         self.kept.pop(uuid, None)
-        self.kept[uuid] = {k: station.get(k) for k in ("stationuuid", "name", "url", "url_resolved", "hls", "favicon",
-                                                       "tags", "country", "state", "language", "codec", "bitrate",
-                                                       "homepage") if station.get(k) not in (None, "")}
+        self.kept[uuid] = {k: station.get(k) for k in ("stationuuid", "name", "url", "url_resolved", "hls", "tunein",
+                                                       "favicon", "tags", "country", "state", "language", "codec",
+                                                       "bitrate", "homepage") if station.get(k) not in (None, "")}
         favourites = self._favourite_ids()
         for old in [k for k in self.kept if k not in favourites][:max(0, len(self.kept) - STATIONS_ON_DISK)]:
             self.kept.pop(old, None)
@@ -253,7 +258,7 @@ class RadioService(MusicService):
 
     async def _keep_favourites(self) -> None:
         """Favourites saved before stations were kept on disk: fetched once, while the directory answers."""
-        missing = [i for i in self._favourite_ids() if i not in self.kept]
+        missing = [i for i in self._favourite_ids() if i not in self.kept and not i.startswith("ti:")]
         if not missing:
             return
         with contextlib.suppress(ServiceError):
@@ -331,6 +336,15 @@ class RadioService(MusicService):
         if uuid in self.kept:
             # saved or played before: no need to wait for the directory (which may be down)
             return self.kept[uuid]
+        if uuid.startswith("ti:"):
+            body = await self._tunein("Describe.ashx", id=uuid[3:])
+            station = next((x for x in body if x.get("element") == "station"), None)
+            if not station:
+                raise ServiceError("This station is no longer listed")
+            return self.stations.put(uuid, {"stationuuid": uuid, "name": station.get("name") or "",
+                                            "favicon": station.get("logo") or "", "tags": station.get("genre_name") or "",
+                                            "country": station.get("location") or "", "homepage": station.get("url") or "",
+                                            "tunein": True})
         found = await self._get("/json/stations/byuuid", uuids=uuid)
         if not found:
             raise ServiceError("This station is no longer listed")
@@ -385,6 +399,12 @@ class RadioService(MusicService):
             sections.append(models.section("Most listened", [], got["popular"][:20]))
         if isinstance(got.get("genres"), list):
             sections.append(models.section("Genres", [self._tag(t) for t in got["genres"]]))
+        if not any(isinstance(v, list) for v in got.values()):
+            # Radio Browser can't answer (and had nothing to show from before): TuneIn's stations near you and genres
+            try:
+                sections += await self._tunein_home()
+            except ServiceError:
+                pass
         if not sections:
             raise next(v for v in got.values() if isinstance(v, Exception))
         if any(isinstance(v, list) for v in got.values()):
@@ -477,6 +497,11 @@ class RadioService(MusicService):
         return await super().tab(tab_id)
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id.startswith("ti:"):
+            outlines = await self._tunein("Browse.ashx", id=id[3:])
+            title = self.tunein_title or "TuneIn"
+            stations = self._tunein_stations(outlines, 100)
+            return models.page(title, models.count(len(stations), "station"), tracks=stations)
         if kind == "list" and id.startswith("country:"):
             code, _, name = id[8:].partition("#")
             if not COUNTRY_CODE.match(code):
@@ -502,7 +527,8 @@ class RadioService(MusicService):
             self._get(f"/json/tags/{query}", order="stationcount", reverse=True, limit=10),
             return_exceptions=True)
         if isinstance(stations, Exception):
-            raise stations
+            # Radio Browser can't answer: TuneIn's stations by that name
+            stations = self._tunein_stations(await self._tunein("Search.ashx", query=query, types="station"))
         genres = [self._tag(t) for t in tags if t.get("stationcount")] if isinstance(tags, list) else []
         return models.page(f"Results for “{query}”", collections=genres, tracks=stations, tracks_first=True)
 
@@ -576,6 +602,74 @@ class RadioService(MusicService):
 
     # --- media ---
 
+    # --- TuneIn, when Radio Browser can't answer ---
+
+    async def _tunein(self, path: str, **params: Any) -> list[dict[str, Any]]:
+        """A TuneIn directory answer's outlines (its title in self.tunein_title, for a genre's page)."""
+        assert self.session
+        try:
+            async with self.session.get(f"{TUNEIN}/{path}", params={"render": "json", "formats": TUNEIN_FORMATS,
+                                                                     **params}) as resp:
+                if resp.status >= 400:
+                    raise ServiceError(f"TuneIn returned HTTP {resp.status}")
+                data = await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+            raise ServiceError(f"Couldn't reach TuneIn ({type(e).__name__})") from e
+        body = data.get("body") if isinstance(data, dict) else None
+        head = data.get("head") if isinstance(data, dict) else None
+        self.tunein_title = str(head.get("title") or "") if isinstance(head, dict) else ""
+        return [x for x in body if isinstance(x, dict)] if isinstance(body, list) else []
+
+    def _tunein_stations(self, outlines: list[dict[str, Any]], limit: int = LIST_SIZE) -> list[dict[str, Any]]:
+        """The stations in TuneIn outlines (and their groups'), as stations (Radio Browser's shape)."""
+        found: list[dict[str, Any]] = []
+
+        def walk(items: list[dict[str, Any]]) -> None:
+            for x in items:
+                if x.get("item") == "station" and x.get("type") == "audio" and x.get("guide_id"):
+                    uuid = "ti:" + str(x["guide_id"])
+                    station = {"stationuuid": uuid, "name": x.get("text") or "", "favicon": x.get("image") or "",
+                               "tags": x.get("subtext") or "", "bitrate": int(x["bitrate"]) if str(x.get("bitrate") or "").isdigit() else 0,
+                               "tunein": True}
+                    found.append(self.stations.put(uuid, station))
+                walk(x.get("children") or [])
+        walk(outlines)
+        return [self._station(s) for s in found[:limit]]
+
+    def _tunein_genres(self, outlines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [models.collection(f"ti:{x['guide_id']}", "list", x.get("text") or "", "TuneIn")
+                for x in outlines if x.get("type") == "link" and str(x.get("guide_id") or "").startswith(("g", "c"))]
+
+    async def _tunein_home(self) -> list[dict[str, Any]]:
+        local, music = await asyncio.gather(self._tunein("Browse.ashx", c="local"), self._tunein("Browse.ashx", c="music"),
+                                            return_exceptions=True)
+        sections = []
+        if isinstance(local, list) and (near := self._tunein_stations(local, 20)):
+            sections.append(models.section("Stations near you", [], near))
+        if isinstance(music, list) and (genres := self._tunein_genres(music)):
+            sections.append(models.section("Genres", genres))
+        if not sections:
+            raise local if isinstance(local, Exception) else ServiceError("TuneIn had nothing")
+        return sections
+
+    async def _tunein_stream(self, uuid: str, info: dict[str, Any]) -> StreamSource:
+        """Its stream, asked of TuneIn each time (its addresses expire); the last one when TuneIn can't answer."""
+        try:
+            streams = [x for x in await self._tunein("Tune.ashx", id=uuid[3:]) if x.get("url")]
+        except ServiceError:
+            if info.get("url_resolved"):
+                return StreamSource(url=info["url_resolved"], hls=bool(info.get("hls")))
+            raise
+        if not streams:
+            raise ServiceError("This station has no stream right now")
+        best = streams[0]
+        url = str(best["url"])
+        hls = best.get("media_type") == "hls" or ".m3u8" in url.split("?")[0]
+        # kept with the station: Now Playing reads the song on air from it, and it plays while TuneIn is down
+        info = self.stations.put(uuid, {**info, "url_resolved": url, "hls": hls})
+        self._keep(info)
+        return StreamSource(url=url, hls=hls)
+
     async def _count_play(self, track_id: str) -> None:
         try:
             await self._get(f"/json/url/{track_id}")
@@ -584,13 +678,15 @@ class RadioService(MusicService):
 
     async def stream(self, track_id: str) -> StreamSource:
         info = await self._station_info(track_id)
+        if info.get("tunein"):
+            return await self._tunein_stream(track_id, info)
         url = info.get("url_resolved") or info.get("url")
         if not url:
             raise ServiceError("This station has no stream address")
         # Radio Browser's etiquette: count a play, which also keeps its popularity lists honest (in the background:
         # the song doesn't wait for the directory)
         asyncio.ensure_future(self._count_play(track_id))
-        self._keep(info)
+        self._keep(info)  # (TuneIn's stations went above)
         hls = bool(info.get("hls")) or ".m3u8" in url.split("?")[0]
         return StreamSource(url=url, hls=hls)
 

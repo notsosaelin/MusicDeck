@@ -1,6 +1,6 @@
 import { Menu, MenuItem, showContextMenu } from "@decky/ui";
 import { FC } from "react";
-import { CastDevice, Result, castDevices } from "../api";
+import { CastDevice, Result, castDevices, castKnown } from "../api";
 import { notify } from "../notify";
 import { player } from "../player";
 import { pluginState } from "../store";
@@ -13,6 +13,8 @@ export const canCast = (instanceId: string) => !!pluginState.get()?.services.fin
 
 /** How long a search's devices are shown without searching again */
 const FRESH_MS = 60_000;
+/** How long Play on waits for a search when no device was ever found (the first time) */
+const FIRST_WAIT_MS = 2500;
 
 /** The last search's devices, and the search running now (one at a time) */
 let found: { result: Result<CastDevice[]>; at: number } | null = null;
@@ -40,9 +42,6 @@ export function prepareCastMenu() {
 /** What "here" is called: this Deck (or handheld), or this PC on Windows. */
 export const thisDevice = () => (pluginState.get()?.platform?.startsWith("windows") ? "This PC" : "This Deck");
 
-/** The devices to offer: the ones found lately, or once a search for them finishes. */
-export const castChoices = (): Promise<Result<CastDevice[]>> =>
-  found && Date.now() - found.at <= FRESH_MS ? Promise.resolve(found.result) : search();
 
 /** Plays on `device`, or back here (null); a failure is said. */
 export const chooseCast = async (device: CastDevice | null) => {
@@ -75,7 +74,22 @@ const CastMenu: FC<{ result: Result<CastDevice[]> }> = ({ result }) => {
   );
 };
 
-/** Opens Play on: at once with the devices found lately, or once a search for them finishes. */
+/**
+ * Opens Play on at once: with the last search's devices, or the ones the backend found lately (your other MusicDeck
+ * devices always as they are now), searching again behind it for next time. Only when no speaker or TV was found yet
+ * (since MusicDeck started) does it wait, a moment at most, for the search.
+ */
 export async function showCastMenu(parent?: EventTarget | null) {
   showContextMenu(<CastMenu result={await castChoices()} />, parent ?? window);
+}
+
+/** The devices to offer (Play on here, the desktop's list too): at once, as showCastMenu says. */
+export async function castChoices(): Promise<Result<CastDevice[]>> {
+  if (found && Date.now() - found.at <= FRESH_MS) return found.result;
+  const known = await castKnown().catch(() => null);
+  const searched = search();
+  // speakers and TVs found before (not just your own devices, known at once after a restart): opens with those
+  if (known?.ok && known.data.some((d) => d.kind !== "musicdeck")) return known;
+  const waited = new Promise<null>((done) => window.setTimeout(() => done(null), FIRST_WAIT_MS));
+  return (await Promise.race([searched, waited])) ?? known ?? { ok: true, data: [] };
 }

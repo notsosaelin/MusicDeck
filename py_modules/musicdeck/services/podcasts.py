@@ -36,6 +36,7 @@ CHARTS = "https://rss.marketingtools.apple.com/api/v2/{country}/podcasts/top/{co
 FEED_TTL = 30 * 60
 FEEDS_KEPT = 100  # a parsed feed can be large (hundreds of episodes)
 CHARTS_TTL = 6 * 3600
+HOME_WAIT = 4.0  # seconds Home waits for the feeds and charts
 # Apple's podcast categories (genre ids), for the Browse tab; each opens to its chart, which only the
 # older iTunes feed offers by category
 CATEGORIES = [(1489, "News"), (1303, "Comedy"), (1488, "True Crime"), (1324, "Society & Culture"),
@@ -143,7 +144,9 @@ class PodcastService(MusicService):
             async with self.session.get(url) as resp:
                 if resp.status >= 400:
                     raise ServiceError(f"This podcast's feed returned HTTP {resp.status}")
-                podcast = parse_feed(await resp.read())
+                # in a thread: a big feed takes a second or more to read on a handheld, and would hold up everything
+                # else meanwhile (Home waited on it)
+                podcast = await asyncio.to_thread(parse_feed, await resp.read())
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             raise ServiceError("Couldn't reach this podcast's feed") from e
         except ValueError as e:
@@ -202,8 +205,19 @@ class PodcastService(MusicService):
 
     async def home(self) -> list[dict[str, Any]]:
         subscriptions = self.config.get("subscriptions") or []
-        feeds = await asyncio.gather(*[self._feed(s["feed"]) for s in subscriptions], return_exceptions=True)
-        charts = await asyncio.gather(self._charts(), return_exceptions=True)
+        # every feed and the charts at once, waited for HOME_WAIT at most: a slow feed (or a big one) is left out
+        # this time and kept for next time when it comes, rather than holding up Home
+        jobs = [asyncio.ensure_future(self._feed(s["feed"])) for s in subscriptions] + [asyncio.ensure_future(self._charts())]
+        await asyncio.wait(jobs, timeout=HOME_WAIT)
+        for job in jobs:
+            job.add_done_callback(lambda f: f.cancelled() or f.exception())
+
+        def outcome(job: asyncio.Future) -> Any:
+            if not job.done():
+                return ServiceError("Still loading")
+            return job.exception() or job.result()
+        results = [outcome(j) for j in jobs]
+        feeds, charts = results[:-1], results[-1:]
         sections = []
         unfinished = sorted((p for p in self.progress.values() if not p.get("done") and p.get("position", 0) > 30),
                             key=lambda p: p.get("updated", 0), reverse=True)
