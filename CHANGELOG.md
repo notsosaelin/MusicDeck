@@ -3,7 +3,7 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
-## Unreleased
+## 0.43.0
 
 - **Your devices, anywhere**: paired devices find each other over the internet too (another network, a phone's
   hotspot, mobile data), with no Tailscale, port forwarding or account, and nothing to set up. Each shows whether
