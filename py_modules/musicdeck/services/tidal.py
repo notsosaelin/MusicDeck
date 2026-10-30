@@ -57,6 +57,16 @@ def _image(uuid: Optional[str], size: int = 320) -> Optional[str]:
     return f"{IMAGES}{uuid.replace('-', '/')}/{size}x{size}.jpg"
 
 
+WIMP_LINK = re.compile(r"\[/?wimpLink[^\]]*\]")
+
+
+def _bio(text: Any) -> str:
+    """An artist's biography as TIDAL keeps it (names marked [wimpLink artistId=...]...[/wimpLink], line breaks as
+    <br/>): the text, a paragraph a line."""
+    text = WIMP_LINK.sub("", str(text or ""))
+    return "\n".join(p.strip() for p in re.split(r"<br\s*/?>", text) if p.strip())
+
+
 def _dash_elements(mpd: str) -> list[tuple[str, dict[str, str]]]:
     return [(m.group(1), {k: v.replace("&amp;", "&") for k, v in DASH_ATTR.findall(m.group(2))})
             for m in DASH_TAG.finditer(mpd)]
@@ -389,18 +399,37 @@ class TidalService(MusicService):
             return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks(items),
                                save=models.saved(self._saved("album", id)))
         if kind == "artist":
-            a, top, albums, singles = await asyncio.gather(
+            if not str(id).isdigit():
+                raise ServiceError("Not found on TIDAL")
+            # as TIDAL's own app has an artist: top tracks, albums, then singles and EPs, what they appear on,
+            # their radio, similar artists and their biography (each left out if TIDAL doesn't answer it)
+            a, top, albums, singles, appears, similar, bio = await asyncio.gather(
                 self._get(f"artists/{id}"), self._get(f"artists/{id}/toptracks", limit=10),
                 self._get(f"artists/{id}/albums", limit=50),
-                self._get(f"artists/{id}/albums", limit=50, filter="EPSANDSINGLES"), return_exceptions=True)
+                self._get(f"artists/{id}/albums", limit=50, filter="EPSANDSINGLES"),
+                self._get(f"artists/{id}/albums", limit=50, filter="COMPILATIONS"),
+                self._get(f"artists/{id}/similar", limit=20), self._get(f"artists/{id}/bio"), return_exceptions=True)
             if isinstance(a, Exception):
                 raise a
-            releases = [x for r in (albums, singles) if isinstance(r, dict) for x in r.get("items", [])]
-            releases.sort(key=lambda x: x.get("releaseDate") or "", reverse=True)
+            items = lambda r: [x for x in r.get("items", []) if isinstance(x, dict)] if isinstance(r, dict) else []  # noqa: E731
+            newest = lambda r: sorted(items(r), key=lambda x: x.get("releaseDate") or "", reverse=True)  # noqa: E731
             c = self._artist(a)
-            return models.page(c["title"], c["subtitle"], c["art"], collections=[self._album(x) for x in releases],
+            radio = models.collection(f"radio:{id}", "list", f"{c['title']} radio", "Endless, from TIDAL", c["art"])
+            return models.page(c["title"], c["subtitle"], c["art"], collections=[self._album(x) for x in newest(albums)],
                                tracks=self._tracks(top.get("items", [])) if isinstance(top, dict) else [],
-                               save=models.saved(self._saved("artist", id)))
+                               save=models.saved(self._saved("artist", id)),
+                               shelves=[models.section("Singles & EPs", [self._album(x) for x in newest(singles)]),
+                                        models.section("Appears on", [self._album(x) for x in newest(appears)]),
+                                        models.section("Radio", [radio]),
+                                        models.section("Similar artists", [self._artist(x) for x in items(similar)])],
+                               about=_bio(bio.get("text") if isinstance(bio, dict) else ""))
+        if kind == "list" and id.startswith("radio:"):
+            artist = id[6:]
+            if not artist.isdigit():
+                raise ServiceError("Unknown radio")
+            data = await self._get(f"artists/{artist}/radio", limit=100)
+            tracks = self._tracks(data.get("items", []))
+            return models.page("Artist radio", "Endless, from TIDAL", tracks[0]["art"] if tracks else None, tracks=tracks)
         if kind == "playlist" and id.startswith("mix:"):
             page = await self._get("pages/mix", mixId=id[4:], deviceType="BROWSER", locale="en_US")
             title, tracks = page.get("title") or "Mix", []
@@ -542,6 +571,8 @@ class TidalLogin(SignIn):
             raise ServiceError(f"TIDAL sign-in failed: {data.get('error_description') or data.get('error') or resp.status}")
         url = data.get("verificationUriComplete") or f"{data.get('verificationUri')}/{data.get('userCode')}"
         self.url = url if url.startswith("http") else f"https://{url}"
+        # on a phone: the same page, the code filled in (the code shown as well, for typing it there)
+        self.qr, self.code = self.url, str(data.get("userCode") or "")
         self.status = "waiting"
         self._task = asyncio.get_event_loop().create_task(
             self._poll(data["deviceCode"], int(data.get("interval") or 2), int(data.get("expiresIn") or 300)))

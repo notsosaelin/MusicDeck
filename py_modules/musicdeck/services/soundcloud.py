@@ -209,13 +209,19 @@ class SoundCloudService(LocalLikes, MusicService):
     # --- browsing ---
 
     async def home(self) -> list[dict[str, Any]]:
-        data = await self._get("/mixed-selections", limit=10)
+        data, trending = await asyncio.gather(self._get("/mixed-selections", limit=10),
+                                              self.open("list", "chart:trending"), return_exceptions=True)
+        if isinstance(data, BaseException):
+            raise data
         sections = []
         for selection in data.get("collection", []):
             items = (selection.get("items") or {}).get("collection", [])
             playlists = [self._playlist(p) for p in items if p.get("kind") in ("playlist", "system-playlist")]
             if playlists:
                 sections.append(models.section(selection.get("title") or "Discover", playlists))
+        # what's played most right now, as songs
+        if isinstance(trending, dict) and trending.get("tracks"):
+            sections.append(models.section("Popular now", [], trending["tracks"][:20]))
         return sections
 
     async def browse(self) -> list[dict[str, Any]]:
@@ -267,20 +273,39 @@ class SoundCloudService(LocalLikes, MusicService):
             c = self._playlist(p)
             return models.page(c["title"], c["subtitle"], c["art"], tracks=self._tracks_of(tracks))
         if kind == "artist":
-            user, top, playlists, albums = await asyncio.gather(
+            if not str(id).isdigit():
+                raise ServiceError("Not found on SoundCloud")
+            user, top, playlists, albums, uploads, related, reposts, likes = await asyncio.gather(
                 self._get(f"/users/{id}"), self._get(f"/users/{id}/toptracks", limit=20),
-                self._get(f"/users/{id}/playlists_without_albums", limit=20), self._get(f"/users/{id}/albums", limit=20))
-            uploads = await self._get(f"/users/{id}/tracks", limit=50)
-            collections = [self._playlist(p) for p in albums.get("collection", []) + playlists.get("collection", [])]
+                self._get(f"/users/{id}/playlists_without_albums", limit=50), self._get(f"/users/{id}/albums", limit=50),
+                self._get(f"/users/{id}/tracks", limit=50), self._get(f"/users/{id}/relatedartists", limit=20),
+                self._get(f"/stream/users/{id}/reposts", limit=30), self._get(f"/users/{id}/likes", limit=30),
+                return_exceptions=True)
+            if isinstance(user, BaseException):
+                raise user
+            got = lambda r: r.get("collection", []) if isinstance(r, dict) else []  # noqa: E731
             # popular first, then the rest of their uploads
             seen = set()
             tracks = []
-            for t in top.get("collection", []) + uploads.get("collection", []):
+            for t in got(top) + got(uploads):
                 if t["id"] not in seen:
                     seen.add(t["id"])
                     tracks.append(t)
-            return models.page(user.get("username", ""), self._user(user)["subtitle"], _art(user.get("avatar_url")),
-                               collections=collections, tracks=self._tracks_of(tracks))
+            name = user.get("username", "")
+            art = _art(user.get("avatar_url"))
+            # what they reposted and liked: tracks (and playlists) in the collection's own wrappers
+            shared = lambda r: [x.get("track") for x in got(r) if isinstance(x, dict) and x.get("track")]  # noqa: E731
+            station = models.collection(f"urn:soundcloud:system-playlists:artist-stations:{id}", "playlist",
+                                        f"{name} station" if name else "Station", "Endless, from SoundCloud", art)
+            return models.page(name, self._user(user)["subtitle"], art,
+                               collections=[self._playlist(p) for p in got(albums)], tracks=self._tracks_of(tracks),
+                               extra=[{"title": "Reposts", "tracks": self._tracks_of(shared(reposts))},
+                                      {"title": "Likes", "tracks": self._tracks_of(shared(likes))}],
+                               shelves=[models.section("Playlists", [self._playlist(p) for p in got(playlists)]),
+                                        models.section("Station", [station]),
+                                        models.section("Similar artists", [self._user(u) for u in got(related)
+                                                                           if isinstance(u, dict) and u.get("id")])],
+                               about=str(user.get("description") or ""))
         raise ServiceError(f"Unknown collection kind: {kind}")
 
     async def search(self, query: str) -> dict[str, Any]:

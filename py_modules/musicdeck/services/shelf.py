@@ -44,6 +44,10 @@ READ_ONLY = ("tag_fields", "edit_tags", "undo_tags", "lookup", "lookup_changes",
 KIND_NAMES = {"mtp": "Phone", "ios": "iPhone", "disc": "Disc", "usb": "USB"}
 #: Recently deleted: its cards' ids ("deleted:<batch>"), and how many deletions it keeps
 DELETED = "deleted:"
+#: the disc drive's card while nothing's in it
+NO_DISC = "disc:none"
+#: what's in a disc drive, shown as the one Disc card rather than as devices
+DISC_KINDS = ("cd", "disc")
 KEEP_DELETED = 50
 #: what an album's folder may be left with and still go with it: artwork, a rip's logs and cue sheet, lyrics
 LEFTOVERS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".cue", ".log", ".nfo", ".txt", ".m3u", ".m3u8",
@@ -99,6 +103,8 @@ class LocalLibrary(LocalService):
     def __init__(self, instance_id: str, config: dict[str, Any], runtime_dir: str):
         super().__init__(instance_id, config, runtime_dir)
         self.devices: Callable[[], list[dict[str, Any]]] = lambda: []
+        # whether there's a disc drive (set by the plugin): an empty one shows as "No disc inserted"
+        self.has_drive: Callable[[], bool] = lambda: False
         self.copying: Optional[asyncio.Task[None]] = None
         self.copy_progress = {"running": False, "done": 0, "total": 0, "to": "", "error": ""}
         self.burning: Optional[asyncio.Task[None]] = None
@@ -150,9 +156,34 @@ class LocalLibrary(LocalService):
             cover = f"{PREFIX}{device['id']}~{instance._art_id(tid, t)}"
         return models.collection(f"{PREFIX}{device['id']}~", "device", device["name"], about, cover)
 
+    def _discs(self) -> list[dict[str, Any]]:
+        """What's in the disc drives: audio CDs and data discs (MP3 CDs)."""
+        return [d for d in self.devices() if d["kind"] in DISC_KINDS]
+
+    def _plugged(self) -> list[dict[str, Any]]:
+        """Everything else plugged in: players, phones, sticks."""
+        return [d for d in self.devices() if d["kind"] not in DISC_KINDS]
+
+    def disc_card(self) -> Optional[dict[str, Any]]:
+        """The disc drive as one card: what's in it (a CD as its album, a data disc as itself), or "No disc
+        inserted" while there's a drive and nothing in it; None without a drive."""
+        discs = self._discs()
+        if discs:
+            card = self._card(discs[0])
+            if discs[0]["kind"] == "disc":
+                card = {**card, "subtitle": card["subtitle"].replace("Disc ·", "Data disc ·", 1)}
+            return card
+        if self.has_drive():
+            return models.collection(NO_DISC, "list", "No disc inserted", "Disc drive")
+        return None
+
     def _devices_section(self, display: str = "shelf") -> list[dict[str, Any]]:
-        devices = self.devices()
-        return [models.section("Devices", [self._card(d) for d in devices], display=display)] if devices else []
+        """The disc drive's card (its own row), then what else is plugged in."""
+        disc, devices = self.disc_card(), self._plugged()
+        sections = [models.section("Disc", [disc], display=display)] if disc else []
+        if devices:
+            sections.append(models.section("Devices", [self._card(d) for d in devices], display=display))
+        return sections
 
     def center_tabs(self) -> list[dict[str, Any]]:
         tabs = super().center_tabs()
@@ -160,12 +191,15 @@ class LocalLibrary(LocalService):
         if deleted:
             tabs = tabs + [{"id": "deleted", "title": "Recently deleted", "group": "files",
                             "subtitle": f"{len(deleted)} in the trash"}]
-        devices = self.devices()
-        if not devices:
+        devices = self._plugged()
+        disc = self.disc_card()
+        if not devices and not disc:
             return tabs
-        art = [c["art"] for c in (self._card(d) for d in devices) if c.get("art")][:4]
-        return tabs + [{"id": "devices", "title": "Devices", "group": "files",
-                        "subtitle": models.count(len(devices), "device"), **({"art": art} if art else {})}]
+        art = [c["art"] for c in ([disc] if disc else []) + [self._card(d) for d in devices] if c.get("art")][:4]
+        about = ", ".join(x for x in (disc["title"] if disc else "", models.count(len(devices), "device")
+                                      if devices else "") if x)
+        return tabs + [{"id": "devices", "title": "Disc and devices" if disc else "Devices", "group": "files",
+                        "subtitle": about, **({"art": art} if art else {})}]
 
     async def home(self) -> list[dict[str, Any]]:
         return self._devices_section() + await super().home()
@@ -178,18 +212,24 @@ class LocalLibrary(LocalService):
             return [models.section("Recently deleted", cards, display="grid")] if cards                 else [models.notice("Nothing deleted lately")]
         if tab_id == "home":
             # first, as on the panel's Home: what was just plugged in is what's to be played
-            return self._devices_section() + [s for s in await super().tab(tab_id) if s["title"] != "Devices"]
+            return self._devices_section() + [s for s in await super().tab(tab_id) if s["title"] not in ("Devices", "Disc")]
         return await super().tab(tab_id)
 
     # --- what's on a device, through Local files ---
 
     async def open(self, kind: str, id: str) -> dict[str, Any]:
+        if kind == "list" and id == NO_DISC:
+            return models.page("No disc inserted", "Disc drive", notice="Put in an audio CD to play or rip it, or a "
+                               "disc of music files. A blank CD burns from an album's or playlist's menu.")
         if kind == "list" and id.startswith(DELETED):
             return self._open_deleted(id[len(DELETED):])
         if not on_device(id):
             return await super().open(kind, id)
         device, inner = self._route(id)
         instance = device["instance"]
+        if kind == "device" and isinstance(instance, AudioCdService):
+            # a CD is its album (desktop opens a device as itself)
+            return mark(await instance.open("album", "disc"), device["id"])
         if kind == "device":
             # the device itself, as a media manager shows one: its songs, artists and playlists, then its
             # albums; how much room is left on it
@@ -279,6 +319,8 @@ class LocalLibrary(LocalService):
         device, inner = self._route(collection_id)
         if not hasattr(device["instance"], "collection_action"):
             raise ServiceError("Not something this device does")
+        if kind == "device" and isinstance(device["instance"], AudioCdService):
+            kind, inner = "album", "disc"  # a CD's page is its album's (open)
         return await device["instance"].collection_action(kind, inner, call)
 
     def status(self) -> dict[str, Any]:

@@ -144,9 +144,47 @@ class PlaylistStore:
             return 0
         fresh = self._fresh(p["tracks"], tracks, source or p["instance_id"])
         p["tracks"].extend(fresh)
+        # a song of the original taken out of a saved copy and put back: no longer kept out
+        if p.get("hidden"):
+            back = {t["id"] for t in fresh if t["source"] == p["instance_id"]}
+            p["hidden"] = [i for i in p["hidden"] if i not in back]
         p["updated"] = time.time()
         self._save()
         return len(fresh)
+
+    def following(self) -> list[dict[str, Any]]:
+        """The playlists saved from a source's playlist or album, which follow it (follow())."""
+        return [p for p in self.playlists if isinstance(p.get("source"), dict)]
+
+    def follow(self, collection_id: str, tracks: list[dict[str, Any]]) -> bool:
+        """A saved copy brought up to date with its original's `tracks` (as the source has them now): the original's
+        songs in its order, less those the user took out ("hidden"), then the songs the user added; "seen" is what the
+        original had, so a song not in it is the user's. Whether its songs changed."""
+        p = self._get(collection_id)
+        if p is None or not isinstance(p.get("source"), dict):
+            return False
+        home = p["instance_id"]
+        mine = [t for t in p["tracks"] if t.get("source") == home]
+        # a copy saved before copies followed: every song of the source's in it was the original's
+        seen = set(p["seen"]) if isinstance(p.get("seen"), list) else {t["id"] for t in mine}
+        hidden = set(p.get("hidden") or [])
+        original = self._fresh([], tracks, home)
+        if not original and p["tracks"]:
+            return False  # an empty answer from a source that had songs: kept as it is (a hiccup, or gone)
+        kept = [t for t in original if t["id"] not in hidden]
+        added = [t for t in p["tracks"] if not (t.get("source") == home and t["id"] in seen)]
+        now = kept + self._fresh(kept, added, home)
+        before = [(t.get("source"), t["id"]) for t in p["tracks"]]
+        ids = [t["id"] for t in original]
+        changed = before != [(t["source"], t["id"]) for t in now]
+        if changed:
+            p["tracks"] = now
+            p["updated"] = time.time()
+        if changed or p.get("seen") != ids:
+            p["seen"] = ids
+            p["hidden"] = [i for i in ids if i in hidden]
+            self._save()
+        return changed
 
     def retarget(self, instance_id: str, ids: dict[str, str]) -> int:
         """A source's songs known by new ids (Local files' files moved: an id is its path's): its playlists follow."""
@@ -167,7 +205,11 @@ class PlaylistStore:
         p = self._get(collection_id)
         if p is None:
             return
-        p["tracks"] = [t for t in p["tracks"] if not (t["id"] == track_id and (not source or t.get("source") == source))]
+        gone = [t for t in p["tracks"] if t["id"] == track_id and (not source or t.get("source") == source)]
+        p["tracks"] = [t for t in p["tracks"] if not any(t is g for g in gone)]
+        # a song of the original a saved copy follows: it stays out when the original's songs are taken in again
+        if isinstance(p.get("source"), dict) and any(g.get("source") == p["instance_id"] for g in gone):
+            p["hidden"] = list(dict.fromkeys([*(p.get("hidden") or []), track_id]))
         p["updated"] = time.time()
         self._save()
 
@@ -298,10 +340,28 @@ class PlaylistStore:
             peer = str(t.get("source", "")).startswith("peer~") and t.get("origin")
             out["origin"] = t["origin"] if peer else origin(t.get("source", ""))
             return out
+        def follows(p: dict[str, Any]) -> dict[str, Any]:
+            # a saved copy: what it follows and what the user changed of it, so another device keeps those changes
+            if not isinstance(p.get("source"), dict):
+                return {"follows": None}
+            return {"follows": {"source": p["source"], "seen": p.get("seen"), "hidden": p.get("hidden") or []}}
         return {"playlists": [{"id": p["id"], "name": p["name"], "created": p.get("created", 0),
                                "updated": p.get("updated", 0), "home": origin(p["instance_id"]),
-                               "tracks": [track(t) for t in p["tracks"]]} for p in self.playlists],
+                               "tracks": [track(t) for t in p["tracks"]], **follows(p)} for p in self.playlists],
                 "deleted": dict(self.deleted)}
+
+    @staticmethod
+    def _follows(f: Any, home: str) -> dict[str, Any]:
+        """A paired device's "follows" (shared()) as this one keeps it: what a saved copy follows and the user's changes
+        to it, when it's of a source here (its ids are the service's own on both); else nothing to change. A device that
+        doesn't know a copy's original (one saved before devices told each other) never makes this one forget it."""
+        ids = lambda v: [i for i in v if isinstance(i, str)][:20000] if isinstance(v, list) else None
+        source = f.get("source") if isinstance(f, dict) else None
+        if not (isinstance(source, dict) and isinstance(source.get("kind"), str) and isinstance(source.get("id"), str)
+                and home and not home.startswith("peer~")):
+            return {}
+        return {"source": {"kind": source["kind"], "id": source["id"]}, "seen": ids(f.get("seen")),
+                "hidden": ids(f.get("hidden")) or []}
 
     def take(self, theirs: Any, here: Callable[[dict[str, str]], str]) -> bool:
         """A paired device's playlists (as shared() gives them) into these: each one newer there replaces this one's
@@ -342,6 +402,7 @@ class PlaylistStore:
                 p = {"id": r["id"], "created": r.get("created") or updated, "source": None, "offline": False}
                 self.playlists.append(p)
             p.update({"name": r["name"][:200] or "Playlist", "tracks": fresh, "updated": updated, "instance_id": home})
+            p.update(self._follows(r.get("follows"), home))
             changed = True
         if changed:
             self._save()

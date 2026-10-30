@@ -77,12 +77,17 @@ def page(title: str, subtitle: str = "", art: Optional[str] = None,
          tracks: Optional[list[dict[str, Any]]] = None,
          extra: Optional[list[dict[str, Any]]] = None, tracks_first: bool = False,
          action: Optional[dict[str, str]] = None, notice: Optional[str] = None,
-         save: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    # tracks_first: show songs/videos above albums/artists/playlists (search results)
+         save: Optional[dict[str, Any]] = None, shelves: Optional[list[dict[str, Any]]] = None,
+         about: str = "") -> dict[str, Any]:
+    """tracks_first: show songs/videos above albums/artists/playlists (search results). shelves: more rows of
+    collections after the rest, each titled (section(): an artist's Singles & EPs, Similar artists...); about: a
+    few paragraphs on it (an artist's biography), newlines between them."""
     return {"title": title, "subtitle": subtitle, "art": art,
             "collections": collections or [], "tracks": tracks or [],
             "extra": [e for e in extra or [] if e["tracks"]], "tracks_first": tracks_first,
-            "action": action, "notice": notice, "save": save}
+            "action": action, "notice": notice, "save": save,
+            "shelves": [{"title": s["title"], "items": s["items"]} for s in shelves or [] if s["items"]],
+            "about": about.strip()}
 
 
 def saved(on: Optional[bool], style: str = "library") -> Optional[dict[str, Any]]:

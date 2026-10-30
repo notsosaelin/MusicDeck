@@ -3,6 +3,45 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## 0.42.0
+
+- **Home, one source at a time** (media center): what you played lately, then each source in turn, a row of its
+  albums or playlists (the rows take turns) and then a list of its songs: SoundCloud's popular songs, Qobuz's My
+  Weekly Q, YouTube Music's quick picks, Bandcamp Radio's shows. Your playlists live in Browse.
+- **Browse → Your library is your music**, not four tiles: a row each of your playlists, albums and artists, then
+  your songs, each ending in Show all. Every card from a mix of sources carries its source's logo in its corner, so
+  the same album saved from three services is three cards you can tell apart.
+- **Much more of each source**:
+  - **Qobuz**: My Weekly Q; Qobuz's Discover on Home (new releases, album of the week, Qobuzissimes, press awards,
+    ideal discography); playlists by theme; Start radio from a song, an album or an artist; artist pages as Qobuz's
+    app has them (popular songs, albums, singles and EPs, live, compilations, appears on, similar artists, their
+    biography); albums with their label, "More like this" and Qobuz's notes; Load more in search.
+  - **YouTube Music**: an artist's whole discography (not just the first ten), their radio, related artists and
+    about them; albums with their radio and "More like this".
+  - **SoundCloud**: an artist's reposts, likes, playlists, station and similar artists; what's popular now.
+  - **Bandcamp**: Bandcamp Radio, every show playing as one long mix with the song it's on shown as it goes;
+    albums' tags, "you may also like" and credits; artists' bio.
+  - **TIDAL**: artists' singles, appearances, similar artists, biography and radio. **Navidrome, Jellyfin, Emby**:
+    biographies, album notes and similar artists; Jellyfin and Emby albums "More like this". **Podcasts and the Live
+    Music Archive**: a show's or band's description and a concert's notes.
+  - Pages have room for all of it: titled rows (Singles & EPs, Similar artists...) and an About that reads a
+    screenful at a time with the controller; an artist's popular songs show ten, the rest a press away.
+- **Sign in with your phone**: Spotify, Qobuz, TIDAL and Plex show a QR code beside their usual sign-in. Scan it,
+  sign in or approve on your phone, and the source is added. (Qobuz's needs the phone on the same Wi-Fi.)
+- **Saved playlists keep up with the original**: a playlist saved from SoundCloud, YouTube or any source takes in
+  the songs added to it there and lets go of those taken out, when you open it and every few hours (downloaded
+  ones download the new songs). What you added or removed yourself stays that way, on all your devices.
+- **One Disc entry**: what's in the disc drive is its own entry, apart from your devices: "No disc inserted", an
+  audio CD (named, with its cover) or a data disc, in the media center, desktop Steam's sidebar and Settings. A CD's
+  page has Eject disc beside Play, Shuffle and Rip, and says "Audio CD". Ejecting takes its songs out of the queue
+  and closes its page (they were skipped one by one before).
+- **Fixes**: desktop Steam's page of a CD showed "Not on this CD" and its Rip did nothing (page buttons that fail
+  now say why); Browse's source dots no longer shift as you move along them, and stay centred under the tabs, with
+  room between them and a page opened under them; Search and Settings use the whole width of a large screen, the
+  equalizer's heading and choices look like the rest of Settings; on Windows, ejecting a USB player could freeze
+  MusicDeck (a folder watch that couldn't be stopped).
+- A little surprise in the media center's Now Playing, for touchscreens.
+
 ## 0.41.8
 
 - **Browse rows scroll again in the media center:** the source pages fit the screen instead of expanding to the

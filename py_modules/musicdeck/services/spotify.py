@@ -39,6 +39,8 @@ REPLY_LIMIT = 64 * 1024 * 1024
 API = "https://api.spotify.com/v1"
 AUTHORIZE = "https://accounts.spotify.com/authorize"
 TOKEN = "https://accounts.spotify.com/api/token"
+# Spotify's device flow (as its TV apps sign in): a code approved at spotify.com/pair
+DEVICE_AUTHORIZE = "https://accounts.spotify.com/oauth2/device/authorize"
 
 # Identities and redirect ports exactly as Spotifast registers them (the redirect must match)
 PLAYBACK_CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
@@ -66,7 +68,12 @@ SPOTIFY_ID = re.compile(r"^[A-Za-z0-9]{1,64}$")
 
 
 def web_client(config: dict[str, Any]) -> str:
-    return (config.get("client_id") or "").strip() or WEB_CLIENT_ID
+    """The app the Web API is asked as: the user's own, else the one it was signed in with on a phone (playback's: a
+    phone signs in with one consent, see SpotifyPhoneLogin), else the shared one."""
+    own = (config.get("client_id") or "").strip()
+    if own:
+        return own
+    return PLAYBACK_CLIENT_ID if config.get("signed_with") == PLAYBACK_CLIENT_ID else WEB_CLIENT_ID
 
 
 class _Gate:
@@ -258,6 +265,8 @@ class SpotifyService(MusicService):
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
+        if options.get("phone"):
+            return SpotifyPhoneLogin(runtime_dir)
         return SpotifyLogin(runtime_dir, options.get("client_id") or "")
 
     @classmethod
@@ -774,6 +783,34 @@ class SpotifyService(MusicService):
         return StreamSource(url=art_id)
 
 
+async def _signed_in(runtime_dir: str, helper: "SpotifyHelper", scratch: str, account: dict[str, Any],
+                     webgrant: dict[str, Any], client_id: str) -> dict[str, Any]:
+    """The end of a sign-in, however it was made: the account's name (from the Web API, else the session), Premium
+    checked, and the session's credentials moved from `scratch` to the account's folder. The source's config."""
+    me: dict[str, Any] = {}
+    async with _session() as http:
+        async with http.get(f"{API}/me", headers={"Authorization": f"Bearer {webgrant['access_token']}"}) as resp:
+            me = await resp.json(content_type=None) if resp.status == 200 else {}
+    if not me.get("display_name"):
+        # the Web API can be rate-limited right at sign-in; the session has the name too
+        try:
+            me["display_name"] = (await helper.call("profile")).get("display_name")
+        except ServiceError:
+            pass
+    if me.get("product") and me["product"] != "premium":
+        raise ServiceError("Spotify playback needs a Premium account")
+    result = {"refresh_token": webgrant.get("refresh_token", ""), "username": account.get("username", ""),
+              "display_name": me.get("display_name") or account.get("username", ""),
+              "product": me.get("product", ""), "signed_with": client_id,
+              "client_id": "" if client_id in (WEB_CLIENT_ID, PLAYBACK_CLIENT_ID) else client_id}
+    await helper.stop()
+    target = account_dir(runtime_dir, result["username"])
+    shutil.rmtree(target, ignore_errors=True)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    shutil.move(scratch, target)
+    return result
+
+
 class SpotifyLogin(SignIn):
     """Both Spotify sign-ins in one go: playback first, then the Web API.
 
@@ -864,26 +901,7 @@ class SpotifyLogin(SignIn):
             account = await helper.call("login_token", token=playback["access_token"], timeout=60)
             self.step = "web"
             webgrant = await self._authorize(self.client_id, WEB_PORT, WEB_SCOPES, dialog=False)
-            async with _session() as http:
-                async with http.get(f"{API}/me", headers={"Authorization": f"Bearer {webgrant['access_token']}"}) as resp:
-                    me = await resp.json(content_type=None) if resp.status == 200 else {}
-            if not me.get("display_name"):
-                # the Web API can be rate-limited right at sign-in; the session has the name too
-                try:
-                    me["display_name"] = (await helper.call("profile")).get("display_name")
-                except ServiceError:
-                    pass
-            if me.get("product") and me["product"] != "premium":
-                raise ServiceError("Spotify playback needs a Premium account")
-            self.result = {"refresh_token": webgrant.get("refresh_token", ""), "username": account.get("username", ""),
-                           "display_name": me.get("display_name") or account.get("username", ""),
-                           "product": me.get("product", ""), "signed_with": self.client_id,
-                           "client_id": "" if self.client_id == WEB_CLIENT_ID else self.client_id}
-            await helper.stop()
-            target = account_dir(self.runtime_dir, self.result["username"])
-            shutil.rmtree(target, ignore_errors=True)
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            shutil.move(scratch, target)
+            self.result = await _signed_in(self.runtime_dir, helper, scratch, account, webgrant, self.client_id)
             self.step = "done"
             debuglog.debug("spotify", "signed in", user=self.result["username"])
         except asyncio.TimeoutError:
@@ -909,3 +927,73 @@ class SpotifyLogin(SignIn):
         if self._task:
             self._task.cancel()
         await self._close_listener()
+
+
+class SpotifyPhoneLogin(SignIn):
+    """Signing in on a phone, as Spotify's TV apps do (OAuth's device flow): a code, and spotify.com/pair with it
+    filled in (`qr`), approved on the phone; one consent for playback and the library at once, as only playback's
+    app may sign in this way (the Web API is then asked as it, see web_client). Polled until approved."""
+
+    def __init__(self, runtime_dir: str):
+        super().__init__()
+        self.runtime_dir = runtime_dir
+        self._task: Optional[asyncio.Task] = None
+
+    async def start(self) -> None:
+        scopes = " ".join(sorted(set(PLAYBACK_SCOPES + WEB_SCOPES)))
+        async with _session() as http:
+            try:
+                async with http.post(DEVICE_AUTHORIZE, data={"client_id": PLAYBACK_CLIENT_ID, "scope": scopes}) as resp:
+                    data = await resp.json(content_type=None)
+            except aiohttp.ClientError as e:
+                raise ServiceError(f"Could not reach Spotify: {e}") from e
+        if not isinstance(data, dict) or "device_code" not in data:
+            why = (data or {}).get("error_description") or (data or {}).get("error") if isinstance(data, dict) else data
+            raise ServiceError(f"Spotify sign-in failed: {why}")
+        self.code = str(data.get("user_code") or "")
+        self.qr = self.url = str(data.get("verification_uri_complete") or f"https://spotify.com/pair?code={self.code}")
+        self.status = "waiting"
+        self._task = asyncio.get_event_loop().create_task(
+            self._run(data["device_code"], int(data.get("interval") or 5), int(data.get("expires_in") or 600)))
+
+    async def _run(self, device_code: str, interval: int, expires_in: int) -> None:
+        scratch = os.path.join(self.runtime_dir, "spotify", f"sign-in-{self.id}")
+        helper = SpotifyHelper(self.runtime_dir, scratch)
+        try:
+            deadline = time.time() + min(expires_in, LOGIN_TIMEOUT)
+            grant: dict[str, Any] = {}
+            async with _session() as http:
+                while not grant:
+                    if time.time() > deadline:
+                        raise ServiceError("The code expired; start again")
+                    await asyncio.sleep(interval)
+                    async with http.post(TOKEN, data={"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                                                      "device_code": device_code, "client_id": PLAYBACK_CLIENT_ID}) as resp:
+                        data = await resp.json(content_type=None)
+                    error = data.get("error") if isinstance(data, dict) else "invalid_response"
+                    if not error and "access_token" in data:
+                        grant = data
+                    elif error == "slow_down":
+                        interval += 5
+                    elif error in ("expired_token", "access_denied"):
+                        raise ServiceError("The code expired; start again" if error == "expired_token"
+                                           else "Sign-in was declined on Spotify")
+                    elif error != "authorization_pending":
+                        raise ServiceError(f"Spotify sign-in failed: {data.get('error_description') or error}")
+            account = await helper.call("login_token", token=grant["access_token"], timeout=60)
+            self.result = await _signed_in(self.runtime_dir, helper, scratch, account, grant, PLAYBACK_CLIENT_ID)
+            self.status = "done"
+            debuglog.debug("spotify", "signed in on a phone", user=self.result["username"])
+        except asyncio.CancelledError:
+            self.status, self.error = "error", "Sign-in cancelled"
+        except ServiceError as e:
+            self.status, self.error = "error", str(e)
+        except Exception as e:
+            self.status, self.error = "error", f"Sign-in failed: {e}"
+        finally:
+            await helper.stop()
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    async def close(self) -> None:
+        if self._task:
+            self._task.cancel()

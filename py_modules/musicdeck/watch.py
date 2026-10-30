@@ -17,6 +17,7 @@ import os
 import struct
 import threading
 import time
+from ctypes import wintypes
 from typing import Callable, Optional
 
 from . import tagging, winio
@@ -43,6 +44,11 @@ FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 #: file and folder names, sizes and writes: what copying music in changes
 NOTIFY_FILTER = 0x1 | 0x2 | 0x8 | 0x10
 WIN_BUFFER = 64 * 1024
+FILE_FLAG_OVERLAPPED = 0x40000000
+WAIT_OBJECT_0 = 0
+INFINITE = 0xFFFFFFFF
+#: the longest stop() waits for a root's thread to end (it ends as soon as it's told)
+STOP_WAIT = 2.0
 #: Linux: the most folders watched, and the longest the first walk of them may take
 MAX_WATCHED = 10_000
 WALK_SECONDS = 2.0
@@ -69,6 +75,35 @@ def relevant(path: str) -> bool:
     return not parts[-1].lower().endswith(IGNORED_SUFFIXES)
 
 
+class _Overlapped(ctypes.Structure):
+    _fields_ = [("Internal", ctypes.c_void_p), ("InternalHigh", ctypes.c_void_p), ("Offset", wintypes.DWORD),
+                ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
+
+
+_k32_typed = None
+
+
+def _k32():
+    """kernel32 with the types of what the watcher calls (handles are pointer-sized: left untyped, ctypes cuts them to
+    an int's 32 bits)."""
+    global _k32_typed
+    if _k32_typed is None:
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        H, P, BOOL, DWORD = wintypes.HANDLE, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD
+        k.CreateFileW.restype = H
+        k.CreateFileW.argtypes = [wintypes.LPCWSTR, DWORD, DWORD, P, DWORD, DWORD, H]
+        k.CreateEventW.restype = H
+        k.CreateEventW.argtypes = [P, BOOL, BOOL, wintypes.LPCWSTR]
+        k.SetEvent.argtypes = k.ResetEvent.argtypes = k.CloseHandle.argtypes = [H]
+        k.ReadDirectoryChangesW.argtypes = [H, P, DWORD, BOOL, DWORD, P, P, P]
+        k.WaitForMultipleObjects.restype = DWORD
+        k.WaitForMultipleObjects.argtypes = [DWORD, P, BOOL, DWORD]
+        k.CancelIoEx.argtypes = [H, P]
+        k.GetOverlappedResult.argtypes = [H, P, P, BOOL]
+        _k32_typed = k
+    return _k32_typed
+
+
 def _libc() -> Optional[ctypes.CDLL]:
     name = ctypes.util.find_library("c")
     try:
@@ -89,8 +124,8 @@ class FolderWatcher:
         self.timer: Optional[asyncio.TimerHandle] = None
         self.libc = None if winio.WINDOWS else _libc()
         self.available = False
-        # Windows: a handle on each root being watched, and the loop to tell
-        self.handles: list[int] = []
+        # Windows: each root's reading thread and the event that stops it, and the loop to tell
+        self.handles: list[tuple[threading.Thread, int]] = []
         self.loop: Optional[asyncio.AbstractEventLoop] = None
 
     def start(self) -> None:
@@ -112,38 +147,66 @@ class FolderWatcher:
 
     def _start_windows(self) -> None:
         self.loop = asyncio.get_running_loop()
-        k32 = winio.kernel32
+        k32 = _k32()
         for root in self.roots:
             handle = k32.CreateFileW(root, FILE_LIST_DIRECTORY, FILE_SHARE_ALL, None, winio.OPEN_EXISTING,
-                                     FILE_FLAG_BACKUP_SEMANTICS, None)
+                                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, None)
             if handle in (None, winio.INVALID_HANDLE):
                 continue
-            self.handles.append(handle)
-            threading.Thread(target=self._read_windows, args=(handle,), daemon=True, name="musicdeck-watch").start()
+            stop = k32.CreateEventW(None, True, False, None)
+            if not stop:
+                k32.CloseHandle(handle)
+                continue
+            thread = threading.Thread(target=self._read_windows, args=(handle, stop), daemon=True,
+                                      name="musicdeck-watch")
+            self.handles.append((thread, stop))
+            thread.start()
         self.available = bool(self.handles)
 
-    def _read_windows(self, handle: int) -> None:
-        """Waits for changes under one root (in its own thread) until stop() cancels the wait."""
-        k32 = winio.kernel32
+    def _read_windows(self, handle: int, stop: int) -> None:
+        """Waits for changes under one root (in its own thread) until stop() sets `stop`; closes the root's handle as
+        it goes. Overlapped, so the wait ends whenever stop() is called: a cancel of a synchronous read can miss one
+        not begun yet, and closing the handle under it then waits for that read forever (the event loop with it)."""
+        k32 = _k32()
         buf = ctypes.create_string_buffer(WIN_BUFFER)
-        got = ctypes.c_ulong(0)
-        while True:
-            ok = k32.ReadDirectoryChangesW(ctypes.c_void_p(handle), buf, WIN_BUFFER, True, NOTIFY_FILTER,
-                                           ctypes.byref(got), None, None)
-            if not ok:
-                return  # stopped (its handle cancelled or closed), or the folder went away
-            # nothing came back: more changed than the buffer holds, which is a change too
-            changes = parse_notify(buf.raw[:got.value]) if got.value else [(0, "?")]
-            if any(relevant(path) for _, path in changes) and self.loop and not self.loop.is_closed():
-                self.loop.call_soon_threadsafe(self._settle)
+        got = wintypes.DWORD(0)
+        done = k32.CreateEventW(None, True, False, None)
+        overlapped = _Overlapped()
+        overlapped.hEvent = done
+        # stop first: when both are set, the lower one is said, and changes pouring in mustn't keep it from stopping
+        waits = (wintypes.HANDLE * 2)(stop, done)
+        try:
+            while done:
+                k32.ResetEvent(done)
+                if not k32.ReadDirectoryChangesW(handle, buf, WIN_BUFFER, True, NOTIFY_FILTER, None,
+                                                 ctypes.byref(overlapped), None):
+                    return  # the folder went away
+                if k32.WaitForMultipleObjects(2, waits, False, INFINITE) != WAIT_OBJECT_0 + 1:
+                    k32.CancelIoEx(handle, ctypes.byref(overlapped))
+                    k32.GetOverlappedResult(handle, ctypes.byref(overlapped), ctypes.byref(got), True)
+                    return  # stopped
+                if not k32.GetOverlappedResult(handle, ctypes.byref(overlapped), ctypes.byref(got), False):
+                    return
+                # nothing came back: more changed than the buffer holds, which is a change too
+                changes = parse_notify(buf.raw[:got.value]) if got.value else [(0, "?")]
+                if any(relevant(path) for _, path in changes) and self.loop and not self.loop.is_closed():
+                    self.loop.call_soon_threadsafe(self._settle)
+        finally:
+            if done:
+                k32.CloseHandle(done)
+            k32.CloseHandle(handle)
 
     def stop(self) -> None:
         if self.timer:
             self.timer.cancel()
             self.timer = None
-        for handle in self.handles:
-            winio.kernel32.CancelIoEx(ctypes.c_void_p(handle), None)
-            winio.kernel32.CloseHandle(handle)
+        for _, stop in self.handles:
+            _k32().SetEvent(stop)
+        for thread, stop in self.handles:
+            # each closes its folder's handle as it ends, at once (a device being ejected needs them closed)
+            thread.join(STOP_WAIT)
+            if not thread.is_alive():
+                _k32().CloseHandle(stop)
         self.handles.clear()
         if self.fd >= 0:
             try:

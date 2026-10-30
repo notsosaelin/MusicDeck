@@ -20,6 +20,7 @@ from typing import Any, Optional
 import aiohttp
 
 from .. import debuglog, models
+from ..feeds import notes_text
 from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource, as_rows
 from ..version import VERSION
@@ -30,6 +31,8 @@ TICKS = 10_000_000  # Jellyfin times are in 100 ns ticks
 CONTAINERS = "opus,webm,mp3,aac,m4a,m4b,flac,webma,wav,ogg"
 QUICK_CONNECT_TIMEOUT = 10 * 60
 LIST_LIMIT = 500
+#: how many of what the server finds alike an album or artist shows
+SIMILAR_LIMIT = 12
 
 
 def _session() -> aiohttp.ClientSession:
@@ -152,6 +155,11 @@ class JellyfinService(MusicService):
     async def _item(self, id: str) -> dict[str, Any]:
         """One item (album, artist, playlist) as the signed-in user sees it."""
         return await self._get(f"/Items/{id}", userId=self.config.get("user_id"))
+
+    async def _similar(self, id: str) -> list[dict[str, Any]]:
+        """What the server finds like an album or artist (by genre and the like), from its own library."""
+        data = await self._get(f"/Items/{id}/Similar", userId=self.config.get("user_id"), Limit=SIMILAR_LIMIT)
+        return [x for x in (data or {}).get("Items", []) if isinstance(x, dict) and x.get("Id")]
 
     async def test(self) -> str:
         info = await self._get("/System/Info")
@@ -295,22 +303,40 @@ class JellyfinService(MusicService):
                                    collections=[self._album(a) for a in albums])
             raise ServiceError(f"Unknown list: {id}")
         if kind == "album":
-            album = await self._item(id)
-            tracks = await self._items(ParentId=id, IncludeItemTypes="Audio", SortBy="ParentIndexNumber,IndexNumber")
+            album, tracks, similar = await asyncio.gather(
+                self._item(id),
+                self._items(ParentId=id, IncludeItemTypes="Audio", SortBy="ParentIndexNumber,IndexNumber"),
+                self._similar(id), return_exceptions=True)
+            for got in (album, tracks):
+                if isinstance(got, BaseException):
+                    raise got
             c = self._album(album)
+            artists = [models.collection(str(a["Id"]), "artist", a.get("Name", ""), "Artist")
+                       for a in album.get("AlbumArtists") or [] if isinstance(a, dict) and a.get("Id")]
             return models.page(c["title"], c["subtitle"], c["art"], tracks=[self._track(t) for t in tracks],
-                               save=self._favourite(album))
+                               save=self._favourite(album),
+                               shelves=[models.section("Explore", artists),
+                                        models.section("More like this", [self._album(a) for a in similar]
+                                                       if isinstance(similar, list) else [])],
+                               about=notes_text(album.get("Overview") or ""))
         if kind == "artist":
-            artist, albums, top = await asyncio.gather(
+            artist, albums, top, similar = await asyncio.gather(
                 self._item(id),
                 self._items(ArtistIds=id, IncludeItemTypes="MusicAlbum", SortBy="ProductionYear,SortName",
                             SortOrder="Descending"),
                 self._items(ArtistIds=id, IncludeItemTypes="Audio", SortBy="PlayCount,SortName",
-                            SortOrder="Descending", Limit=10))
+                            SortOrder="Descending", Limit=10),
+                self._similar(id), return_exceptions=True)
+            for got in (artist, albums, top):
+                if isinstance(got, BaseException):
+                    raise got
             c = self._artist(artist)
             return models.page(c["title"], models.count(len(albums), "album"), c["art"],
                                collections=[self._album(a) for a in albums], tracks=[self._track(t) for t in top],
-                               save=self._favourite(artist))
+                               save=self._favourite(artist),
+                               shelves=[models.section("Similar artists", [self._artist(a) for a in similar]
+                                                       if isinstance(similar, list) else [])],
+                               about=notes_text(artist.get("Overview") or ""))
         if kind == "playlist":
             playlist = await self._item(id)
             data = await self._get(f"/Playlists/{id}/Items", userId=self.config.get("user_id"))

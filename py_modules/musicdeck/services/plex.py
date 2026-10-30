@@ -153,7 +153,9 @@ class PlexService(MusicService):
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> Optional[SignIn]:
-        return PlexLink(options.get("client_id") or "", browser=bool(options.get("browser")))
+        # on a phone: Plex's own page, as in the browser (a link with the long code in it, for a QR code)
+        phone = bool(options.get("phone"))
+        return PlexLink(options.get("client_id") or "", browser=bool(options.get("browser")) or phone, phone=phone)
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],
@@ -575,10 +577,11 @@ class PlexLink(SignIn):
     opened in Steam's browser. The token belongs to the client id it was asked for, so that is kept
     with it."""
 
-    def __init__(self, client_id: str, browser: bool = False):
+    def __init__(self, client_id: str, browser: bool = False, phone: bool = False):
         super().__init__()
         self.client_id = client_id or pysecrets.token_hex(12)
         self.browser = browser
+        self.phone = phone
         self._pin = 0
         self._task: Optional[asyncio.Task] = None
 
@@ -591,6 +594,8 @@ class PlexLink(SignIn):
         if self.browser:
             self.url = APPROVE_PAGE + urlencode({"clientID": self.client_id, "code": pin["code"],
                                                  "context[device][product]": PRODUCT}, quote_via=quote)
+            if self.phone:
+                self.qr = self.url
         else:
             self.code = pin["code"]
         self.status = "waiting"

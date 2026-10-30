@@ -131,7 +131,9 @@ source (`MusicService.remove`).
 ## Plugged-in devices and CDs, in Local files (`shelf.py`, `device.py`, `audiocd.py`, `devices.py`, `cd.py`)
 
 - **Where they show**: in Local files (`LocalLibrary`, `shelf.py`), not as sources of their own: a Devices
-  tab (group "files") and a Devices row first on Home, while anything is plugged in. Each device keeps its
+  tab (group "files") and a Devices row first on Home, while anything is plugged in. What's in a disc drive is a
+  Disc row of its own, one card: the CD as its album, a data disc as itself, or "No disc inserted" while a drive
+  is there and empty (`disc_card`; the state's `disc`). Each device keeps its
   own index, started by the plugin (`Plugin.device_instances`, not saved): a `DeviceService` (Local files'
   scanner on its folders, read only) or an `AudioCdService`. Local files speaks for them: everything of a
   device's goes out with ids, album and artist ids and art ids prefixed `dv~<device id>~` (`shelf.mark`),
@@ -386,6 +388,9 @@ source (`MusicService.remove`).
   and some label releases (`policy` MONETIZE, ad-supported) that SoundCloud only serves as
   `cbc-`/`ctr-encrypted-hls`. Those need Widevine, which Steam's browser engine lacks; a paid
   account doesn't change that.
+- **Artists**: their popular and other uploads, albums, playlists, reposts (`/stream/users/<id>/reposts`), likes,
+  related artists (`/users/<id>/relatedartists`), bio, and their station (the system playlist
+  `soundcloud:system-playlists:artist-stations:<id>`). Home adds what's trending (`/charts`) as its song list.
 - **Breaks when**: SoundCloud changes how its bundle embeds the client id (update the regex).
 
 ## YouTube Music (`youtube.py`, `ytdlp_worker.py`, `ytdlp_update.py`)
@@ -402,6 +407,9 @@ source (`MusicService.remove`).
   Music calls are limited to the methods the plugin uses (`MUSIC_METHODS`).
 - **Updates**: YouTube changes often, so yt-dlp updates itself from PyPI (`ytdlp_update.py`): wheel
   checksums verified, the new copy must start, else MusicDeck rolls back.
+- **Artists and albums**: an artist's whole discography (`get_artist_albums`, from the browse id and params of
+  `get_artist`'s albums and singles), related artists, description and radio (`radioId`, opened as a watch
+  playlist); an album's description, its radio (`audioPlaylistId`) and `related_recommendations`.
 - **Breaks when**: YouTube changes faster than yt-dlp; the update usually fixes it.
 
 ## Bandcamp (`bandcamp.py`)
@@ -412,6 +420,10 @@ source (`MusicService.remove`).
 - **Audio**: the 128 kbps MP3 every visitor can stream; tracks an artist reserves for buyers are
   left out. Links are signed, so pages are cached for 15 minutes only.
 - Ids are URLs (album URL, track URL, artist root URL).
+- **Album pages** also give their tags (each opens that tag's best-sellers, as a genre does) and "you may also
+  like" (`TAG_LINK`, `RECOMMENDED`, kept with the page's data, not the page); artists' bio (`BIO`).
+- **Bandcamp Radio**: `bcweekly/3/list` (the shows) and `bcweekly/3/get` (one show: a single `mp3-128` stream of
+  the whole mix, and its tracks with their `timecode`s, served as synced lyrics so Now Playing follows the show).
 - **Breaks when**: Bandcamp changes its page markup (`TRALBUM`, `DISCOGRAPHY_ITEM` regexes).
 
 ## Internet radio (`radio.py`)
@@ -497,6 +509,15 @@ source (`MusicService.remove`).
   `artist_ids`), others' playlists subscribed with `playlist/subscribe`/`unsubscribe`. Whether a page's
   is in the library comes from the first 500 favourite albums and artists and playlists, asked once
   every five minutes; the user's own playlists get no button.
+- **Sign-in on a phone**: the same OAuth page as a QR code, its `redirect_url` this device's home-network
+  address at a path of random characters, listened on (all interfaces) only while the sign-in waits.
+- **Discover and pages**: Home from `discover/index` (new releases, album of the week, Qobuzissimes, most
+  streamed, press awards, ideal discography, Qobuz's playlists) and My Weekly Q (`dynamic-tracks/get`
+  type weekly); playlists by theme (`playlist/getTags`, `discover/playlists?tags=`); radio from a track,
+  an album or an artist (`radio/track`, `radio/album`, `radio/artist`); artists from `artist/page` (top tracks,
+  releases by type, with `artist/getReleasesList` for a type it has more of, playlists, appears on, biography)
+  and `artist/getSimilarArtists`; albums' `album/suggest` and label (`label/get`); `track/search` for Load more.
+  The newer endpoints answer in another shape ("artists", "dates", names as `{"display"}`): the mapping reads both.
 - **Breaks when**: Qobuz changes its bundle layout (update the regexes).
 
 ## TIDAL (`tidal.py`)
@@ -514,6 +535,10 @@ source (`MusicService.remove`).
   `/playlists`, the user's own playlists aside), track radio, lyrics
   (synced LRC when available), home page modules (playlists, albums, mixes, tracks), playlist
   editing (with TIDAL's required `If-None-Match` ETag).
+- **Artists**: albums, singles and EPs (`filter=EPSANDSINGLES`), appearances (`COMPILATIONS`), similar artists,
+  biography (`[wimpLink]` markup removed) and artist radio (`artists/<id>/radio`); each left out if TIDAL
+  doesn't answer it. Not yet tried with an account.
+- **Sign-in on a phone**: the device login's own link (with the code filled in) as a QR code.
 - Catalogue calls were tested with an app-only token; sign-in, playback, favourites and lyrics need
   a TIDAL subscription and were not yet tested end to end.
 
@@ -567,6 +592,10 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
      in `spotify/accounts/<username>/` (the sign-in runs in a scratch folder that becomes it).
   2. *Web API*: the public app shared by spotify-player and ncspot, or the user's own developer app
      (Client ID field), for library, search and changes. Only its refresh token is stored.
+- **Sign-in on a phone** (`SpotifyPhoneLogin`): Spotify's device flow, as its TV apps sign in
+  (`accounts.spotify.com/oauth2/device/authorize`, approved at `spotify.com/pair`, shown as a QR code). Spotify only
+  allows it for the playback identity, so that one consent has the library's scopes too, and the Web API is then
+  asked as it (`signed_with` is it; `web_client`).
 - **Helper** (`bin/<platform>/spotify-helper`, Rust; static musl builds for Linux, a Windows .exe): JSON-lines control on stdin/stdout;
   `GET /track/<id>` serves the decrypted original Ogg Vorbis file with byte ranges, `/info/<id>`
   returns Spotify's loudness values from the file header.

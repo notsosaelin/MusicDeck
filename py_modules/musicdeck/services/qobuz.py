@@ -15,9 +15,11 @@ import asyncio
 import base64
 import socket
 import hashlib
+import ipaddress
 import json
 import os
 import re
+import secrets
 import time
 from collections import OrderedDict
 from typing import Any, Optional
@@ -26,6 +28,8 @@ import aiohttp
 from aiohttp import web
 
 from .. import debuglog, models
+from ..cast import netif
+from ..feeds import notes_text
 from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource, as_rows
 
@@ -56,6 +60,16 @@ DISCOVER_FEATURED = [("press-awards", "Press awards"), ("best-sellers", "Best se
                      ("ideal-discography", "Ideal discography"), ("most-featured", "Most featured")]
 FEATURED = [("new-releases-full", "New releases"), ("qobuzissims", "Qobuzissimes"),
             ("editor-picks", "Editor's picks"), ("most-streamed", "Most streamed")]
+#: Qobuz's Discover page (discover/index), its containers in its own order, as Home's rows
+DISCOVER_ROWS = [("new_releases", "New releases"), ("album_of_the_week", "Album of the week"),
+                 ("playlists", "Playlists by Qobuz"), ("qobuzissims", "Qobuzissimes"),
+                 ("most_streamed", "Most streamed"), ("press_awards", "Press awards"),
+                 ("ideal_discography", "Ideal discography"), ("recent_releases", "Recent releases")]
+#: an artist's releases (artist/page), by type, as its page's rows; "album" is the page's own Albums
+RELEASE_ROWS = [("epSingle", "Singles & EPs"), ("live", "Live"), ("compilation", "Compilations"),
+                ("other", "Other releases"), ("download", "More releases")]
+#: what one artist row holds when Qobuz says there's more: the whole of it, asked for by type
+RELEASES_LIMIT = 100
 
 
 def _session() -> aiohttp.ClientSession:
@@ -110,7 +124,7 @@ class QobuzService(MusicService):
 
     type = "qobuz"
     display_name = "Qobuz"
-    features = frozenset({"star", "playlists", "scrobble", "browse"})
+    features = frozenset({"star", "playlists", "scrobble", "browse", "radio", "more"})
 
     @classmethod
     def account(cls, config: dict[str, Any]) -> Optional[str]:
@@ -170,7 +184,7 @@ class QobuzService(MusicService):
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
-        return QobuzLogin(runtime_dir)
+        return QobuzLogin(runtime_dir, phone=bool(options.get("phone")))
 
     @classmethod
     async def authenticate(cls, config: dict[str, Any], previous: Optional[dict[str, Any]],
@@ -234,16 +248,48 @@ class QobuzService(MusicService):
             return image.get("large") or image.get("small") or image.get("thumbnail")
         return None
 
+    # Qobuz answers in two shapes: the older endpoints' (album/get, catalog/search: "artist", "released_at",
+    # "tracks_count", "streamable") and the newer ones' (discover/*, artist/page, radio/*, album/suggest: "artists",
+    # "dates", "track_count", "rights"); each reads either
+
+    @staticmethod
+    def _main_artist(obj: dict[str, Any]) -> dict[str, Any]:
+        """The first (main) artist: {"id", "name"}, its name a string whichever shape it came in."""
+        if isinstance(obj.get("artist"), dict):
+            main = obj["artist"]
+        else:
+            artists = [a for a in obj.get("artists") or [] if isinstance(a, dict)]
+            main = next((a for a in artists if "main-artist" in (a.get("roles") or [])), artists[0] if artists else {})
+        return {**main, "name": QobuzService._name(main.get("name"))} if main else {}
+
+    @staticmethod
+    def _name(value: Any) -> str:
+        """A name, as a string or as artist/page's {"display": ...}."""
+        return value.get("display", "") if isinstance(value, dict) else str(value or "")
+
+    @staticmethod
+    def _portrait(a: dict[str, Any]) -> Optional[str]:
+        """An artist's picture: an old-style "image", or artist/page's portrait (a hash on Qobuz's image server)."""
+        image = QobuzService._image(a)
+        if image:
+            return image
+        portrait = (a.get("images") or {}).get("portrait") or {}
+        if isinstance(portrait, dict) and re.fullmatch(r"[0-9a-f]{16,64}", str(portrait.get("hash", ""))):
+            return f"https://static.qobuz.com/images/artists/covers/large/{portrait['hash']}.{portrait.get('format') or 'jpg'}"
+        return None
+
     def _track(self, t: dict[str, Any], album: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
-        if not t.get("streamable", True):
+        if not t.get("streamable", (t.get("rights") or {}).get("streamable", True)):
             return None
         album = t.get("album") or album or {}
-        performer = (t.get("performer") or {}).get("name") or (album.get("artist") or {}).get("name") or ""
-        title = t.get("title", "") + (f" ({t['version']})" if t.get("version") else "")
+        performer = ((t.get("performer") or {}).get("name") or self._main_artist(t).get("name")
+                     or self._main_artist(album).get("name") or "")
+        title = t.get("title", "").strip() + (f" ({t['version']})" if t.get("version") else "")
         audio = t.get("audio_info") or {}
         return models.track(str(t["id"]), title, performer, album.get("title", ""), float(t.get("duration") or 0),
                             art=self._image(album), album_id=album.get("id"),
-                            artist_id=str((album.get("artist") or {}).get("id") or "") or None,
+                            artist_id=str(self._main_artist(album).get("id") or self._main_artist(t).get("id") or "")
+                            or None,
                             starred=bool(t.get("favorited_at")),
                             gain=models.gain(audio.get("replaygain_track_gain"), None, audio.get("replaygain_track_peak")))
 
@@ -252,57 +298,119 @@ class QobuzService(MusicService):
 
     def _album(self, a: dict[str, Any]) -> dict[str, Any]:
         released = models.utc_date(a.get("released_at")) if a.get("released_at") else None
-        year = str(released.year) if released else ""
-        hires = " · Hi-Res" if a.get("hires_streamable") else ""
-        sub = " · ".join(x for x in [(a.get("artist") or {}).get("name", ""), year] if x) + hires
-        return models.collection(str(a["id"]), "album", a.get("title", ""), sub, self._image(a))
+        year = str(released.year) if released else str((a.get("dates") or {}).get("original") or "")[:4]
+        hires = a.get("hires_streamable") or (a.get("rights") or {}).get("hires_streamable")
+        sub = " · ".join(x for x in [self._main_artist(a).get("name", ""), year] if x) + (" · Hi-Res" if hires else "")
+        # an edition ("Deluxe", "10th Anniversary Edition") tells two of an album apart
+        title = (a.get("title") or "").strip() + (f" ({a['version']})" if a.get("version") else "")
+        return models.collection(str(a["id"]), "album", title, sub, self._image(a))
 
     def _artist(self, a: dict[str, Any]) -> dict[str, Any]:
         count = a.get("albums_count")
-        return models.collection(str(a["id"]), "artist", a.get("name", ""),
-                                 models.count(count, "album") if count else "", self._image(a))
+        return models.collection(str(a["id"]), "artist", self._name(a.get("name")),
+                                 models.count(count, "album") if count else "", self._portrait(a))
 
     def _playlist(self, p: dict[str, Any]) -> dict[str, Any]:
-        images = p.get("images300") or p.get("images150") or p.get("images") or []
+        # a list of covers ("images300"...), or {"covers": [...], "rectangle": ...} in the newer shape
+        found = [p.get("images300"), p.get("images150"), p.get("images"), p.get("image")]
+        found = [x.get("covers") if isinstance(x, dict) else x for x in found]
+        images = next((x for x in found if isinstance(x, list) and x and isinstance(x[0], str)), [])
         sub = " · ".join(x for x in [(p.get("owner") or {}).get("name", ""),
                                       models.count(p.get("tracks_count") or 0, "track")] if x)
-        return models.collection(str(p["id"]), "playlist", p.get("name", ""), sub, images[0] if images else None)
+        return models.collection(str(p["id"]), "playlist", p.get("name") or p.get("title") or "", sub,
+                                 images[0] if images else None)
+
+    @staticmethod
+    def _radio(kind: str, id: str, name: str, art: Optional[str] = None) -> dict[str, Any]:
+        """A card for a radio Qobuz makes from a track, an artist or an album (opened by open())."""
+        return models.collection(f"radio:{kind}:{id}", "list", f"{name} radio" if name else "Radio",
+                                 "Endless, from Qobuz", art)
 
     # --- browsing ---
 
     async def home(self) -> list[dict[str, Any]]:
         user_id = self.config.get("user_id")
-        jobs = [self._get("playlist/getUserPlaylists", user_id=user_id, limit=50),
-                self._get("favorite/getUserFavorites", user_id=user_id, type="albums", limit=50)]
-        jobs += [self._get("album/getFeatured", type=kind, limit=20) for kind, _ in FEATURED]
-        results = await asyncio.gather(*jobs, return_exceptions=True)
+        playlists, favourites, weekly, discover = await asyncio.gather(
+            self._get("playlist/getUserPlaylists", user_id=user_id, limit=50),
+            self._get("favorite/getUserFavorites", user_id=user_id, type="albums", limit=50),
+            self._get("dynamic-tracks/get", type="weekly", limit=20),
+            self._discover(), return_exceptions=True)
         sections = []
-        playlists, favourites, *featured = results
+        # made for the user (Qobuz's own My Weekly Q), then theirs, then what Qobuz's Discover shows
+        made = []
+        if isinstance(weekly, dict) and weekly.get("title"):
+            made.append(models.collection("weekly", "list", weekly["title"], weekly.get("baseline") or "",
+                                          (weekly.get("images") or {}).get("large")))
+        if made:
+            sections.append(models.section("Made for you", made))
+        if isinstance(weekly, dict) and (weekly.get("tracks") or {}).get("items"):
+            # its songs too, to play from Home
+            sections.append(models.section(weekly.get("title") or "My Weekly Q", [],
+                                           self._tracks(weekly["tracks"]["items"])))
         if isinstance(playlists, dict):
             items = [self._playlist(p) for p in (playlists.get("playlists") or {}).get("items", [])]
             if items:
                 sections.append(models.section("Your playlists", items))
-        library = [models.collection("favourite-tracks", "list", "Favourite tracks")]
         if isinstance(favourites, dict):
             albums = [self._album(a) for a in (favourites.get("albums") or {}).get("items", [])]
             if albums:
                 sections.append(models.section("Favourite albums", albums))
-        for (_, title), result in zip(FEATURED, featured):
-            if isinstance(result, dict):
-                albums = [self._album(a) for a in (result.get("albums") or {}).get("items", [])]
-                if albums:
-                    sections.append(models.section(title, albums))
-        sections.append(models.section("Library", library))
-        if all(isinstance(r, Exception) for r in results):
-            raise results[0]
+        if isinstance(discover, list):
+            sections += discover
+        sections.append(models.section("Library", [models.collection("favourite-tracks", "list", "Favourite tracks")]))
+        if all(isinstance(r, Exception) for r in (playlists, favourites, weekly, discover)):
+            raise playlists if isinstance(playlists, Exception) else ServiceError("Qobuz didn't answer; try again")
         return sections
 
+    async def _discover(self) -> list[dict[str, Any]]:
+        """Qobuz's Discover page as rows: new releases, its picks and awards, its playlists. Older lists
+        (album/getFeatured) when Discover doesn't answer."""
+        try:
+            data = await self._get("discover/index")
+        except ServiceError:
+            found = await asyncio.gather(*[self._get("album/getFeatured", type=kind, limit=20) for kind, _ in FEATURED],
+                                         return_exceptions=True)
+            return [models.section(title, [self._album(a) for a in (r.get("albums") or {}).get("items", [])])
+                    for (_, title), r in zip(FEATURED, found) if isinstance(r, dict)]
+        containers = data.get("containers") or {}
+        rows = []
+        for key, title in DISCOVER_ROWS:
+            items = ((containers.get(key) or {}).get("data") or {}).get("items") or []
+            if key == "playlists":
+                cards = [self._playlist(p) for p in items if isinstance(p, dict) and p.get("id")]
+            else:
+                cards = [self._album(a) for a in items if isinstance(a, dict) and a.get("id")]
+            if cards:
+                rows.append(models.section(title, cards))
+        return rows
+
     async def browse(self) -> list[dict[str, Any]]:
-        data = await self._get("genre/list")
+        data, themes = await asyncio.gather(self._get("genre/list"), self._themes(), return_exceptions=True)
+        if isinstance(data, Exception):
+            raise data
         genres = (data.get("genres") or {}).get("items") or []
-        return [models.section("Genres", [models.collection(f"genre:{g['id']}#{g.get('name', '')}", "list",
-                                                            g.get("name") or "Genre")
-                                          for g in genres if str(g.get("id", "")).isdigit()])]
+        sections = [models.section("Genres", [models.collection(f"genre:{g['id']}#{g.get('name', '')}", "list",
+                                                                g.get("name") or "Genre")
+                                              for g in genres if str(g.get("id", "")).isdigit()])]
+        if isinstance(themes, list) and themes:
+            sections.append(models.section("Playlists by Qobuz", themes))
+        return sections
+
+    async def _themes(self) -> list[dict[str, Any]]:
+        """Qobuz's playlist themes (Hi-Res, New releases, moods, genres...), each opening to its playlists."""
+        data = await self._get("playlist/getTags")
+        themes = []
+        for t in data.get("tags") or []:
+            slug = str(t.get("slug") or "")
+            if not re.fullmatch(r"[a-z0-9-]{1,64}", slug):
+                continue
+            try:
+                names = json.loads(t.get("name_json") or "{}")
+            except ValueError:
+                names = {}
+            name = (names.get("en") or next(iter(names.values()), "") or slug) if isinstance(names, dict) else slug
+            themes.append(models.collection(f"tag:{slug}#{name}", "list", name))
+        return themes
 
     # --- media center ---
 
@@ -317,6 +425,10 @@ class QobuzService(MusicService):
             return [s for s in await self.home()
                     if s["title"] not in ("Favourite albums", "Library") and not models.is_categories(s)]
         if tab_id == "picks":
+            # by theme, as Qobuz's own app has them: a row of each theme's playlists
+            themes = await self._themes()
+            if themes:
+                return [as_rows(models.section("Playlists by Qobuz", themes))]
             playlists = await self._get("playlist/getFeatured", type="editor-picks", limit=60)
             return [models.section("Playlists by Qobuz", [self._playlist(p) for p in
                                                          (playlists.get("playlists") or {}).get("items", [])],
@@ -400,20 +512,64 @@ class QobuzService(MusicService):
             for t in tracks:
                 t["starred"] = True
             return models.page("Favourite tracks", models.count(len(tracks), "track"), tracks=tracks)
+        if kind == "list" and id.startswith("tag:"):
+            slug, _, name = id[4:].partition("#")
+            if not re.fullmatch(r"[a-z0-9-]{1,64}", slug):
+                raise ServiceError("Unknown theme")
+            data = await self._get("discover/playlists", tags=slug, limit=100)
+            return models.page(name or "Playlists", "Playlists by Qobuz",
+                               collections=[self._playlist(p) for p in data.get("items") or [] if p.get("id")])
+        if kind == "list" and id == "weekly":
+            data = await self._get("dynamic-tracks/get", type="weekly", limit=50)
+            return models.page(data.get("title") or "My Weekly Q", data.get("baseline") or "",
+                               (data.get("images") or {}).get("large"),
+                               tracks=self._tracks((data.get("tracks") or {}).get("items", [])),
+                               about=data.get("description") or "")
+        if kind == "list" and id.startswith("radio:"):
+            what, _, of = id[6:].partition(":")
+            if what not in ("track", "artist", "album") or not QOBUZ_ID.match(of):
+                raise ServiceError("Unknown radio")
+            data = await self._get(f"radio/{what}", **{f"{what}_id": of})
+            images = data.get("images") or {}
+            return models.page(f"{data.get('title') or 'Qobuz'} radio", "Endless, from Qobuz",
+                               images.get("large") or images.get("small"),
+                               tracks=self._tracks((data.get("tracks") or {}).get("items", [])))
+        if kind == "list" and id.startswith("label:"):
+            label, _, name = id[6:].partition("#")
+            if not label.isdigit():
+                raise ServiceError("Unknown label")
+            data = await self._get("label/get", label_id=label, extra="albums", limit=RELEASES_LIMIT)
+            albums = (data.get("albums") or {}).get("items", [])
+            return models.page(data.get("name") or name or "Label",
+                               models.count((data.get("albums") or {}).get("total") or len(albums), "album"),
+                               self._image(data), collections=[self._album(a) for a in albums],
+                               about=notes_text(data.get("description") or ""))
         if kind == "album":
-            a, library = await asyncio.gather(self._get("album/get", album_id=id), self._library())
+            a, library, like = await asyncio.gather(self._get("album/get", album_id=id), self._library(),
+                                                    self._get("album/suggest", album_id=id), return_exceptions=True)
+            if isinstance(a, BaseException):
+                raise a
             c = self._album(a)
+            artist = self._main_artist(a)
+            # ways on from it: its radio, its label, its artist
+            explore = [self._radio("album", id, a.get("title", ""), c["art"])]
+            label = a.get("label") or {}
+            if str(label.get("id", "")).isdigit():
+                explore.append(models.collection(f"label:{label['id']}#{label.get('name', '')}", "list",
+                                                 label.get("name") or "Label", "Label"))
+            if artist.get("id"):
+                explore.append(models.collection(str(artist["id"]), "artist", artist.get("name", ""), "Artist",
+                                                 self._portrait(artist)))
+            similar = [self._album(x) for x in ((like.get("albums") or {}).get("items") or [])
+                       if isinstance(x, dict) and x.get("id")] if isinstance(like, dict) else []
             return models.page(c["title"], c["subtitle"], c["art"],
                                tracks=self._tracks((a.get("tracks") or {}).get("items", []), album=a),
-                               save=models.saved(self._saved(library, "album", id)))
+                               save=models.saved(self._saved(library if not isinstance(library, BaseException)
+                                                             else None, "album", id)),
+                               shelves=[models.section("Explore", explore), models.section("More like this", similar)],
+                               about=notes_text(a.get("description") or ""))
         if kind == "artist":
-            a, library = await asyncio.gather(self._get("artist/get", artist_id=id, extra="albums", limit=100),
-                                              self._library())
-            albums = sorted((a.get("albums") or {}).get("items", []), key=lambda x: x.get("released_at") or 0,
-                            reverse=True)
-            return models.page(a.get("name", ""), self._artist(a)["subtitle"], self._image(a),
-                               collections=[self._album(x) for x in albums],
-                               save=models.saved(self._saved(library, "artist", id)))
+            return await self._artist_page(id)
         if kind == "playlist":
             p, library = await asyncio.gather(self._get("playlist/get", playlist_id=id, extra="tracks", limit=500),
                                               self._library())
@@ -425,6 +581,59 @@ class QobuzService(MusicService):
                                save=None if own else models.saved(self._saved(library, "playlist", id)))
         raise ServiceError(f"Unknown collection kind: {kind}")
 
+    async def _artist_page(self, id: str) -> dict[str, Any]:
+        """An artist as Qobuz's own app shows one (artist/page): top tracks, albums, then a row for each other kind
+        of release, their playlists, what they appear on, their radio and similar artists, and their biography."""
+        if not QOBUZ_ID.match(id):
+            raise ServiceError("Not found on Qobuz")
+        # artist/page gives five similar artists; Qobuz's app shows more
+        a, library, similar = await asyncio.gather(
+            self._get("artist/page", artist_id=id, sort="release_date"), self._library(),
+            self._get("artist/getSimilarArtists", artist_id=id, limit=20), return_exceptions=True)
+        if isinstance(a, BaseException):
+            # an artist artist/page doesn't know: the older page, their albums
+            old = await self._get("artist/get", artist_id=id, extra="albums", limit=100)
+            albums = sorted((old.get("albums") or {}).get("items", []), key=lambda x: x.get("released_at") or 0,
+                            reverse=True)
+            return models.page(old.get("name", ""), self._artist(old)["subtitle"], self._image(old),
+                               collections=[self._album(x) for x in albums],
+                               save=models.saved(self._saved(library if isinstance(library, dict) else None,
+                                                             "artist", id)))
+        name = self._name(a.get("name"))
+        groups = {g.get("type"): g for g in a.get("releases") or [] if isinstance(g, dict)}
+        # a kind of release Qobuz has more of than artist/page gives: all of it, by type
+        fuller = [t for t, _ in [("album", ""), *RELEASE_ROWS] if (groups.get(t) or {}).get("has_more")]
+        more = await asyncio.gather(*[self._get("artist/getReleasesList", artist_id=id, release_type=t,
+                                                limit=RELEASES_LIMIT, sort="release_date") for t in fuller],
+                                    return_exceptions=True)
+        for t, got in zip(fuller, more):
+            if isinstance(got, dict) and got.get("items"):
+                groups[t] = {**groups[t], "items": got["items"]}
+        releases = lambda t: [self._album(x) for x in (groups.get(t) or {}).get("items") or []  # noqa: E731
+                              if isinstance(x, dict) and x.get("id")]
+        art = self._portrait(a)
+        shelves = [models.section(title, releases(t)) for t, title in RELEASE_ROWS]
+        # the albums of others they're on (compilations, features), each once, as Qobuz's app shows them
+        appears: dict[str, dict[str, Any]] = {}
+        for t in a.get("tracks_appears_on") or []:
+            album = t.get("album") if isinstance(t, dict) else None
+            if isinstance(album, dict) and album.get("id") and str(album["id"]) not in appears:
+                appears[str(album["id"])] = self._album(album)
+        shelves.append(models.section("Appears on", list(appears.values())))
+        shelves.append(models.section("Playlists", [self._playlist(p) for p in (a.get("playlists") or {}).get("items")
+                                                    or [] if isinstance(p, dict) and p.get("id")]))
+        shelves.append(models.section("Radio", [self._radio("artist", id, name, art)]))
+        alike = ((similar.get("artists") or {}).get("items") if isinstance(similar, dict) else None) \
+            or (a.get("similar_artists") or {}).get("items") or []
+        shelves.append(models.section("Similar artists", [self._artist(s) for s in alike
+                                                           if isinstance(s, dict) and s.get("id")]))
+        category = a.get("artist_category") or ""
+        return models.page(name, category if category and category.lower() != "performer" else "", art,
+                           collections=releases("album"), tracks=self._tracks(a.get("top_tracks") or []),
+                           shelves=shelves,
+                           about=notes_text(((a.get("biography") or {}).get("content")) or ""),
+                           save=models.saved(self._saved(library if isinstance(library, dict) else None, "artist", id)))
+
     async def search(self, query: str) -> dict[str, Any]:
         # as many of each as Qobuz's own apps show: the media center ends long rows in Show all
         data = await self._get("catalog/search", query=query, limit=60)
@@ -434,7 +643,21 @@ class QobuzService(MusicService):
         return models.page(f"Results for “{query}”", collections=artists + albums + playlists,
                            tracks=self._tracks((data.get("tracks") or {}).get("items", [])), tracks_first=True)
 
+    async def search_more(self, query: str, part: str, offset: int) -> list[dict[str, Any]]:
+        """The next of a search's songs, from `offset` on (Qobuz's own paging)."""
+        if part != "Songs":
+            raise ServiceError("There's no more of that")
+        data = await self._get("track/search", query=query, limit=100, offset=max(0, int(offset)))
+        return self._tracks((data.get("tracks") or {}).get("items", []))
+
     # --- features ---
+
+    async def radio(self, track: dict[str, Any]) -> list[dict[str, Any]]:
+        """Qobuz's own radio from a track (radio/track): what its app plays after "Start radio"."""
+        if not QOBUZ_ID.match(str(track.get("id", ""))):
+            raise ServiceError("Not found on Qobuz")
+        data = await self._get("radio/track", track_id=track["id"])
+        return [t for t in self._tracks((data.get("tracks") or {}).get("items", [])) if t["id"] != str(track["id"])]
 
     async def star(self, track_id: str, starred: bool) -> None:
         await self._get("favorite/create" if starred else "favorite/delete", track_ids=track_id)
@@ -549,11 +772,17 @@ class QobuzLogin(SignIn):
 
     Qobuz redirects the browser to http://localhost:<port>/?code_autorisation=<code>; Steam's browser
     runs on the same device, so the listener (bound to 127.0.0.1 only) receives it directly.
+
+    On a phone (`phone`, the page as a QR code), the redirect comes back over the home network instead: to this
+    device's address there, at a path of random characters only that page knows, so nothing else on the network
+    can hand it a code. The listener is there only while the sign-in waits.
     """
 
-    def __init__(self, runtime_dir: str):
+    def __init__(self, runtime_dir: str, phone: bool = False):
         super().__init__()
         self.runtime_dir = runtime_dir
+        self.phone = phone
+        self._path = "/" + secrets.token_urlsafe(18) if phone else "/"
         self.app_id = ""
         self._runner: Optional[web.AppRunner] = None
         self._code: asyncio.Future = asyncio.get_event_loop().create_future()
@@ -563,16 +792,25 @@ class QobuzLogin(SignIn):
         async with _session() as session:
             app = await QobuzService._app_credentials(session, self.runtime_dir)
         self.app_id = app["app_id"]
+        host = "localhost"
+        if self.phone:
+            host = next((a for a in netif.local_addresses()
+                         if ipaddress.ip_address(a).is_private and not ipaddress.ip_address(a).is_loopback), "")
+            if not host:
+                raise ServiceError("This device isn't on a home network the phone could come back to; "
+                                   "sign in here instead")
         web_app = web.Application()
-        web_app.router.add_get("/", self._redirect)
+        web_app.router.add_get(self._path, self._redirect)
         self._runner = web.AppRunner(web_app, access_log=None)
         await self._runner.setup()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("127.0.0.1", 0))
+        sock.bind(("0.0.0.0" if self.phone else "127.0.0.1", 0))
         port = sock.getsockname()[1]
         await web.SockSite(self._runner, sock).start()
         self.url = (f"https://www.qobuz.com/signin/oauth?ext_app_id={self.app_id}"
-                    f"&redirect_url=http://localhost:{port}")
+                    f"&redirect_url=http://{host}:{port}{self._path if self.phone else ''}")
+        if self.phone:
+            self.qr = self.url
         self.status = "waiting"
         self._task = asyncio.get_event_loop().create_task(self._finish())
 

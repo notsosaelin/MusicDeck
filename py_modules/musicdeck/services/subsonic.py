@@ -12,8 +12,16 @@ from urllib.parse import urlencode
 import aiohttp
 
 from .. import models
+from ..feeds import notes_text
 from ..net import tls
 from .base import MusicService, ServiceError, StreamSource, as_rows
+
+
+def _about(text: Any) -> str:
+    """A biography or album notes as the server has them (often HTML with a "Read more on Last.fm" link): the text."""
+    text = notes_text(str(text or ""))
+    return text.split("Read more on Last.fm")[0].strip()
+
 
 API_VERSION = "1.16.1"
 CLIENT_NAME = "MusicDeck"
@@ -225,22 +233,42 @@ class SubsonicService(MusicService):
                 raise ServiceError(f"Unknown list: {id}")
             return models.page(titles[id], collections=await self._album_list(id, 500))
         if kind == "album":
-            a = (await self._call("getAlbum", id=id))["album"]
+            a, info = await asyncio.gather(self._call("getAlbum", id=id), self._call("getAlbumInfo2", id=id),
+                                           return_exceptions=True)
+            if isinstance(a, BaseException):
+                raise a
+            a = a["album"]
             c = self._album(a)
+            # the server's notes on it (from Last.fm or MusicBrainz, when it has an agent for them)
+            notes = (info.get("albumInfo") or {}).get("notes") if isinstance(info, dict) else ""
+            artist = [models.collection(str(a["artistId"]), "artist", a.get("artist", ""), "Artist")] \
+                if a.get("artistId") else []
             return models.page(c["title"], c["subtitle"], c["art"],
                                tracks=[self._track(s) for s in a.get("song", [])],
-                               save=models.saved("starred" in a, "favourite"))
+                               save=models.saved("starred" in a, "favourite"),
+                               shelves=[models.section("Explore", artist)], about=_about(notes))
         if kind == "artist":
-            a = (await self._call("getArtist", id=id))["artist"]
+            a, info = await asyncio.gather(self._call("getArtist", id=id), self._call("getArtistInfo2", id=id, count=20),
+                                           return_exceptions=True)
+            if isinstance(a, BaseException):
+                raise a
+            a = a["artist"]
+            info = (info.get("artistInfo2") or {}) if isinstance(info, dict) else {}
             albums = sorted(a.get("album", []), key=lambda x: x.get("year") or 0, reverse=True)
             try:
                 top = (await self._call("getTopSongs", artist=a.get("name", ""), count=10)).get("topSongs", {})
                 songs = top.get("song", [])
             except ServiceError:
                 songs = []  # needs an external metadata agent (Last.fm) on the server
+            # similar artists the server has music by (an agent's, as above)
+            similar = [models.collection(str(s["id"]), "artist", s.get("name", ""),
+                                         models.count(s["albumCount"], "album") if s.get("albumCount") else "",
+                                         s.get("coverArt"))
+                       for s in info.get("similarArtist") or [] if isinstance(s, dict) and s.get("id")]
             return models.page(a.get("name", ""), models.count(len(albums), "album"), a.get("coverArt"),
                                collections=[self._album(x) for x in albums],
-                               tracks=[self._track(x) for x in songs], save=models.saved("starred" in a, "favourite"))
+                               tracks=[self._track(x) for x in songs], save=models.saved("starred" in a, "favourite"),
+                               shelves=[models.section("Similar artists", similar)], about=_about(info.get("biography")))
         if kind == "playlist":
             p = (await self._call("getPlaylist", id=id))["playlist"]
             return models.page(p.get("name", ""), "Playlist", p.get("coverArt"),

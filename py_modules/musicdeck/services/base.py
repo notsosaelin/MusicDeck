@@ -128,7 +128,9 @@ class SignIn:
     The plugin drives every kind the same way (see Plugin.sign_in_start / sign_in_poll):
 
         start()   sets `url` (a page for Steam's browser, e.g. an OAuth or device-approval page)
-                  or `code` (shown in the dialog, e.g. Jellyfin Quick Connect), then returns
+                  or `code` (shown in the dialog, e.g. Jellyfin Quick Connect), and `qr` for signing in
+                  on a phone (a link the dialog shows as a QR code: the same approval page, or one
+                  that comes back to this device), then returns
         status    "waiting" until the user has finished, then "done" or "error"
         result    when done: config entries to save with the source (tokens, user ids...)
         error     when failed: a message for the user
@@ -143,6 +145,7 @@ class SignIn:
         self.error = ""
         self.url = ""
         self.code = ""
+        self.qr = ""
         self.result: Optional[dict[str, Any]] = None
 
     async def start(self) -> None:

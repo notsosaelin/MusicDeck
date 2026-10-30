@@ -439,6 +439,25 @@ const TrackList: FC<{
   );
 };
 
+/** A page's About (an artist's biography): its first paragraph, the rest a press away. */
+const About: FC<{ text: string }> = ({ text }) => {
+  const [open, setOpen] = useState(false);
+  const paragraphs = text.split("\n").filter((p) => p.trim());
+  return (
+    <PanelSection title="About">
+      {(open ? paragraphs : paragraphs.slice(0, 1)).map((p, i) => (
+        <PanelSectionRow key={i}>
+          <Field focusable bottomSeparator="none" onActivate={() => setOpen(!open)} onClick={() => setOpen(!open)}>
+            <div style={{ fontSize: 13, lineHeight: 1.4, whiteSpace: "normal", opacity: 0.85 }}>
+              {!open && p.length > 280 ? p.slice(0, 280).trimEnd() + "…" : p}
+            </div>
+          </Field>
+        </PanelSectionRow>
+      ))}
+    </PanelSection>
+  );
+};
+
 const PageBody: FC<{
   instanceId: string;
   stack: StackName;
@@ -449,7 +468,7 @@ const PageBody: FC<{
 }> = ({ instanceId, stack, page, playlistId, from }) => {
   // Album pages don't need the album name repeated on every row
   const showAlbum = new Set(page.tracks.map((t) => t.album)).size > 1;
-  const mixed = page.collections.length > 0 || !!page.extra?.length;
+  const mixed = page.collections.length > 0 || !!page.extra?.length || !!page.shelves?.length;
   const collectionSections = groupByKind(page.collections).map(([kind, items], _i, groups) => (
     <CollectionList
       key={kind}
@@ -490,7 +509,11 @@ const PageBody: FC<{
       {/* search results lead with songs and videos; artist pages lead with releases */}
       {page.tracks_first ? trackSections : collectionSections}
       {page.tracks_first ? collectionSections : trackSections}
-      {!page.tracks.length && !page.collections.length && !page.extra?.length && !page.notice && (
+      {page.shelves?.map((shelf) => (
+        <CollectionList key={shelf.title} instanceId={instanceId} stack={stack} title={shelf.title} items={shelf.items} limit={5} />
+      ))}
+      {page.about && <About text={page.about} />}
+      {!page.tracks.length && !page.collections.length && !page.extra?.length && !page.shelves?.length && !page.notice && (
         <Message>Empty</Message>
       )}
     </>

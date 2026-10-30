@@ -41,6 +41,8 @@ VIDEO_ID = re.compile(r"^[\w-]{11}$")
 # a "Moods & genres" category's params, as YouTube Music hands them out (opaque, URL-safe)
 MOOD_PARAMS = re.compile(r"^[\w%=-]{4,200}$")
 CHANNEL_ID = re.compile(r"^UC[\w-]{22}$")
+# a playlist's id (an album's OLAK5uy_..., an artist's radio RDEM...), as a radio's
+PLAYLIST_ID = re.compile(r"^[\w-]{10,80}$")
 LYRICS_IDS_TTL = 6 * 3600
 LYRICS_IDS_KEPT = 1000
 # a search's "Load more": this many more each time, from this many before what was shown (its videos mix two lists)
@@ -217,6 +219,12 @@ def _seconds(item: dict[str, Any]) -> float:
     for p in parts:
         total = total * 60 + p
     return float(total)
+
+
+def _radio(playlist: str, name: str, art: Optional[str] = None) -> dict[str, Any]:
+    """A card for a radio YouTube Music makes from an artist or an album (its playlist id; opened by open())."""
+    return models.collection(f"radio:{playlist}#{name}", "list", f"{name} radio" if name else "Radio",
+                             "Endless, from YouTube Music", art)
 
 
 def _artists(item: dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -425,9 +433,18 @@ class YouTubeService(LocalLikes, MusicService):
             playlists = await self._music("get_mood_playlists", params)
             items = [c for c in (self._collection(p) for p in playlists or [] if isinstance(p, dict)) if c]
             return models.page(title or "Moods & genres", models.count(len(items), "playlist"), collections=items)
+        if kind == "list" and id.startswith("radio:"):
+            # a radio YouTube Music makes (an artist's, an album's): its watch playlist
+            playlist, _, name = id[6:].partition("#")
+            if not PLAYLIST_ID.match(playlist):
+                raise ServiceError("Unknown radio")
+            data = await self._music("get_watch_playlist", playlistId=playlist, radio=True, limit=50)
+            tracks = self._tracks(data.get("tracks"))
+            return models.page(f"{name} radio" if name else "Radio", "Endless, from YouTube Music",
+                               tracks[0]["art"] if tracks else None, tracks=tracks)
         if kind == "album":
             a = await self._music("get_album", id)
-            artist, _ = _artists(a)
+            artist, artist_id = _artists(a)
             art = _thumb(a.get("thumbnails"))
             tracks = self._tracks(a.get("tracks"))
             for t in tracks:  # album track lists omit per-track art and album id
@@ -435,20 +452,24 @@ class YouTubeService(LocalLikes, MusicService):
                 t["album"] = t["album"] or a.get("title", "")
                 t["album_id"] = t["album_id"] or id
             sub = " · ".join(x for x in [artist, str(a.get("year") or "")] if x)
-            return models.page(a.get("title", ""), sub, art, tracks=tracks)
+            # ways on from it: its radio and its artist; then what YouTube Music recommends with it
+            explore = []
+            if PLAYLIST_ID.match(str(a.get("audioPlaylistId") or "")):
+                explore.append(_radio(a["audioPlaylistId"], a.get("title", ""), art))
+            if artist_id:
+                explore.append(models.collection(artist_id, "artist", artist, "Artist"))
+            similar = [c for c in (self._collection(r, "album") for r in a.get("related_recommendations") or []
+                                   if isinstance(r, dict)) if c]
+            return models.page(a.get("title", ""), sub, art, tracks=tracks,
+                               shelves=[models.section("Explore", explore), models.section("More like this", similar)],
+                               about=str(a.get("description") or ""))
         if kind == "artist":
             try:
                 a = await self._music("get_artist", id)
             except ServiceError:
                 # not a YouTube Music artist (e.g. a label or live-session channel): show its uploads
                 return await self._channel_page(id)
-            songs = (a.get("songs") or {}).get("results") or []
-            releases = [(a.get(k) or {}).get("results") or [] for k in ("albums", "singles")]
-            collections = [c for c in (self._collection(r, "album") for group in releases for r in group) if c]
-            videos = self._tracks((a.get("videos") or {}).get("results") or [])
-            return models.page(a.get("name", ""), a.get("subscribers") or "", _thumb(a.get("thumbnails")),
-                               collections=collections, tracks=self._tracks(songs),
-                               extra=[{"title": "Videos", "tracks": videos}])
+            return await self._artist_page(a)
         if kind == "playlist":
             pid = id[2:] if id.startswith("VL") else id
             p = await self._music("get_playlist", pid, limit=300)
@@ -456,6 +477,34 @@ class YouTubeService(LocalLikes, MusicService):
             sub = author.get("name", "") if isinstance(author, dict) else str(author)
             return models.page(p.get("title", ""), sub, _thumb(p.get("thumbnails")), tracks=self._tracks(p.get("tracks")))
         raise ServiceError(f"Unknown collection kind: {kind}")
+
+    async def _artist_page(self, a: dict[str, Any]) -> dict[str, Any]:
+        """An artist as YouTube Music shows one: their top songs, all their albums, then their singles and EPs,
+        videos, radio and related artists, and their description."""
+        async def whole(key: str) -> list[dict[str, Any]]:
+            # the page has a few of them; the rest come by the part's own browse id, when it has one
+            part = a.get(key) or {}
+            found = part.get("results") or []
+            if part.get("browseId") and part.get("params"):
+                try:
+                    found = await self._music("get_artist_albums", part["browseId"], part["params"], limit=None) or found
+                except ServiceError:
+                    pass
+            return [c for c in (self._collection(r, "album") for r in found if isinstance(r, dict)) if c]
+        albums, singles = await asyncio.gather(whole("albums"), whole("singles"))
+        name = a.get("name", "")
+        art = _thumb(a.get("thumbnails"))
+        radio = [_radio(a["radioId"], name, art)] if PLAYLIST_ID.match(str(a.get("radioId") or "")) else []
+        related = [c for c in (self._collection(r, "artist") for r in (a.get("related") or {}).get("results") or []
+                               if isinstance(r, dict)) if c]
+        listeners = f"{a['monthlyListeners']} monthly listeners" if a.get("monthlyListeners") else ""
+        return models.page(name, listeners or a.get("subscribers") or "", art, collections=albums,
+                           tracks=self._tracks((a.get("songs") or {}).get("results") or []),
+                           extra=[{"title": "Videos", "tracks": self._tracks((a.get("videos") or {}).get("results")
+                                                                             or [])}],
+                           shelves=[models.section("Singles & EPs", singles), models.section("Radio", radio),
+                                    models.section("Similar artists", related)],
+                           about=str(a.get("description") or ""))
 
     async def search(self, query: str) -> dict[str, Any]:
         """Both catalogs at once, each category searched on its own so none is starved: YouTube Music's

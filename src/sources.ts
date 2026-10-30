@@ -34,6 +34,8 @@ export function followState(): () => void {
   let live: string | null | undefined = pluginState.get()?.active_service;
   // which EQ applies: it changes with the output, or with each output getting its own
   let eqFor: string | undefined;
+  // the devices plugged in when the state last came (undefined before it first does)
+  let plugged: Set<string> | undefined;
   const unsubscribe = pluginState.subscribe(() => {
     const state = pluginState.get();
     if (!state) return;
@@ -44,6 +46,17 @@ export function followState(): () => void {
     const gone = (id: string) => !sources.has(id) && !id.startsWith("peer~");
     if (switched || player.state.get().queue.some((q) => gone(q.instanceId))) player.clear();
     if (switched) invalidateBrowserCache();
+    // a disc ejected, a player unplugged: its songs leave the queue (they can't play; left, they were skipped one by
+    // one); only on a change, as the devices are only known a moment after start-up
+    const pluggedNow = new Set((state.devices ?? []).map((d) => d.id));
+    const left = plugged ? [...plugged].filter((id) => !pluggedNow.has(id)) : [];
+    plugged = pluggedNow;
+    if (left.length) {
+      const queue = player.state.get().queue;
+      const theirs = queue.flatMap((q, i) => (left.some((id) => q.track.id.startsWith(`dv~${id}~`)) ? [i] : []));
+      if (theirs.length === queue.length && queue.length) player.clear();
+      else for (const i of theirs.reverse()) player.removeAt(i);
+    }
     player.setPlayback(state.playback);
     const now = `${state.eq_per_output}:${state.output?.id ?? ""}`;
     if (eqFor !== undefined && now !== eqFor) player.setEq(state.eq);

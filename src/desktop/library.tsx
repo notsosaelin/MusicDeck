@@ -7,9 +7,9 @@
 import { CSSProperties, FC, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { FaChevronLeft, FaChevronRight, FaDownload, FaCompactDisc, FaEject, FaEllipsisH, FaFolder, FaHdd, FaListUl, FaPlay, FaRandom, FaSearch, FaUser } from "react-icons/fa";
 import * as api from "../api";
-import { Collection, Page, Section, SmartPlaylist, Track } from "../api";
+import { Collection, Page, Section, SmartPlaylist, Track, discCollection } from "../api";
 import { showCollectionMenu, showTrackMenu } from "../components/TrackMenu";
-import { KIND_TITLES, groupByKind } from "../components/Browser";
+import { KIND_TITLES, callAction, groupByKind } from "../components/Browser";
 import { lookupOpener } from "../components/TagEditor";
 import { NameModal } from "../components/NameModal";
 import { SearchPart, dataVersion, invalidateBrowserCache, playFrom } from "../nav";
@@ -301,11 +301,34 @@ const gb = (n: number) => (n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : `${(n / 1
 
 /** What's plugged in, with how full it is; drop music on one to copy it there. */
 const Devices: FC<{ local: string }> = ({ local }) => {
-  const devices = useStore(pluginState)?.devices ?? [];
-  if (!devices.length) return null;
+  const state = useStore(pluginState);
+  // what's in the disc drive is the Disc entry's, not a device of its own
+  const devices = (state?.devices ?? []).filter((d) => d.kind !== "cd" && d.kind !== "disc");
+  const disc = state?.disc;
   return (
     <>
-      <div className="md-nav-heading">Devices</div>
+      {disc && (
+        <>
+          <div className="md-nav-heading">Disc</div>
+          <DropItem
+            onClick={() => go({ type: "collection", collection: discCollection(disc), source: disc.source })}
+            onMenu={(e) => disc.id && showCollectionMenu(disc.source, discCollection(disc), clickPoint(e))}
+            onDrop={() => notify("MusicDeck", disc.id ? "A disc can only be read" : "Put a blank CD in to burn music to it: an album's or playlist's menu has Burn to CD")}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="md-td" style={disc.id ? undefined : { opacity: 0.6 }}>
+                {disc.label}
+              </div>
+              {disc.id && (
+                <div className="md-dim" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {disc.card.title}
+                </div>
+              )}
+            </div>
+          </DropItem>
+        </>
+      )}
+      {devices.length > 0 && <div className="md-nav-heading">Devices</div>}
       {devices.map((d) => {
         const space = d.status?.space as { total: number; free: number } | null | undefined;
         const collection: Collection = { id: `dv~${d.id}~`, kind: "device", title: d.name, subtitle: "", art: null };
@@ -417,33 +440,42 @@ const SmartPage: FC<{ id: string; playlist: SmartPlaylist }> = ({ id, playlist }
 };
 
 /** A device's page: how full it is, and Eject. */
-const DeviceBar: FC<{ collection: Collection }> = ({ collection }) => {
+/** The device a device's page is of (its collection id is dv~<device id>~), while it's plugged in. */
+const useDevice = (collection: Collection) => {
   const deviceId = collection.id.replace(/^dv~/, "").replace(/~.*$/, "");
-  const device = useStore(pluginState)?.devices.find((d) => d.id === deviceId);
+  return useStore(pluginState)?.devices.find((d) => d.id === deviceId);
+};
+
+/** A device's Eject, in its page's row of buttons. */
+const EjectButton: FC<{ collection: Collection }> = ({ collection }) => {
+  const device = useDevice(collection);
   if (!device) return null;
-  const space = device.status?.space as { total: number; free: number } | null | undefined;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14 }}>
-      {space && space.total > 0 && (
-        <div style={{ width: 280 }}>
-          <div className="md-capacity" style={{ height: 8 }}>
-            <div style={{ width: `${Math.min(100, ((space.total - space.free) / space.total) * 100)}%` }} />
-          </div>
-          <div className="md-dim" style={{ fontSize: 12, marginTop: 4 }}>
-            {gb(space.free)} free of {gb(space.total)}
-          </div>
-        </div>
-      )}
-      <button
-        className="md-button md-wide"
-        onClick={async () => {
-          const r = await api.ejectDevice(deviceId).catch(() => null);
-          if (r && !r.ok) notify("MusicDeck", r.error);
-          else goHome();
-        }}
-      >
-        <FaEject /> Eject
-      </button>
+    <button
+      className="md-button md-wide"
+      onClick={async () => {
+        const r = await api.ejectDevice(device.id).catch(() => null);
+        if (r && !r.ok) notify("MusicDeck", r.error);
+        else goHome();
+      }}
+    >
+      <FaEject /> {device.kind === "cd" ? "Eject disc" : "Eject"}
+    </button>
+  );
+};
+
+/** Under a device's buttons: how full it is, when it says. */
+const DeviceBar: FC<{ collection: Collection }> = ({ collection }) => {
+  const space = useDevice(collection)?.status?.space as { total: number; free: number } | null | undefined;
+  if (!space || !(space.total > 0)) return null;
+  return (
+    <div style={{ width: 280, marginTop: 14 }}>
+      <div className="md-capacity" style={{ height: 8 }}>
+        <div style={{ width: `${Math.min(100, ((space.total - space.free) / space.total) * 100)}%` }} />
+      </div>
+      <div className="md-dim" style={{ fontSize: 12, marginTop: 4 }}>
+        {gb(space.free)} free of {gb(space.total)}
+      </div>
     </div>
   );
 };
@@ -548,7 +580,10 @@ const SectionView: FC<{ id: string; section: Section; shelves?: boolean; lead?: 
 
 /** How much a source's results hold: "24" */
 const foundCount = (page: Page) =>
-  page.tracks.length + page.collections.length + (page.extra ?? []).reduce((n, x) => n + x.tracks.length, 0);
+  page.tracks.length +
+  page.collections.length +
+  (page.extra ?? []).reduce((n, x) => n + x.tracks.length, 0) +
+  (page.shelves ?? []).reduce((n, x) => n + x.items.length, 0);
 
 /** Songs a search's list shows before its Show all */
 const SEARCH_SONGS = 30;
@@ -664,6 +699,7 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
   const cover = art(id, page?.art ?? collection.art);
   const tracks = page?.tracks ?? [];
   const length = tracks.reduce((n, t) => n + (t.duration || 0), 0);
+  const device = useDevice(collection);
   return (
     <>
       <header className="md-hero">
@@ -673,7 +709,7 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
             <ArtOrIcon url={cover} kind={collection.kind} />
           </div>
           <div style={{ minWidth: 0 }}>
-            <div className="md-kind">{KIND_NAMES[collection.kind] ?? ""}</div>
+            <div className="md-kind">{device?.kind === "cd" ? "Audio CD" : (KIND_NAMES[collection.kind] ?? "")}</div>
             <div className="md-hero-title">{page?.title ?? collection.title}</div>
             <div className="md-dim">
               {(() => {
@@ -701,9 +737,17 @@ const CollectionPage: FC<{ id: string; collection: Collection }> = ({ id, collec
                   Look up details…
                 </button>
               )}
-              <button className="md-button md-wide" aria-label="More" onClick={(e) => showCollectionMenu(id, collection, e.currentTarget)}>
-                <FaEllipsisH />
-              </button>
+              {collection.kind === "device" && <EjectButton collection={collection} />}
+              {/* a disc's menu would only say Eject again */}
+              {!(collection.kind === "device" && (device?.kind === "cd" || device?.kind === "disc")) && (
+                <button
+                  className="md-button md-wide"
+                  aria-label="More"
+                  onClick={(e) => showCollectionMenu(id, collection, e.currentTarget, { eject: collection.kind !== "device" })}
+                >
+                  <FaEllipsisH />
+                </button>
+              )}
             </div>
             {collection.kind === "device" && <DeviceBar collection={collection} />}
           </div>
@@ -722,7 +766,8 @@ const PageAction: FC<{ id: string; collection: Collection; action: NonNullable<P
     onClick={() => {
       if (action.url?.startsWith("steam://")) (window as any).SteamClient?.URL?.ExecuteSteamURL?.(action.url);
       else if (action.url) window.open(action.url);
-      else if (action.call) api.collectionAction(id, collection.kind, collection.id, action.call).catch(() => {});
+      // what it did (Ripping to..., Subscribed), or why not, as the other views say it
+      else if (action.call) callAction(id, collection, action.call).catch((e) => notify(collection.title, String(e)));
     }}
   >
     {action.label}
@@ -749,7 +794,41 @@ const PageBody: FC<{ id: string; page: Page; from: Collection; skipHeader?: bool
           <TrackTable id={id} tracks={x.tracks} from={from} />
         </section>
       ))}
+      {page.shelves?.map((shelf) => (
+        <section className="md-section" key={"shelf:" + shelf.title}>
+          <h2 className="md-heading">{shelf.title}</h2>
+          <Cards id={id} items={shelf.items} row />
+        </section>
+      ))}
+      {page.about && <About text={page.about} />}
     </>
+  );
+};
+
+/** A page's About (an artist's biography): its first lines, the rest on More. */
+const About: FC<{ text: string }> = ({ text }) => {
+  const [open, setOpen] = useState(false);
+  const paragraphs = text.split("\n").filter((p) => p.trim());
+  const long = paragraphs.length > 1 || text.length > 400;
+  return (
+    <section className="md-section" style={{ maxWidth: 900 }}>
+      <h2 className="md-heading">About</h2>
+      <div
+        className="md-dim"
+        style={{ lineHeight: 1.55, ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }) }}
+      >
+        {paragraphs.map((p, i) => (
+          <p key={i} style={{ margin: "0 0 10px" }}>
+            {p}
+          </p>
+        ))}
+      </div>
+      {long && (
+        <button className="md-link" onClick={() => setOpen(!open)}>
+          {open ? "Less" : "More"}
+        </button>
+      )}
+    </section>
   );
 };
 

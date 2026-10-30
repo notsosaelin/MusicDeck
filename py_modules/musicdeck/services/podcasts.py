@@ -309,7 +309,8 @@ class PodcastService(MusicService):
             podcast["title"], subtitle, podcast["art"] or None, tracks=self._episodes(feed, podcast),
             action={"label": "Subscribed" if subscribed else "Subscribe",
                     "call": "unsubscribe" if subscribed else "subscribe"},
-            notice=None if podcast["episodes"] else "This podcast has no episodes to play yet")
+            notice=None if podcast["episodes"] else "This podcast has no episodes to play yet",
+            about=podcast.get("description") or "")
 
     async def search(self, query: str) -> dict[str, Any]:
         query = query.strip()

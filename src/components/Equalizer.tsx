@@ -5,6 +5,7 @@ import { EQ_BANDS, EQ_PRESETS, EQ_RANGE, formatBand } from "../eq";
 import { player } from "../player";
 import { pluginState, useStore } from "../store";
 import { ACCENT } from "./common";
+import type { SectionFrame } from "./Settings";
 
 let saveTimer: number | undefined;
 
@@ -65,7 +66,8 @@ const EqCurve: FC<{ gains: number[]; enabled: boolean }> = ({ gains, enabled }) 
   );
 };
 
-export const Equalizer: FC = () => {
+/** `Section`: how its heading is drawn where it's shown (the media center's own; Quick Access's by default) */
+export const Equalizer: FC<{ Section?: SectionFrame }> = ({ Section = PanelSection }) => {
   const state = useStore(pluginState);
   const [showBands, setShowBands] = useState(false);
   if (!state) return null;
@@ -78,7 +80,7 @@ export const Equalizer: FC = () => {
   };
 
   return (
-    <PanelSection title="Equalizer">
+    <Section title="Equalizer">
       {state.output && (
         <PanelSectionRow>
           <ToggleField
@@ -99,8 +101,9 @@ export const Equalizer: FC = () => {
       </PanelSectionRow>
       <PanelSectionRow>
         <DropdownItem
-          // under its label, full width: its value (a source's name, a choice) is never cut short
-          layout="below"
+          // under its label, full width in the narrow panel (its value never cut short); beside it, as every other
+          // choice is, where there's room (the media center)
+          layout={Section === PanelSection ? "below" : "inline"}
           label="Preset"
           selectedOption={eq.preset}
           rgOptions={[
@@ -147,6 +150,6 @@ export const Equalizer: FC = () => {
             />
           </PanelSectionRow>
         ))}
-    </PanelSection>
+    </Section>
   );
 };

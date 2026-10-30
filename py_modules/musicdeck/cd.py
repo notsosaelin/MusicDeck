@@ -21,9 +21,9 @@ import hashlib
 import os
 import struct
 import threading
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
-from . import winio
+from . import cdimage, winio
 
 try:
     import fcntl
@@ -59,6 +59,11 @@ def drives() -> list[str]:
         if os.path.isdir("/dev") else []
 
 
+def audio_drives() -> list[str]:
+    """The drives to look for audio CDs in: the real ones, then any disc image put in one of its own (cdimage.py)."""
+    return drives() + cdimage.drives()
+
+
 def _open(device: str) -> int:
     # O_NONBLOCK: opens without a disc, and doesn't wait for one
     return os.open(device, os.O_RDONLY | os.O_NONBLOCK)
@@ -66,6 +71,8 @@ def _open(device: str) -> int:
 
 def eject(device: str) -> bool:
     """Opens the drive's tray (CDROM_LOCKDOOR off, then CDROMEJECT), as `eject` does."""
+    if cdimage.is_virtual(device):
+        return cdimage.eject(device)
     if winio.WINDOWS and device:
         return winio.cd_eject(device)
     if fcntl is None or not device:
@@ -88,6 +95,9 @@ def eject(device: str) -> bool:
 
 
 def has_audio_disc(device: str) -> bool:
+    if cdimage.is_virtual(device):
+        image = cdimage.get(device)
+        return bool(image) and any(audio for _, _, audio in image.toc)
     if winio.WINDOWS:
         try:
             return winio.cd_has_disc(device) and any(audio for _, _, audio in winio.cd_toc(device))
@@ -111,6 +121,11 @@ def has_audio_disc(device: str) -> bool:
 
 def read_toc(device: str) -> list[tuple[int, int, bool]]:
     """[(track number, start LBA, audio?)] in order, then (CDROM_LEADOUT, lead-out LBA, False)."""
+    if cdimage.is_virtual(device):
+        image = cdimage.get(device)
+        if not image:
+            raise OSError("No disc in the drive")
+        return list(image.toc)
     if winio.WINDOWS:
         return winio.cd_toc(device)
     assert fcntl is not None
@@ -218,5 +233,8 @@ class TrackWav:
         return out + data[skip:skip + (end - offset)]
 
 
-def cd_reader(device: str) -> Optional[AudioReader]:
+def cd_reader(device: str) -> Optional[Any]:
+    """What reads a drive's frames (`read(lba, count)`): a disc image's own, else the drive's."""
+    if cdimage.is_virtual(device):
+        return cdimage.get(device)
     return AudioReader(device) if fcntl is not None or winio.WINDOWS else None

@@ -131,6 +131,11 @@ class LiveMusicService(LocalLikes, MusicService):
     def _text(value: Any) -> str:
         return ", ".join(value) if isinstance(value, list) else str(value or "")
 
+    @classmethod
+    def _about(cls, *parts: Any) -> str:
+        """A show's or band's description and notes (archive.org keeps them as HTML), a paragraph a line."""
+        return "\n".join(t for t in (feeds.notes_text(cls._text(p)) for p in parts) if t)[:6000]
+
     @staticmethod
     def _band_of(collections: Any) -> Optional[str]:
         """The band collection a show belongs to (the others are archive.org's own groupings)."""
@@ -242,7 +247,8 @@ class LiveMusicService(LocalLikes, MusicService):
                                               self._text(meta.get("venue")) or self._text(meta.get("coverage"))) if x)
             return models.page(self._text(meta.get("title")) or item, subtitle,
                                self._band_of(meta.get("collection")) or item, tracks=tracks,
-                               notice=None if tracks else "This recording has no files that can be streamed")
+                               notice=None if tracks else "This recording has no files that can be streamed",
+                               about=self._about(meta.get("description"), meta.get("notes")))
         if kind == "list" and id.startswith("year:") and id[5:].isdigit() and len(id) == 9:
             year = id[5:]
             shows = await self._search(f"{SHOWS} AND year:{year}", "downloads desc", 100)
@@ -255,7 +261,7 @@ class LiveMusicService(LocalLikes, MusicService):
             total = self.totals.get(f"{query}|date desc|{BAND_SHOWS}", len(shows))
             subtitle = models.count(total, "show") + (f" · the latest {len(shows)}" if total > len(shows) else "")
             return models.page(self._text(about["metadata"].get("title")) or band, subtitle, band,
-                               [self._show(d) for d in shows])
+                               [self._show(d) for d in shows], about=self._about(about["metadata"].get("description")))
         raise ServiceError(f"Unknown collection: {kind} {id}")
 
     async def search(self, query: str) -> dict[str, Any]:

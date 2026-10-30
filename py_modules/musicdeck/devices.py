@@ -361,7 +361,7 @@ class DeviceWatcher:
             self.hfs_ipods = unreadable_ipods(drives)
             return (windows_storage(drives, is_ipod) + windows_phones(self.phones, self.ejected)
                     + windows_iphones(self.iphones, self.ios_names, self.ejected)
-                    + audio_cds(cd.drives(), cd.has_audio_disc, cd.read_toc, self.discs))
+                    + audio_cds(cd.audio_drives(), cd.has_audio_disc, cd.read_toc, self.discs))
         try:
             with open("/proc/self/mounts", "r", encoding="utf-8", errors="replace") as f:
                 mounts = f.read()
@@ -369,7 +369,7 @@ class DeviceWatcher:
             mounts = ""
         return (usb_storage(mounts, self.user, _uuids())
                 + phone_storage(f"/run/user/{self.uid}/gvfs", _usb_names(), self.ios_names)
-                + audio_cds(cd.drives(), cd.has_audio_disc, cd.read_toc, self.discs))
+                + audio_cds(cd.audio_drives(), cd.has_audio_disc, cd.read_toc, self.discs))
 
     async def eject(self, device: dict[str, Any]) -> str:
         """Ejects a device as the desktop would ("Safely remove"): a stick or iPod unmounted and powered

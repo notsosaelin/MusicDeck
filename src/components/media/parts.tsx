@@ -1,11 +1,12 @@
 import { Focusable, gamepadDialogClasses } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, createContext, useContext, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaList, FaUsb, FaUser } from "react-icons/fa";
-import { Collection, Result, Track } from "../../api";
+import { Collection, NO_DISC, Result, Track } from "../../api";
 import { player } from "../../player";
 import { useArtLoad } from "../../art";
 import { mediaUrl, pluginState, useStore } from "../../store";
 import { ACCENT, QuietSpinner, ScrollingText, formatTime } from "../common";
+import { sourceMark } from "../sourceIcon";
 import { GRID_GAP, GRID_SHARE, gridShape } from "./grid";
 
 /**
@@ -45,6 +46,8 @@ export const CENTER_CSS =
 .mc-browse-stack { display: grid; grid-template-columns: minmax(0, 1fr); }
 .mc-browse-stack > .mc-browse-body { grid-area: 1 / 1; min-width: 0; }
 .mc-browse-body { min-height: 70vh; }
+/* a page opened under Browse's dots: room between them and its header (the dots sit tight on Browse's own rows) */
+.mc-browse-body .mc-page-head { margin-top: 26px; }
 /* a search's results: room between the dots' line and their first heading */
 .mc-browse-body > .mc-results { padding-top: 14px; }
 /* the one swapped in fades in where it'll stay */
@@ -56,13 +59,40 @@ export const CENTER_CSS =
 /* the browser's scroll anchoring moved the page as rows and covers came in above where it was looking: off here, where
    the page's own scrolling (snapRows) decides */
 .mc-center, .mc-center * { overflow-anchor: none; }
-.mc-sources-name { flex-shrink: 0; width: 220px; text-align: center; font-size: 14px; opacity: 0.6; white-space: nowrap;
+.mc-sources-name { flex-shrink: 0; width: 180px; text-align: center; font-size: 14px; opacity: 0.6; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .mc-dot > span { display: block; width: 9px; height: 9px; border-radius: 5px; background: rgba(255, 255, 255, 0.28);
   transition: width 0.22s ease, background 0.15s, transform 0.15s; }
 .mc-dot.gpfocus > span, .mc-dot:hover > span { background: rgba(255, 255, 255, 0.7); transform: scale(1.25); }
 .mc-dot.mc-on > span { width: 26px; background: #fff; transform: none; }
 .mc-dot.gpfocus.mc-on > span { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+/* Browse's dots each keep one slot whichever is lit, so none moves as the pill goes along them, and both sides hold as
+   many (an empty slot evens an odd count): the line is centred on the name, under the tabs */
+.mc-sources .mc-dot { width: 20px; padding: 0; justify-content: center; flex-shrink: 0; }
+.mc-sources .mc-dot.mc-on > span { width: 18px; }
+.mc-dot-gap { width: 20px; flex-shrink: 0; }
+/* the source a card is from: its mark, small, in the cover's corner (where a row mixes sources) */
+.mc-source-badge { position: absolute; top: 7px; right: 7px; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff;
+  background: rgba(10, 12, 16, 0.6); backdrop-filter: blur(6px); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  pointer-events: none; }
+/* Now Playing's cover, and the record a tap on the touchscreen makes of it: round, turning, grooved, with a sheen
+   that stays put as the record turns under it, and the spindle hole */
+.mc-np-face { position: absolute; inset: 0; border-radius: 8px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  transition: border-radius 0.45s ease; }
+.mc-record .mc-np-face { border-radius: 50%; animation: mc-record-turn 9s linear infinite;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6), 0 0 0 2px rgba(0, 0, 0, 0.55); }
+.mc-record .mc-np-face::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: repeating-radial-gradient(circle, rgba(0, 0, 0, 0) 0 3px, rgba(0, 0, 0, 0.14) 3px 4px); }
+.mc-record::after { content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 200deg, rgba(255, 255, 255, 0) 0deg, rgba(255, 255, 255, 0.16) 30deg,
+    rgba(255, 255, 255, 0) 70deg, rgba(255, 255, 255, 0) 180deg, rgba(255, 255, 255, 0.1) 210deg,
+    rgba(255, 255, 255, 0) 250deg); }
+.mc-record-hole { position: absolute; left: 50%; top: 50%; width: 7%; height: 7%; transform: translate(-50%, -50%);
+  border-radius: 50%; background: #0e141b; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12); z-index: 1; }
+@keyframes mc-record-turn { to { transform: rotate(360deg); } }
+/* on a round picture (an artist's): at the circle's edge, not off it */
+.mc-source-badge.mc-on-round { top: auto; right: 12%; bottom: 6%; }
 /* a line of text to rest on while reading (show notes, a station's details): barely marked */
 .mc-line { border-radius: 4px; outline: none; scroll-margin-top: 10px; scroll-margin-bottom: 10px; }
 .mc-line.gpfocus { background: rgba(255, 255, 255, 0.06); }
@@ -130,7 +160,7 @@ const KIND_ICON: Record<Collection["kind"], ReactNode> = {
 };
 
 /** A collection's picture (round for artists), or its kind's icon when it has none. */
-export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind">; size: number | string }> = ({
+export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind"> & { id?: string }; size: number | string }> = ({
   instanceId,
   c,
   size,
@@ -165,6 +195,8 @@ export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind">
           onLoad={load.onLoad}
           onError={load.onError}
         />
+      ) : c.id === NO_DISC ? (
+        <FaCompactDisc />
       ) : (
         KIND_ICON[c.kind]
       )}
@@ -173,6 +205,9 @@ export const Cover: FC<{ instanceId: string; c: Pick<Collection, "art" | "kind">
 };
 
 /** One collection on a shelf: A opens it, X plays it (albums and playlists), Y its menu. */
+/** Whether cards show their source on their cover: off in a row that's all one source's, named in its title */
+export const SourceBadges = createContext(true);
+
 export const Card: FC<{
   instanceId: string;
   c: Collection;
@@ -182,6 +217,11 @@ export const Card: FC<{
 }> = ({ instanceId, c, onOpen, onPlay, onOptions }) => {
   const [focused, setFocused] = useState(false);
   const size = useCardSize();
+  // which source it's from, on its cover, where a row mixes them (the same album from two services told apart)
+  const services = useStore(pluginState)?.services;
+  const source = useContext(SourceBadges) && c.source ? services?.find((s) => s.id === c.source) : undefined;
+  const from = source?.name;
+  const subtitle = from && c.subtitle?.endsWith(` · ${from}`) ? c.subtitle.slice(0, -` · ${from}`.length) : c.subtitle;
   return (
     <Focusable
       className="mc-card"
@@ -198,12 +238,17 @@ export const Card: FC<{
       onGamepadBlur={() => setFocused(false)}
       style={{ width: size, flexShrink: 0, padding: 2 }}
     >
-      <Cover instanceId={instanceId} c={c} size={size} />
+      <div style={{ position: "relative" }}>
+        <Cover instanceId={instanceId} c={c} size={size} />
+        {source && (
+          <div className={c.kind === "artist" ? "mc-source-badge mc-on-round" : "mc-source-badge"} title={source.name}>
+            {sourceMark(source.type, source.name)}
+          </div>
+        )}
+      </div>
       <div style={{ marginTop: 10, textAlign: c.kind === "artist" ? "center" : "left" }}>
         <ScrollingText text={c.title} play={focused} style={{ fontSize: 14, fontWeight: 600, color: "#ffffff" }} />
-        {c.subtitle && (
-          <ScrollingText text={c.subtitle} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />
-        )}
+        {subtitle && <ScrollingText text={subtitle} play={focused} style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }} />}
       </div>
     </Focusable>
   );

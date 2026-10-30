@@ -16,6 +16,7 @@ import { browseThenReturn, readClipboard, signIn } from "../signIn";
 import { FC, useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
 import { DialogActions, ScrollingText, countryName } from "./common";
+import { QrCode } from "./QrCode";
 import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart, saveService, testService } from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
@@ -199,6 +200,13 @@ const TidalFields: FC<{
           ? `Signed in${draft.config.username ? ` as ${draft.config.username}` : ""} · sign in again`
           : "Sign in with TIDAL"}
       </DialogButton>
+      <PhoneSignIn
+        type="tidal"
+        draft={draft}
+        instructions="Scan with your phone's camera and approve it there (or go to link.tidal.com and enter the code)"
+        signedInAs={(s) => `Signed in${s.config.username ? ` as ${s.config.username}` : ""}`}
+        closeModal={closeModal}
+      />
     </Field>
     <DropdownItem
       label="Streaming quality"
@@ -238,6 +246,13 @@ const QobuzFields: FC<{
           ? `Signed in${draft.config.email ? ` as ${draft.config.email}` : ""} · sign in again`
           : "Sign in with Qobuz"}
       </DialogButton>
+      <PhoneSignIn
+        type="qobuz"
+        draft={draft}
+        instructions="Scan with your phone's camera and sign in there. Your phone needs to be on the same Wi-Fi as this device."
+        signedInAs={(s) => `Signed in${s.config.email ? ` as ${s.config.email}` : ""}`}
+        closeModal={closeModal}
+      />
     </Field>
     <DropdownItem
       label="Streaming quality"
@@ -249,6 +264,8 @@ const QobuzFields: FC<{
 );
 
 const SPOTIFY_SHARED_APP = "d420a117a32841c2b3474932e49fb54b";
+/** Spotify's playback app, which a phone signs in with (services/spotify.py PLAYBACK_CLIENT_ID) */
+const SPOTIFY_PLAYBACK_APP = "65b708073fc0480ea92a077233ca87bd";
 const SPOTIFY_DASHBOARD = "https://developer.spotify.com/dashboard";
 /** A Spotify client ID: 32 hex digits, wherever it sits in what was copied. */
 const findClientId = (text: string | null) => text?.match(/\b[0-9a-f]{32}\b/i)?.[0].toLowerCase() ?? null;
@@ -269,7 +286,9 @@ const SpotifyFields: FC<{
 }> = ({ draft, setConfig, signedIn, closeModal, openDashboard }) => {
   const clientId = (draft.config.client_id ?? "").trim();
   // a refresh token only works with the app that issued it
-  const appChanged = signedIn && (clientId || SPOTIFY_SHARED_APP) !== (draft.config.signed_with ?? SPOTIFY_SHARED_APP);
+  // (a phone sign-in is with playback's app, which stands in for the shared one)
+  const signedWith = draft.config.signed_with === SPOTIFY_PLAYBACK_APP ? SPOTIFY_SHARED_APP : draft.config.signed_with;
+  const appChanged = signedIn && (clientId || SPOTIFY_SHARED_APP) !== (signedWith ?? SPOTIFY_SHARED_APP);
   return (
     <>
       <Field label="Account" hint="Needs Spotify Premium">
@@ -285,6 +304,13 @@ const SpotifyFields: FC<{
               ? `Signed in${draft.config.display_name ? ` as ${draft.config.display_name}` : ""} · sign in again`
               : "Sign in with Spotify"}
         </DialogButton>
+        <PhoneSignIn
+          type="spotify"
+          draft={draft}
+          instructions="Scan with your phone's camera and approve it there (or go to spotify.com/pair and enter the code)"
+          signedInAs={(s) => `Signed in${s.config.display_name ? ` as ${s.config.display_name}` : ""}`}
+          closeModal={closeModal}
+        />
       </Field>
       <DropdownItem
         label="Streaming quality"
@@ -478,6 +504,7 @@ const CodeSignIn: FC<{
   closeModal?: () => void;
 }> = ({ type, draft, options, label, instructions, disabled, signedInAs, closeModal }) => {
   const [code, setCode] = useState<string | null>(null);
+  const [qr, setQr] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const login = useRef<string | null>(null);
 
@@ -493,7 +520,8 @@ const CodeSignIn: FC<{
     const begun = await signInStart(type, options);
     if (!begun.ok) return setStatus(begun.error);
     login.current = begun.data.login_id;
-    setCode(begun.data.code);
+    setCode(begun.data.code || null);
+    setQr(begun.data.qr || null);
     setStatus(null);
     for (;;) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -502,6 +530,7 @@ const CodeSignIn: FC<{
       if (poll.status === "error") {
         login.current = null;
         setCode(null);
+        setQr(null);
         return setStatus(poll.error ?? "Sign-in failed");
       }
       if (poll.status === "done" && poll.service) {
@@ -516,7 +545,14 @@ const CodeSignIn: FC<{
 
   return (
     <>
-      {code ? (
+      {qr ? (
+        // on a phone: the camera opens the sign-in page; the code too, where there's one to check or type
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "8px 0" }}>
+          <QrCode text={qr} size={180} />
+          {code && <div style={{ fontSize: 24, fontWeight: "bold", letterSpacing: 5 }}>{code}</div>}
+          <div style={{ fontSize: 12, opacity: 0.6, textAlign: "center", maxWidth: 320 }}>{instructions}</div>
+        </div>
+      ) : code ? (
         <div style={{ textAlign: "center", padding: "8px 0" }}>
           <div style={{ fontSize: 32, fontWeight: "bold", letterSpacing: 6 }}>{code}</div>
           <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>{instructions}</div>
@@ -530,6 +566,31 @@ const CodeSignIn: FC<{
     </>
   );
 };
+
+/**
+ * Signing in on a phone, beside the source's own way: a QR code of its sign-in page (and its code, where it has
+ * one), for the phone's camera; saved here once approved there.
+ */
+const PhoneSignIn: FC<{
+  type: string;
+  draft: ServiceDraft;
+  options?: Record<string, any>;
+  instructions: string;
+  signedInAs: (service: ServiceInfo) => string;
+  closeModal?: () => void;
+}> = ({ type, draft, options, instructions, signedInAs, closeModal }) => (
+  <div style={{ marginTop: 8 }}>
+    <CodeSignIn
+      type={type}
+      draft={draft}
+      options={{ ...options, phone: true }}
+      label="Sign in with your phone"
+      instructions={instructions}
+      signedInAs={signedInAs}
+      closeModal={closeModal}
+    />
+  </div>
+);
 
 /**
  * Jellyfin: Quick Connect (approve a code in any signed-in Jellyfin app, nothing typed here) or a
@@ -619,6 +680,14 @@ const PlexFields: FC<{
         >
           Sign in here instead
         </DialogButton>
+        <PhoneSignIn
+          type="plex"
+          draft={draft}
+          options={{ client_id: draft.config.client_id ?? "" }}
+          instructions="Scan with your phone's camera and approve it there"
+          signedInAs={plexSignedIn}
+          closeModal={closeModal}
+        />
       </Field>
       {servers.length > 1 && (
         <DropdownItem

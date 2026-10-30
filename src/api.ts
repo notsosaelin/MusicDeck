@@ -92,6 +92,10 @@ export interface Page {
   tracks: Track[];
   /** more titled track lists, e.g. "Videos" in search results */
   extra?: { title: string; tracks: Track[] }[];
+  /** more rows of collections after the rest, each titled: an artist's Singles & EPs, Similar artists... */
+  shelves?: { title: string; items: Collection[] }[];
+  /** a few paragraphs on it (an artist's biography), newlines between them */
+  about?: string;
   /** show songs/videos above albums/artists/playlists (search results) */
   tracks_first?: boolean;
   /**
@@ -240,6 +244,19 @@ export interface PluginState {
   version: string;
   services: ServiceInfo[];
   devices: DeviceInfo[];
+  /**
+   * the disc drive, one entry apart from the devices: what's in it (`id`: its device; `kind` "cd" or "disc", a
+   * data disc), or nothing (`id` null, label "No disc inserted"); null without a drive
+   */
+  disc?: {
+    id: string | null;
+    kind: "cd" | "disc" | null;
+    name: string;
+    label: string;
+    /** Local files' card for it (a CD as its album, with its cover), opened through `source` (Local files) */
+    card: Collection;
+    source: string;
+  } | null;
   active_service: string | null;
   qam_mode: QamMode;
   /** a toast when a new song starts (src/songToasts.ts) */
@@ -341,6 +358,20 @@ export const burnPlan = callable<[instanceId: string, kind: string, itemId: stri
 export const burnCd = callable<[instanceId: string, kind: string, itemId: string], Result<string>>("burn_cd");
 /** Ejects a plugged-in device ("Safely remove"), or opens a CD drive's tray. */
 export const ejectDevice = callable<[deviceId: string], Result<string>>("eject_device");
+/** For developers without a CD drive (the debug handle only): a disc image (.cue) in a drive of its own. */
+export const virtualCd = callable<
+  [cue: string],
+  Result<{ drive: string; toc: [number, number, boolean][]; disc_id: string }>
+>("virtual_cd");
+/**
+ * The disc drive's entry as a collection to open: the disc in it as its device (a CD opens as its album, with Eject;
+ * its card's cover and title), or the "No disc inserted" page; through Local files (`source`).
+ */
+/** The disc drive's card while nothing's in it (services/shelf.py NO_DISC) */
+export const NO_DISC = "disc:none";
+
+export const discCollection = (disc: NonNullable<PluginState["disc"]>): Collection =>
+  disc.id ? { ...disc.card, id: `dv~${disc.id}~`, kind: "device", source: disc.source } : { ...disc.card, source: disc.source };
 /** Whether an id (a track's, an album's...) is of something on a plugged-in device (services/shelf.py). */
 export const onDevice = (id: string | null | undefined) => !!id && id.startsWith("dv~");
 export const getHome = callable<[id: string], Result<Section[]>>("home");
@@ -671,7 +702,8 @@ export const youtubeUpdate = callable<[id: string], Result<string>>("youtube_upd
 /** Sign-in outside the form (OAuth pages, device codes): see SignIn in services/base.py. */
 export const signInStart = callable<
   [type: string, options: Record<string, any>],
-  Result<{ login_id: string; url: string; code: string }>
+  /** qr: a link to sign in on a phone (shown as a QR code), when the source has one */
+  Result<{ login_id: string; url: string; code: string; qr?: string }>
 >("sign_in_start");
 export const signInPoll = callable<
   [loginId: string, service: ServiceDraft],

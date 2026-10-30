@@ -7,6 +7,7 @@ import {
   FaCompactDisc,
   FaCompass,
   FaDownload,
+  FaEject,
   FaExternalLinkAlt,
   FaFeatherAlt,
   FaFire,
@@ -46,6 +47,8 @@ import {
   Section,
   TabInfo,
   Track,
+  discCollection,
+  ejectDevice,
   getBrowseInfo,
   getCenterTab,
   isLocalPlaylist,
@@ -89,6 +92,7 @@ import {
   PageButton,
   SectionTitle,
   ShowAllCard,
+  SourceBadges,
   StationCard,
   allStations,
   Shelf,
@@ -172,17 +176,24 @@ const addToQueue = (instanceId: string, track: Track) => {
 };
 
 /** Shelves of collections, a card each; A opens one in this tab. */
-const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[]; titled: boolean }> = ({
+/** Rows of cards, one a kind (titled by it when `titled`); or with `title`, one row of them all under that title. */
+const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[]; titled: boolean; title?: string }> = ({
   instanceId,
   stack,
   items,
   titled,
+  title,
 }) => {
   useStore(runningGame); // cards get a menu (play with the game) while one runs
+  const rows: [string, Collection[]][] = title
+    ? items.length
+      ? [[title, items]]
+      : []
+    : groupByKind(items).map(([kind, list]) => [KIND_TITLES[kind], list]);
   return (
     <>
-      {groupByKind(items).map(([kind, list]) => (
-        <Shelf key={kind} title={titled ? KIND_TITLES[kind] : undefined}>
+      {rows.map(([name, list]) => (
+        <Shelf key={name} title={titled || title ? name : undefined}>
           {list.slice(0, rowCut(list.length)).map((c) => (
             <Card
               key={c.kind + c.id}
@@ -197,7 +208,7 @@ const Shelves: FC<{ instanceId: string; stack: CenterStack; items: Collection[];
               }
             />
           ))}
-          {list.length > ROW_SIZE && rowEnd(stack, KIND_TITLES[kind], list, [], instanceId)}
+          {list.length > ROW_SIZE && rowEnd(stack, name, list, [], instanceId)}
         </Shelf>
       ))}
     </>
@@ -558,20 +569,31 @@ const DEVICE_KINDS: Record<string, string> = { mtp: "Phone", ios: "iPhone", disc
 
 /** Browse's Your library: what's plugged in (phones, players, sticks, CDs), a card each; each opens its page. */
 export const DevicesShelf: FC<{ instanceId: string; stack: CenterStack }> = ({ instanceId, stack }) => {
-  const devices = useStore(pluginState)?.devices ?? [];
-  if (!devices.length) return null;
+  const state = useStore(pluginState);
+  // what's in the disc drive is the Disc row's, not a device of its own
+  const devices = (state?.devices ?? []).filter((d) => d.kind !== "cd" && d.kind !== "disc");
+  const disc = state?.disc;
   return (
-    <Shelf title="Devices">
-      {devices.map((d) =>
-        collectionCard(instanceId, stack, {
-          id: `dv~${d.id}~`,
-          kind: "device",
-          title: d.name,
-          subtitle: d.kind === "ipod" ? d.status?.model || "iPod" : (DEVICE_KINDS[d.kind] ?? "USB"),
-          art: null,
-        }),
+    <>
+      {disc && (
+        <Shelf title="Disc">
+          {collectionCard(disc.source, stack, discCollection(disc))}
+        </Shelf>
       )}
-    </Shelf>
+      {devices.length > 0 && (
+        <Shelf title="Devices">
+          {devices.map((d) =>
+            collectionCard(instanceId, stack, {
+              id: `dv~${d.id}~`,
+              kind: "device",
+              title: d.name,
+              subtitle: d.kind === "ipod" ? d.status?.model || "iPod" : (DEVICE_KINDS[d.kind] ?? "USB"),
+              art: null,
+            }),
+          )}
+        </Shelf>
+      )}
+    </>
   );
 };
 
@@ -583,8 +605,26 @@ const continueCards = (sessions: ReturnType<typeof useOtherSessions>) =>
     <TrackCard key={`peer:${s.peer}`} instanceId={s.instanceId} track={{ ...s.track, artist: `On ${s.name}` }} onPlay={() => continueFrom(s)} />
   ));
 
-/** `lead`: cards ahead of the section's own in its row (Home's Jump back in: your other devices') */
-const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean; lead?: ReactNode }> = ({
+/**
+ * A section, its cards saying which source each is from, unless the whole row is one source's and its title says so
+ * (Home's "Qobuz · New releases"). `lead`: cards ahead of the section's own in its row (Home's Jump back in: your
+ * other devices').
+ */
+const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean; lead?: ReactNode }> = (
+  props,
+) => {
+  const s = props.section;
+  const first = s.items[0]?.source;
+  const name = first ? pluginState.get()?.services.find((x) => x.id === first)?.name : undefined;
+  const named = !!name && s.title.startsWith(name) && s.items.every((c) => c.source === first);
+  return (
+    <SourceBadges.Provider value={!named}>
+      <SectionContent {...props} />
+    </SourceBadges.Provider>
+  );
+};
+
+const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean; lead?: ReactNode }> = ({
   instanceId,
   stack,
   section: s,
@@ -862,6 +902,67 @@ const CategoryShelf: FC<{ instanceId: string; stack: CenterStack; category: Coll
   );
 };
 
+/**
+ * Your library as rows: every source's playlists, albums, artists and songs (each part of the one library), a row
+ * or a short list each, ending in Show all; each card with its source on its cover.
+ */
+export const LibraryRows: FC<{ instanceId: string; stack: CenterStack; parts: CenterTabInfo[] }> = ({
+  instanceId,
+  stack,
+  parts,
+}) => (
+  <>
+    {parts.map((t) => (
+      <LibraryRow key={t.id} instanceId={instanceId} stack={stack} part={t} />
+    ))}
+  </>
+);
+
+const LibraryRow: FC<{ instanceId: string; stack: CenterStack; part: CenterTabInfo }> = ({ instanceId, stack, part }) => {
+  const id = part.id.startsWith("library:") ? part.id.slice(8) : part.id;
+  const result = useResult<Section[]>(`library:tab:${id}`, () => libraryTab(id), true);
+  if (!result?.ok) return null;
+  const items = result.data.flatMap((s) => s.items);
+  const tracks = result.data.flatMap((s) => s.tracks ?? []);
+  if (!items.length && !tracks.length) return null;
+  return <SectionView instanceId={instanceId} stack={stack} section={{ title: part.title, items, tracks }} headed={false} />;
+};
+
+/** A long paragraph as pieces of whole sentences, each short enough to be on screen whole (a line the controller
+ *  rests on taller than the screen would hide its end). */
+function readable(paragraph: string): string[] {
+  const sentences = paragraph.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [paragraph];
+  const pieces: string[] = [];
+  for (const s of sentences) {
+    const last = pieces.length - 1;
+    if (last >= 0 && pieces[last].length + s.length <= 420) pieces[last] += s;
+    else pieces.push(s);
+  }
+  return pieces.map((p) => p.trim()).filter(Boolean);
+}
+
+/** A page's About (an artist's biography): a paragraph to a line, the controller resting on each as it reads down. */
+const AboutText: FC<{ text: string }> = ({ text }) => (
+  <Focusable flow-children="column" style={{ marginBottom: 28 }}>
+    <SectionTitle>About</SectionTitle>
+    {text
+      .split("\n")
+      .filter((p) => p.trim())
+      .flatMap(readable)
+      .map((p, i) => (
+        <Focusable
+          key={i}
+          className="mc-line"
+          noFocusRing
+          onActivate={() => {}}
+          style={{ padding: "6px 10px", fontSize: 16, lineHeight: 1.45, opacity: 0.9 }}
+        >
+          {p}
+        </Focusable>
+      ))}
+  </Focusable>
+);
+
 /** What a page holds below its header: shelves of collections and lists of tracks. */
 const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from?: Collection }> = ({
   instanceId,
@@ -870,7 +971,7 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
   from,
 }) => {
   const showAlbum = new Set(page.tracks.map((t) => t.album)).size > 1;
-  const mixed = page.collections.length > 0 || !!page.extra?.length;
+  const mixed = page.collections.length > 0 || !!page.extra?.length || !!page.shelves?.length;
   const playlistId = from && isLocalPlaylist(from.id) ? from.id : undefined;
   const numbered = from?.kind === "album" && !showAlbum && !mixed && !hasFeature(instanceId, "progress");
   // a long list (a genre's albums, a decade's, a chart's): the standard grid, as every Show all is; a page
@@ -911,17 +1012,19 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
       </>
     );
   }
+  const popular = from?.kind === "artist" && mixed;
   const tracks = (
     <>
       {page.tracks.length > 0 && (
         <div style={{ marginBottom: 28 }}>
-          {mixed && <SectionTitle>{page.tracks_first ? "Songs" : "Tracks"}</SectionTitle>}
+          {mixed && <SectionTitle>{page.tracks_first ? "Songs" : popular ? "Popular" : "Tracks"}</SectionTitle>}
           <TrackTable
             instanceId={instanceId}
             tracks={page.tracks}
             numbered={numbered}
             showAlbum={showAlbum}
-            limit={mixed && !from ? 8 : undefined}
+            // an artist's songs are their most played: a few, the rest a press away, their releases soon after
+            limit={mixed && !from ? 8 : popular ? 10 : undefined}
             onPlay={(i) =>
               from ? playFrom(instanceId, from, page.tracks, i) : player.playList(instanceId, page.tracks, i)
             }
@@ -950,7 +1053,13 @@ const PageContent: FC<{ instanceId: string; stack: CenterStack; page: Page; from
       {page.notice && <Notice>{page.notice}</Notice>}
       {page.tracks_first ? tracks : shelves}
       {page.tracks_first ? shelves : tracks}
-      {!page.tracks.length && !page.collections.length && !page.extra?.length && !page.notice && <Notice>Empty</Notice>}
+      {page.shelves?.map((shelf) => (
+        <Shelves key={shelf.title} instanceId={instanceId} stack={stack} items={shelf.items} titled title={shelf.title} />
+      ))}
+      {page.about && <AboutText text={page.about} />}
+      {!page.tracks.length && !page.collections.length && !page.extra?.length && !page.shelves?.length && !page.notice && (
+        <Notice>Empty</Notice>
+      )}
     </>
   );
 };
@@ -975,6 +1084,15 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
   const download = useDownload(instanceId, collection);
   const copy = useSavedCopy(instanceId, collection);
   const pictured = collection.kind !== "list" && collection.kind !== "folder";
+  // a device's own page (a disc in the drive, a player): what it is, and Eject
+  const device =
+    collection.kind === "device" ? pluginState.get()?.devices.find((d) => collection.id === `dv~${d.id}~`) : undefined;
+  // the disc ejected, the player unplugged: its page goes (there's nothing left to show or play)
+  const wasThere = useRef(false);
+  useEffect(() => {
+    if (device) wasThere.current = true;
+    else if (wasThere.current) popCenter(stack);
+  }, [!!device]);
   const albumArtist = page && collection.kind === "album" ? mostCommon(page.tracks.map((t) => t.artist)) : undefined;
   const total = page?.tracks.reduce((sum, t) => sum + (t.duration || 0), 0) ?? 0;
   const byline = albumArtist ?? page?.subtitle ?? collection.subtitle;
@@ -993,7 +1111,7 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
   return (
     <>
       {/* a block snapRows brings into view whole: moving up to Play shows the cover and title too */}
-      <div className="mc-row-block" style={{ display: "flex", gap: 32, alignItems: "flex-end", marginBottom: 28 }}>
+      <div className="mc-row-block mc-page-head" style={{ display: "flex", gap: 32, alignItems: "flex-end", marginBottom: 28 }}>
         {pictured && (
           <Cover
             instanceId={instanceId}
@@ -1003,7 +1121,7 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
         )}
         <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontSize: 13, letterSpacing: 1.5, textTransform: "uppercase", opacity: 0.6 }}>
-            {KIND_TITLES[collection.kind].replace(/s$/, "")}
+            {device?.kind === "cd" ? "Audio CD" : device?.kind === "disc" ? "Data disc" : KIND_TITLES[collection.kind].replace(/s$/, "")}
           </div>
           <div style={{ fontSize: 26, fontWeight: 700, color: "#ffffff", lineHeight: 1.15 }}>
             {page?.title ?? collection.title}
@@ -1075,6 +1193,17 @@ export const CollectionPage: FC<{ instanceId: string; stack: CenterStack; collec
                 {page.action.label}
               </PageButton>
             )}
+            {device && (
+              <PageButton
+                onClick={async () => {
+                  const r = await ejectDevice(device.id);
+                  notify(device.name, r.ok ? r.data : r.error);
+                  if (r.ok) popCenter(stack);
+                }}
+              >
+                <FaEject /> {device.kind === "cd" || device.kind === "disc" ? "Eject disc" : "Eject"}
+              </PageButton>
+            )}
           </Focusable>
         </div>
       </div>
@@ -1111,7 +1240,7 @@ export const SearchPage: FC<{ instanceId: string; stack: CenterStack; query: str
     <>
       <Focusable
         flow-children="row"
-        style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 24, maxWidth: 720 }}
+        style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 24 }}
       >
         <div style={{ flex: 1 }}>
           <TextField
@@ -1282,7 +1411,7 @@ const RecentSearches: FC<{ instanceId: string; onSearch: (q: string) => void }> 
       <Focusable
         className="mc-list"
         flow-children="column"
-        style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 720 }}
+        style={{ display: "flex", flexDirection: "column", gap: 2 }}
       >
         {searches.map((q) => (
           <Focusable

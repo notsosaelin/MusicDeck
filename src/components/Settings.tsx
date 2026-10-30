@@ -797,8 +797,9 @@ export const PlaybackSections: FC<{ state: PluginState; Section?: SectionFrame }
       <Section title="Games">
         <PanelSectionRow>
           <DropdownItem
-            // under its label, full width: its value (a source's name, a choice) is never cut short
-            layout="below"
+            // under its label, full width in the narrow panel (its value never cut short); beside it, as every other
+            // choice is, where there's room (the media center)
+            layout={Section === PanelSection ? "below" : "inline"}
             label="In games"
             description={
               state.playback.game_pause
@@ -907,11 +908,25 @@ export const Settings: FC = () => {
         </PanelSectionRow>
       </PanelSection>
       {/* what's plugged in plays in Local files (its Devices tab): listed here to be named */}
-      {(state.devices ?? []).length > 0 && (
+      {/* the disc drive, one entry: what's in it (named, ejected), or that nothing is */}
+      {state.disc && (
+        <PanelSection title="Disc">
+          {state.disc.id && state.devices.some((d) => d.id === state.disc?.id) ? (
+            <DeviceRow device={state.devices.find((d) => d.id === state.disc?.id)!} />
+          ) : (
+            <PanelSectionRow>
+              <Field label={state.disc.label} bottomSeparator="none" />
+            </PanelSectionRow>
+          )}
+        </PanelSection>
+      )}
+      {(state.devices ?? []).some((d) => d.kind !== "cd" && d.kind !== "disc") && (
         <PanelSection title="Plugged in">
-          {state.devices.map((d) => (
-            <DeviceRow key={d.id} device={d} />
-          ))}
+          {state.devices
+            .filter((d) => d.kind !== "cd" && d.kind !== "disc")
+            .map((d) => (
+              <DeviceRow key={d.id} device={d} />
+            ))}
         </PanelSection>
       )}
 

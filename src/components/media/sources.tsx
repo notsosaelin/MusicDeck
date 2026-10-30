@@ -197,7 +197,10 @@ export const SourcePager: FC<{
             {places.length > 1 && places.slice(0, half).map(dot)}
           </div>
           <div className="mc-sources-name">{places.length > 1 ? (places.find((p) => p.id === lit)?.name ?? "") : ""}</div>
-          <div className="mc-sources-side">{places.length > 1 && places.slice(half).map(dot)}</div>
+          <div className="mc-sources-side">
+            {places.length > 1 && places.slice(half).map(dot)}
+            {places.length > 1 && places.length % 2 === 1 && <div className="mc-dot-gap" />}
+          </div>
           {leading !== undefined && <div className="mc-sources-end" />}
         </Focusable>
       )}

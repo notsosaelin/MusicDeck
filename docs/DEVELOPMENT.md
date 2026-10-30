@@ -209,6 +209,9 @@ m.centerTab.set({ tab: "playing" })       // the media center's tab; m.openMedia
 m.openInLibrary({ id, kind: "album", title: "" })  // a page, in the media center when it's showing
 m.previewSource(id)                       // another source's Home/Browse/Search, the live one left playing;
                                           // m.previewSource() goes back (for checking each source's pages)
+m.api.virtualCd("/path/to/disc.cue")      // a disc image in a virtual drive, found as a CD is (cdimage.py);
+                                          // m.api.virtualCd("") unplugs the drive. A test image laid out to a
+                                          // real pressing (so MusicBrainz names it): out/winbuild/make_real_cd.py
 ```
 
 Screenshots of the QAM: `python scripts/cdp.py QuickAccess "1" --shot qam.png`. Dialogs render in

@@ -18,9 +18,11 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   Windows, Settings first offers **Let your devices reach this PC** (Windows' firewall asks for an administrator's yes).
 - **One library:** every source's music together, as Steam's library is every game whatever store it came from.
   Playlists mix sources (a Qobuz song, a SoundCloud one and your own files in one list).
-  Home has what you played lately and your playlists from all of them, then a little of each source's own Home;
-  **Your music** (Playlists, Albums, Artists, Songs) puts every source's together, each card saying where it's
-  from, filtered to one source or ordered by title, artist or source; **Search** asks every source at once, each one's results showing as they come. A queue can mix sources.
+  Home has what you played lately from all of them, then each source in turn: a row of its albums or playlists
+  (the rows take turns) and a list of its songs; **Your music** (Playlists, Albums, Artists, Songs) puts every
+  source's together, a row of each in the media center, each card marked with its source's logo (the same album
+  saved from three services is three cards you can tell apart), filtered to one source or ordered by title,
+  artist or source; **Search** asks every source at once, each one's results showing as they come. A queue can mix sources.
   Each source's own parts (Qobuz's picks, Local files' folders and tools) stay under its name. On desktop Steam
   and in the media center; the Quick Access panel still browses the live source.
 - **Desktop Steam too:** a **Music** tab beside Store, Library and Community, as if Steam always had one.
@@ -71,7 +73,9 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   file) show as their songs; songs **convert** to MP3, AAC, Opus or FLAC for other devices.
 - **Downloads anywhere:** every playlist or album of a source that can download has Download, wherever it's
   opened (Quick Access, the media center, desktop Steam, its menu); one from another source is saved to your
-  playlists first. A playlist you've saved says so wherever it's opened.
+  playlists first. A playlist you've saved says so wherever it's opened, and **keeps up with the original**:
+  songs added to it on SoundCloud, YouTube or any source show up in your copy (and are downloaded, if it is),
+  songs taken out go, and what you added or removed yourself stays that way, on all your devices.
 - **Library manager for your files:** edit a track's or a whole album's tags (**Y** → Edit tags; the last
   edit to each file can be undone), fill them in with **Look up details**: [MusicBrainz](https://musicbrainz.org),
   Apple Music's and Deezer's public catalogues are all asked at once, the same record from several of them
@@ -187,14 +191,14 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
 | Plex | Your server (Plex account, or none for a server open to your network) | Sign in with a plex.tv/link code, server picker, favourites (star ratings), play reports, lyrics, radio, add to playlists, loudness levelling, original-quality audio |
 | Audiobookshelf | Your server | Audiobooks and podcasts: continue listening, series, authors, collections and playlists, search; books resume where any of your Audiobookshelf apps left them, chapters to jump between, mark as played |
 | SoulSync | Your server (an admin API key) | The library of the SoulSync you run: recently added albums and songs, albums, artists, search; plays its files, seeking included |
-| SoundCloud | None | Search, curated selections, artists, playlists and albums, related-track radio |
-| YouTube Music | None | Home, search across YouTube Music **and** regular YouTube, artists and channels, radio, lyrics |
-| Bandcamp | None | Genre charts, search, albums and artist discographies, full-track streaming, lyrics, same-artist radio |
+| SoundCloud | None | Search, curated selections, what's popular now, artists (their reposts, likes, playlists, station and similar artists), playlists and albums, related-track radio |
+| YouTube Music | None | Home, search across YouTube Music **and** regular YouTube, artists (every album and single, their radio, related artists, about them) and channels, albums with their radio and what's like them, radio, lyrics |
+| Bandcamp | None | Genre charts, Bandcamp Radio's shows (each with what's playing in it), search, albums (tags, "you may also like", credits) and artist discographies with their bio, full-track streaming, lyrics, same-artist radio |
 | Internet radio | None | Tens of thousands of stations from [Radio Browser](https://www.radio-browser.info): popular near you, trending, genres, search, favourite stations, song on air |
 | Podcasts | None | Apple's top charts, search for shows and episodes (or paste a feed address), subscriptions, new episodes, episodes resume where you stopped, mark as played |
 | Live Music Archive | None | Over 250,000 concert recordings bands allow to be shared ([archive.org](https://archive.org/details/etree)): concerts played on this day, popular this week, bands and their shows, search, same-band radio |
-| Qobuz | Your subscription | Your playlists and favourites (synced), editorial picks, search, MP3 up to 24-bit/192 kHz FLAC, plays reported as from the official player |
-| TIDAL | Your subscription | Your playlists, mixes and favourites, TIDAL's home page, search, track radio, synced lyrics, up to CD-quality FLAC |
+| Qobuz | Your subscription | Your playlists and favourites (synced), My Weekly Q, Qobuz's Discover (new releases, album of the week, Qobuzissimes, press awards, ideal discography), playlists by theme, radio from a song, an album or an artist, full artist pages (every kind of release, appears on, similar artists, biography), albums with what's like them and their label, search with Load more, MP3 up to 24-bit/192 kHz FLAC, plays reported as from the official player |
+| TIDAL | Your subscription | Your playlists, mixes and favourites, TIDAL's home page, search, track and artist radio, artists' singles, appearances, similar artists and biography, synced lyrics, up to CD-quality FLAC |
 | Soulseek | A Soulseek name (registered when you first sign in with it) | Search what other people share, albums by folder (the whole folder) with format and quality, browse a user's whole library, play a track (downloaded first), download an album into your music folder (default `~/Music/Soulseek`), where your local files pick it up and get it ready; downloads carry on after interruptions, retry and can be cancelled; optionally share folders of your own (searches, browsing, uploads two at a time), with your router asked to forward the port |
 | Spotify | Premium | Your playlists, Liked Songs (synced), recently played, top tracks and artists, saved albums, new releases, search, Spotify's synced lyrics, up to 320 kbps, Spotify's own loudness levelling |
 
@@ -206,7 +210,10 @@ using an unofficial client. Your playlists and favourites for those stay on the 
 has no tokens, so it's kept like the tokens below (and never in backups). Navidrome passwords become Subsonic tokens and Jellyfin, Emby and
 Audiobookshelf passwords become access tokens on save (or skip the password with Jellyfin's Quick Connect).
 Plex signs in with a code entered at plex.tv/link. Qobuz, TIDAL and Spotify sign in on their own websites, in
-Steam's browser, and MusicDeck only receives the resulting tokens.
+Steam's browser, and MusicDeck only receives the resulting tokens. **Sign in with your phone** (Spotify, Qobuz,
+TIDAL, Plex) shows a QR code instead: scan it, sign in or approve on your phone, done. Spotify's and TIDAL's are
+their own TV-style codes (spotify.com/pair, link.tidal.com); Qobuz's phone comes back to the Deck over your home
+network, so it has to be on the same Wi-Fi.
 
 **Where those tokens live.** In MusicDeck's settings file, which only your user account can read (mode 600, in a private folder),
 and not encrypted: SteamOS's game mode has no system keyring to lock them with, and a key kept beside them

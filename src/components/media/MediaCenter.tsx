@@ -71,6 +71,7 @@ import {
   centerNav,
   centerStack,
   DevicesShelf,
+  LibraryRows,
   focusKeyFor,
   popCenter,
   viewsOf,
@@ -636,6 +637,40 @@ const NothingPlaying: FC = () => {
   );
 };
 
+/**
+ * Now Playing's cover; a tap on it on the touchscreen (a little secret: no hint, no button) turns it into a record,
+ * the cover as its label going round (still while paused); another tap and it's the cover again.
+ */
+const CoverOrRecord: FC<{ art?: string }> = ({ art }) => {
+  const [record, setRecord] = useState(false);
+  const { playing } = useStore(player.state);
+  return (
+    <div
+      className={record ? "mc-np-cover mc-record" : "mc-np-cover"}
+      onPointerUp={(e) => {
+        if (e.pointerType === "touch" || e.pointerType === "pen") setRecord(!record);
+      }}
+      style={{
+        height: "100%",
+        // on a squarer screen (docked) the row's height would take most of its width
+        maxHeight: "40vw",
+        aspectRatio: "1",
+        flexShrink: 0,
+        position: "relative",
+      }}
+    >
+      <div
+        className="mc-np-face"
+        style={{
+          background: art ? `center / cover no-repeat url("${art}")` : "rgba(255, 255, 255, 0.08)",
+          animationPlayState: record && playing ? "running" : "paused",
+        }}
+      />
+      {record && <div className="mc-record-hole" />}
+    </div>
+  );
+};
+
 const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyrics"] }> = ({ onSleep, lyricsSize }) => {
   const [syncedSize, plainSize] = LYRICS_SIZES[lyricsSize] ?? LYRICS_SIZES.medium;
   const state = useStore(player.state);
@@ -705,18 +740,7 @@ const NowPlayingTab: FC<{ onSleep: () => void; lyricsSize: CenterSettings["lyric
                 }}
               />
             ) : (
-              <div
-                style={{
-                  height: "100%",
-                  // on a squarer screen (docked) the row's height would take most of its width
-                  maxHeight: "40vw",
-                  aspectRatio: "1",
-                  flexShrink: 0,
-                  borderRadius: 8,
-                  background: art ? `center / cover no-repeat url("${art}")` : "rgba(255, 255, 255, 0.08)",
-                  boxShadow: "0 8px 30px rgba(0, 0, 0, 0.5)",
-                }}
-              />
+              <CoverOrRecord art={art} />
             )}
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5vh" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
@@ -1001,10 +1025,11 @@ const Browse: FC<{
             stack={stack}
             after={<BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />}
           />
-        ) : devicesFrom ? (
+        ) : devicesFrom !== undefined ? (
+          // Your library: the disc and what's plugged in, then your music itself, a row of each part
           <>
-            <DevicesShelf instanceId={devicesFrom} stack={stack} />
-            <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
+            {devicesFrom && <DevicesShelf instanceId={devicesFrom} stack={stack} />}
+            <LibraryRows instanceId={instanceId} stack={stack} parts={sections} />
           </>
         ) : tab === BROWSE.id && sections.length !== 1 ? (
           <BrowseIndex instanceId={instanceId} sections={sections} stack={stack} />
@@ -1081,7 +1106,7 @@ const BrowseBySource: FC<{ live: string }> = ({ live }) => {
         return from ? (
           <Browse instanceId={from.id} tab={BROWSE.id} sections={ownSections(from)} withHome />
         ) : (
-          <Browse instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id} />
+          <Browse instanceId={live} tab={BROWSE.id} sections={librarySections()} devicesFrom={local?.id ?? ""} />
         );
       }}
     />
@@ -1214,8 +1239,8 @@ const CenterSection: SectionFrame = ({ title, children }) => (
 const SettingsPage: FC = () => {
   const state = useStore(pluginState);
   return (
-    <div style={{ maxWidth: 760 }}>
-      <Equalizer />
+    <div>
+      <Equalizer Section={CenterSection} />
       <CenterChoices Section={CenterSection} />
       {state && <PlaybackSections state={state} Section={CenterSection} />}
       <div style={{ fontSize: 13, opacity: 0.55, marginTop: 24, lineHeight: 1.5 }}>

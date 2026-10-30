@@ -11,6 +11,8 @@ import asyncio
 import re
 from typing import Any, Awaitable, Callable, Optional
 
+from . import models
+
 #: the one library's tabs: its id, title, and which of a source's tabs (by id, of the user's own) go into it
 MERGED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("playlists", "Playlists", ("playlists", "musicdeck-playlists")),
@@ -21,10 +23,12 @@ MERGED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 MERGED_IDS = {m[0] for m in MERGED}
 #: how long a source may take before the rest are shown without it
 SECONDS = 8.0
-#: a source's own Home sections shown on the one Home, after Jump back in and the playlists
-HOME_PER_SOURCE = 3
 #: on Home, the newest of what was played, from every source
 JUMP_BACK = 12
+#: on Home, the kinds of cards the sources' rows take turns with
+HOME_KINDS = ("album", "playlist")
+#: a Home row of fewer cards than this is passed over for a fuller one
+HOME_ROW_MIN = 3
 
 # sections a source's Home starts with that the one Home has already, from every source at once
 OWN_HOME = {"Jump back in", "Your playlists"}
@@ -93,21 +97,37 @@ def merge_tab(title: str, parts: list[tuple[str, list[dict[str, Any]]]], sort: b
 
 def merge_home(jump_back: list[dict[str, Any]], playlists: list[dict[str, Any]],
                homes: list[tuple[str, str, list[dict[str, Any]]]]) -> list[dict[str, Any]]:
-    """Home: what was played lately and the user's playlists, from every source, then the start of each
-    source's own Home under its name. `jump_back`, `playlists`: already tagged; `homes`: (source, its
-    name, its Home's sections), in the sources' order."""
+    """Home: what was played lately, from every source, then each source under its name: a row of its cards, then a
+    list of its songs. The rows take turns, albums then playlists, where a source has both, so Home reads as a mix
+    rather than the same kind over and over; a row of a few cards over one card alone. (Your playlists are Browse's.)
+    `jump_back`: already tagged; `homes`: (source, its name, its Home's sections), in the sources' order."""
     out: list[dict[str, Any]] = []
     if jump_back:
         out.append({"title": "Jump back in", "items": [c for c in jump_back if "kind" in c],
                     "tracks": [t for t in jump_back if "kind" not in t]})
-    if playlists:
-        out.append({"title": "Your playlists", "items": playlists})
+    turn = 0
     for source, name, sections in homes:
         shown = [s for s in sections if isinstance(s, dict) and s.get("title") not in OWN_HOME and not s.get("notice")
-                 and (s.get("items") or s.get("tracks"))]
-        for s in shown[:HOME_PER_SOURCE]:
-            out.append(tag({**s, "title": f"{s['title']} · {name}" if s.get("title") else name}, source))
+                 and not (s.get("items") and models.is_categories(s))]
+        rows = [s for s in shown if s.get("items")]
+        wanted = HOME_KINDS[turn % len(HOME_KINDS)]
+        cards = (next((s for s in rows if _mostly(s, wanted) and len(s["items"]) >= HOME_ROW_MIN), None)
+                 or next((s for s in rows if len(s["items"]) >= HOME_ROW_MIN), None) or (rows[0] if rows else None))
+        songs = next((s for s in shown if s.get("tracks")), None)
+        titled = lambda s: f"{name} · {s['title']}" if s.get("title") else name  # noqa: E731
+        if cards:
+            out.append(tag({**cards, "title": titled(cards), "tracks": []}, source))
+            if _mostly(cards, wanted):
+                turn += 1
+        if songs:
+            out.append(tag({**songs, "title": titled(songs), "items": []}, source))
     return out
+
+
+def _mostly(section: dict[str, Any], kind: str) -> bool:
+    """Whether most of a section's cards are of `kind` ("album", "playlist")."""
+    items = section.get("items") or []
+    return bool(items) and sum(1 for c in items if c.get("kind") == kind) * 2 > len(items)
 
 
 async def gather(calls: list[tuple[str, Callable[[], Awaitable[Any]]]], seconds: float = SECONDS,

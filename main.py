@@ -14,7 +14,7 @@ import aiohttp
 # The decky plugin module is provided by Decky Loader at runtime (see decky.pyi for intellisense)
 import decky
 
-from musicdeck import backup, burn, cd, debuglog, library, lyrics, migrate, models, native, stats
+from musicdeck import backup, burn, cd, cdimage, debuglog, library, lyrics, migrate, models, native, stats
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
 from musicdeck import firewall, peers as peermod, updates, version
@@ -23,7 +23,7 @@ from musicdeck.lastfm import Lastfm, LastfmError
 from musicdeck.listenbrainz import ListenBrainz
 from musicdeck.net import tls
 from musicdeck.offline import OfflineStore
-from musicdeck.playlists import PlaylistStore
+from musicdeck.playlists import PREFIX as PLAYLIST_PREFIX, PlaylistStore
 from musicdeck.server import StreamServer
 from musicdeck.services import PLANNED_TYPES, SERVICE_TYPES, MusicService, ServiceError, StreamSource
 from musicdeck.services.base import LIKED_LIST, LocalLikes
@@ -123,6 +123,8 @@ class Plugin:
         # the paired device playing on this one now (as on a speaker), and where it's got to here
         self.render_for: Optional[str] = None
         self.render_status: dict[str, Any] = {}
+        # saved copies of a source's playlists and albums: when each was last brought up to date with its original
+        self.followed: dict[str, float] = {}
 
     # --- lifecycle ---
 
@@ -192,6 +194,7 @@ class Plugin:
             except OSError as e:
                 decky.logger.warning(f"Your devices: couldn't start ({e})")
                 self.peers = None
+            spawn(self._follow_all(), "saved copies")
         finally:
             # release waiting calls even on failure, so the UI shows errors instead of hanging
             self.ready.set()
@@ -240,11 +243,25 @@ class Plugin:
         instance.announce = lambda text, sid=service["id"]: spawn(decky.emit("source_note", sid, text), "source note")
         if isinstance(instance, LocalLibrary):
             instance.devices = self._shelf
+            instance.has_drive = lambda: bool(cd.audio_drives())
         try:
             await instance.start()
         except Exception:
             decky.logger.exception(f"Failed to start service {service['id']}")
         self.instances[service["id"]] = instance
+
+    def _disc_state(self) -> Optional[dict[str, Any]]:
+        """The disc drive, one entry apart from the devices: {"id" (the disc's device, or None), "kind" ("cd",
+        "disc" or None), "name", "label", "card" (Local files' card for it, opened through Local files),
+        "source" (that Local files)}; None without a drive (or without a Local files source to show it)."""
+        library = next(((sid, i) for sid, i in self.instances.items() if isinstance(i, LocalLibrary)), None)
+        card = library[1].disc_card() if library else None
+        if not card:
+            return None
+        disc = next((d for d in self._shelf() if d["kind"] in ("cd", "disc")), None)
+        return {"id": disc["id"] if disc else None, "kind": disc["kind"] if disc else None,
+                "name": disc["name"] if disc else "", "card": card, "source": library[0],
+                "label": "No disc inserted" if not disc else "Audio CD" if disc["kind"] == "cd" else "Data disc"}
 
     def _shelf(self) -> list[dict[str, Any]]:
         """What's plugged in, for Local files to show: [{"id", "name", "kind", "instance"}]."""
@@ -415,6 +432,8 @@ class Plugin:
             # what's plugged in (shown in Local files): {"id", "name", "kind" (usb, mtp, cd), "status"}
             "devices": [{"id": d["id"], "name": d["name"], "kind": d["kind"], "status": d["instance"].status()}
                         for d in self._shelf()],
+            # the disc drive, shown as one entry rather than with the devices: what's in it, if anything
+            "disc": self._disc_state(),
             "active_service": self.settings.get("active_service"),
             "qam_mode": self.settings.get("qam_mode"),
             "song_toasts": self.settings.get("song_toasts"),
@@ -630,6 +649,24 @@ class Plugin:
                 raise ServiceError("Only Local files burns CDs")
             ids, title = self._burn_args(item_id)
             return await instance.burn("playlist" if ids is not None else kind, item_id, ids, title)
+        return await _result(work())
+
+    @_when_ready
+    async def virtual_cd(self, cue: str) -> dict[str, Any]:
+        """For developers without a CD drive (the debug handle; nothing in the UI): a disc image (.cue) put in a
+        virtual drive, found as a CD in a real drive is (cdimage.py); ejected as one is, the drive staying, empty.
+        "" unplugs the virtual drive."""
+        async def work():
+            if cue == "":
+                cdimage.remove()  # the virtual drive unplugged
+                return {}
+            if not isinstance(cue, str) or not cue.lower().endswith(".cue"):
+                raise ServiceError("A .cue sheet's path")
+            try:
+                image = await asyncio.to_thread(cdimage.insert, cue)
+            except ValueError as e:
+                raise ServiceError(str(e))
+            return {"drive": cdimage.DRIVE, "toc": image.toc, "disc_id": cd.disc_id(image.toc)}
         return await _result(work())
 
     @_when_ready
@@ -872,6 +909,7 @@ class Plugin:
                     page = self.playlists.page(collection_id)
                 except KeyError:
                     raise ServiceError("Playlist not found")
+                spawn(self._follow(collection_id), "saved copy")
                 return self._liked(instance_id, {**page, "offline": self._offline_state(instance_id, collection_id,
                                                                                        page["tracks"])})
             return await _result(local())
@@ -1031,7 +1069,7 @@ class Plugin:
                 await old.close()
             self.sign_ins = {attempt.id: attempt}
             await attempt.start()
-            return {"login_id": attempt.id, "url": attempt.url, "code": attempt.code}
+            return {"login_id": attempt.id, "url": attempt.url, "code": attempt.code, "qr": attempt.qr}
         return await _result(work())
 
     @_when_ready
@@ -1719,6 +1757,36 @@ class Plugin:
         await decky.emit("playlists_changed")
         return True
 
+    async def _follow(self, collection_id: str) -> None:
+        """A playlist saved from a source's playlist or album brought up to date with it (playlists.follow): what's
+        showing it, the paired devices and its downloads follow. At most once in FOLLOW_AGAIN."""
+        p = self.playlists.find(collection_id)
+        if p is None or not isinstance(p.get("source"), dict) or p["instance_id"] not in self.instances:
+            return
+        if time.monotonic() - self.followed.get(p["id"], -FOLLOW_AGAIN) < FOLLOW_AGAIN:
+            return
+        self.followed[p["id"]] = time.monotonic()
+        try:
+            page = await asyncio.wait_for(
+                self.instances[p["instance_id"]].open(p["source"].get("kind", ""), p["source"].get("id", "")), 60)
+        except (ServiceError, NotImplementedError, asyncio.TimeoutError, aiohttp.ClientError) as e:
+            decky.logger.info(f"Saved copy {p['name']!r}: its original couldn't be read ({e})")
+            return
+        tracks = page.get("tracks") if isinstance(page, dict) else None
+        if isinstance(tracks, list) and self.playlists.follow(collection_id, tracks):
+            decky.logger.info(f"Saved copy {p['name']!r} follows its original: now {len(p['tracks'])} songs")
+            self._sync_offline()
+            self._playlists_changed()
+            await decky.emit("playlists_changed")
+
+    async def _follow_all(self) -> None:
+        """Every saved copy brought up to date a while after start-up, then every few hours."""
+        await asyncio.sleep(90)
+        while True:
+            for p in self.playlists.following():
+                await self._follow(PLAYLIST_PREFIX + p["id"])
+            await asyncio.sleep(FOLLOW_ALL_EVERY)
+
     def _playlists_changed(self) -> None:
         """A playlist made, changed or deleted here: the paired devices are told, so they fetch it."""
         if self.peers:
@@ -2126,6 +2194,10 @@ class Plugin:
 CATALOGUE_TYPES = {"qobuz", "tidal", "spotify", "youtube", "soundcloud", "bandcamp", "radio", "podcasts", "livemusic"}
 #: how long a device that's been taken over has to stop and save where it was, before its queue is read
 TOOK_OVER_SAVE = 0.6
+#: a saved copy is brought up to date with its original when opened, at most this often (seconds)
+FOLLOW_AGAIN = 300
+#: and every saved copy, this often
+FOLLOW_ALL_EVERY = 6 * 3600
 #: another device's music is offered to continue here for this long after it was last played
 HANDOFF_FRESH = 12 * 3600
 

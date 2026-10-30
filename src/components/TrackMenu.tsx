@@ -377,18 +377,18 @@ function deleteItems(instanceId: string, kind: string, id: string, title: string
 export const canDelete = (instanceId: string, c: Collection) =>
   deleteItems(instanceId, c.kind, c.id, c.title).length > 0;
 
-/** A device's own menu (its card in Devices): eject it, and name it. */
-function deviceMenu(c: Collection, target: EventTarget) {
+/** A device's own menu (its card in Devices): eject it (unless `eject` is false: an Eject button beside it), name it. */
+function deviceMenu(c: Collection, target: EventTarget, eject = true) {
   const device = pluginState.get()?.devices.find((d) => c.id === `dv~${d.id}~` || c.id.startsWith(`dv~${d.id}~`));
   if (!device) return;
-  const eject = async () => {
+  const doEject = async () => {
     const r = await ejectDevice(device.id);
     invalidateBrowserCache();
     notify(device.name, r.ok ? r.data : r.error);
   };
   showContextMenu(
     <Menu label={device.name}>
-      <MenuItem onSelected={eject}>{device.kind === "cd" ? "Eject disc" : "Eject"}</MenuItem>
+      {eject && <MenuItem onSelected={doEject}>{device.kind === "cd" ? "Eject disc" : "Eject"}</MenuItem>}
       {device.kind !== "cd" && device.kind !== "disc" && (
         <MenuItem
           onSelected={() =>
@@ -644,11 +644,19 @@ function gameMusicItem(instanceId: string, c: Collection) {
   );
 }
 
-/** Options for a collection row: save remote playlists, manage MusicDeck playlists, play with a game. */
-export async function showCollectionMenu(instanceId: string, c: Collection, parent?: EventTarget | null) {
+/**
+ * Options for a collection row: save remote playlists, manage MusicDeck playlists, play with a game. `eject`: false
+ * where an Eject button is beside it (a device's page on the desktop).
+ */
+export async function showCollectionMenu(
+  instanceId: string,
+  c: Collection,
+  parent?: EventTarget | null,
+  { eject = true }: { eject?: boolean } = {},
+) {
   const target = parent ?? window;
   if (c.kind === "device") {
-    deviceMenu(c, target);
+    deviceMenu(c, target, eject);
     return;
   }
   if (c.kind === "folder") {

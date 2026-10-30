@@ -945,6 +945,11 @@ async def run():
         check(opened["title"] == "Drive" and len(opened["tracks"]) == 1, "remove and rename")
         saved = (await plugin.save_as_playlist(sid, "album", album_one["id"]))["data"]
         check(saved["title"] == "Album One" and saved["subtitle"] == "2 tracks", "save an album as a playlist")
+        plugin.followed.clear()
+        await plugin._follow(saved["id"])
+        check(plugin.playlists.find(saved["id"])["seen"] == [t["id"] for t in album_one_tracks]
+              if (album_one_tracks := (await plugin.open_collection(sid, "album", album_one["id"]))["data"]["tracks"])
+              else False, "a saved copy is checked against its original")
         check(len(await plugin.local_playlists(sid)) == 2, "playlists listed per source")
         mine = (await plugin.center_tab(sid, "playlists"))["data"][0]["items"]
         check({"Drive", "Album One"} <= {c["title"] for c in mine}, f"Browse's Playlists has MusicDeck's too: {mine}")
@@ -2389,6 +2394,62 @@ async def run():
         check(devmod.audio_cds(["/dev/sr0"], lambda d: True, lambda d: 1 / 0, cache) == found, "its contents are read once")
         check(devmod.audio_cds(["/dev/sr0"], lambda d: False, lambda d: example, cache) == [] and not cache, "ejected: gone")
 
+        print("audio CD images, for trying CDs without a drive")
+        from musicdeck import cdimage
+        imgdir = os.path.join(tmp, "cd-image")
+
+        def sheet(path, text):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        os.makedirs(imgdir, exist_ok=True)
+        disc_bytes = frames_of(0, 600)  # the whole disc, every frame saying where it is
+        with open(os.path.join(imgdir, "disc.bin"), "wb") as f:
+            f.write(disc_bytes)
+        sheet(os.path.join(imgdir, "one.cue"), 'FILE "disc.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n'
+              '  TRACK 02 AUDIO\n    INDEX 00 00:02:00\n    INDEX 01 00:02:25\n  TRACK 03 AUDIO\n    INDEX 01 00:06:00\n')
+        image = cdimage.CueImage(os.path.join(imgdir, "one.cue"))
+        check(image.toc == [(1, 0, True), (2, 175, True), (3, 450, True), (cdmod.CDROM_LEADOUT, 600, False)],
+              f"one file's sheet: its tracks where INDEX 01 says, the lead-out at its end ({image.toc})")
+        check(image.read(170, 10) == disc_bytes[170 * cdmod.FRAME:180 * cdmod.FRAME] and image.read(595, 10)[
+            5 * cdmod.FRAME:] == bytes(5 * cdmod.FRAME), "its frames as a drive reads them; past the end, silence")
+        # a track a file: a WAV, then raw big-endian audio with a pregap the file doesn't hold
+        pcm = disc_bytes[:200 * cdmod.FRAME]
+        with wave.open(os.path.join(imgdir, "01.wav"), "wb") as w:
+            w.setnchannels(2), w.setsampwidth(2), w.setframerate(44100)
+            w.writeframes(pcm)
+        with open(os.path.join(imgdir, "02.raw"), "wb") as f:
+            f.write(bytes(b for pair in zip(pcm[1::2], pcm[0::2]) for b in pair)[:100 * cdmod.FRAME])
+        sheet(os.path.join(imgdir, "split.cue"), 'REM a comment\nFILE "01.wav" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n'
+              'FILE "02.raw" MOTOROLA\n  TRACK 02 AUDIO\n    PREGAP 00:00:30\n    INDEX 01 00:00:00\n')
+        split = cdimage.CueImage(os.path.join(imgdir, "split.cue"))
+        check(split.toc == [(1, 0, True), (2, 230, True), (cdmod.CDROM_LEADOUT, 330, False)],
+              f"a file a track, a WAV's header skipped, a pregap's silence counted ({split.toc})")
+        check(split.read(195, 40) == pcm[195 * cdmod.FRAME:] + bytes(30 * cdmod.FRAME) + pcm[:5 * cdmod.FRAME],
+              "read across the files and the silence between them, big-endian audio turned round")
+        sheet(os.path.join(imgdir, "bad.cue"), 'FILE "missing.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n')
+        check(not (await plugin.virtual_cd(os.path.join(imgdir, "bad.cue")))["ok"]
+              and not (await plugin.virtual_cd(os.path.join(imgdir, "disc.bin")))["ok"], "a sheet that can't be read is refused")
+        put = (await plugin.virtual_cd(os.path.join(imgdir, "one.cue")))["data"]
+        drive = put["drive"]
+        in_drive = devmod.audio_cds(cdmod.audio_drives(), cdmod.has_audio_disc, cdmod.read_toc, image_cache := {})
+        check(len(in_drive) == 1 and in_drive[0]["drive"] == drive and in_drive[0]["disc_id"] == put["disc_id"]
+              and drive not in cdmod.drives(), "put in, it's found as a CD in a drive is (but isn't a drive to burn to)")
+        check(cdmod.cd_reader(drive).read(0, 3) == disc_bytes[:3 * cdmod.FRAME], "and read as one")
+        state = (await plugin.get_state())["disc"]
+        check(state is None or state["label"] in ("Audio CD", "No disc inserted"),
+              f"the disc drive is one entry of its own: {state and state['label']}")
+        check(cdmod.eject(drive) and devmod.audio_cds(cdmod.audio_drives(), cdmod.has_audio_disc, cdmod.read_toc,
+                                                      image_cache) == [] and cdmod.audio_drives() == [drive],
+              "ejected, the disc is gone and the drive stays, empty")
+        shelf_source = next(i for i in plugin.instances.values() if isinstance(i, main.LocalLibrary))
+        empty = shelf_source.disc_card()
+        check(empty and empty["title"] == "No disc inserted"
+              and (await plugin.open_collection(sid, "list", empty["id"]))["data"]["title"] == "No disc inserted",
+              "an empty drive is the Disc entry's \"No disc inserted\", opening to say so")
+        check((await plugin.get_state())["disc"]["label"] == "No disc inserted" and (await plugin.virtual_cd(""))["ok"]
+              and cdmod.audio_drives() == [] and (await plugin.get_state())["disc"] is None,
+              "unplugged, there's no Disc entry")
+
         disc = dict(found[0])
         named = {"release": "rel-1", "title": "Blue: Album?", "artist": "AC/DC", "year": "1990", "genres": ["Rock"],
                  "disc": 1, "discs": 1, "tracks": [{"title": f"Song {i}", "artist": "AC/DC"} for i in range(1, 7)]}
@@ -2402,6 +2463,9 @@ async def run():
         card = (await plugin.center_tab(sid, "devices"))["data"][0]["items"][0]
         check(card["kind"] == "album" and card["title"] == "Blue: Album?" and card["subtitle"] == "Audio CD · 6 tracks",
               f"its card is its album: {card}")
+        as_device = await plugin.open_collection(sid, "device", f"dv~{disc['id']}~")
+        check(as_device["ok"] and len(as_device["data"]["tracks"]) == 6 and as_device["data"]["title"] == "Blue: Album?",
+              f"opened as a device (desktop's sidebar), a CD is its album: {as_device.get('error')}")
         cd_page = (await plugin.open_collection(sid, "album", card["id"]))["data"]
         cd_tracks = cd_page["tracks"]
         check([t["title"] for t in cd_tracks][:2] == ["Song 1", "Song 2"] and round(cd_tracks[0]["duration"]) == 203,
@@ -2425,7 +2489,9 @@ async def run():
         if shutil.which("ffmpeg"):
             action = (await plugin.open_collection(sid, "album", card["id"]))["data"]["action"]
             check(action == {"label": "Rip to Local files", "call": "rip"}, f"the album offers ripping: {action}")
-            said = await plugin.collection_action(sid, "album", card["id"], "rip")
+            # from the CD's own page on the desktop (the device, opened as its album): the same
+            said = await plugin.collection_action(sid, "device", f"dv~{disc['id']}~", "rip")
+            check(said["ok"] and said["data"].startswith("Ripping to"), f"ripped from the CD's device page too: {said}")
             await cd_source.rip_task
             folder = os.path.join(rips, "AC_DC", "Blue_ Album_")
             check(sorted(os.listdir(folder)) == ["01 Song 1.flac", "02 Song 2.flac"] and not cd_source.rip_progress["error"],
@@ -3093,6 +3159,47 @@ async def run():
             await asyncio.wait([login._task])
             check(login._task.cancelled() or login._task.exception() is None,
                   "closing a waiting sign-in stops its listener once")
+
+            # signing in on a phone: Qobuz's page comes back over the home network, to a path only it knows
+            from musicdeck.services import qobuz as qzmod
+            from musicdeck.cast import netif as netmod
+            real_creds, real_addrs = qzmod.QobuzService._app_credentials, netmod.local_addresses
+
+            async def creds(*_a, **_k):
+                return {"app_id": "123456789"}
+            qzmod.QobuzService._app_credentials = staticmethod(creds)
+            netmod.local_addresses = lambda: ["127.0.0.1", "192.168.7.20"]
+            try:
+                phone = qzmod.QobuzService.sign_in({"phone": True}, tmp)
+                await phone.start()
+                from urllib.parse import urlparse, parse_qs
+                back = urlparse(parse_qs(urlparse(phone.qr).query)["redirect_url"][0])
+                check(phone.qr == phone.url and back.hostname == "192.168.7.20" and len(back.path) > 16,
+                      f"Qobuz on a phone: a QR code of its page, which comes back to this device's home address: {back.geturl()}")
+                async with aiohttp.ClientSession() as http:
+                    async with http.get(f"http://127.0.0.1:{back.port}/?code_autorisation=forged") as r:
+                        wrong = r.status
+                    async with http.get(f"http://127.0.0.1:{back.port}{back.path}?code_autorisation=abc") as r:
+                        right = r.status
+                check(wrong == 404 and right == 200 and phone._code.done() and phone._code.result() == "abc",
+                      "only its own path takes the code (anything else on the network can't hand it one)")
+                await phone.close()
+                netmod.local_addresses = lambda: []
+                try:
+                    await qzmod.QobuzService.sign_in({"phone": True}, tmp).start()
+                    check(False, "no home network: a phone can't come back")
+                except ServiceErrorForTest as e:
+                    check("sign in here instead" in str(e), f"no home network: says to sign in here instead ({e})")
+            finally:
+                qzmod.QobuzService._app_credentials, netmod.local_addresses = real_creds, real_addrs
+
+            from musicdeck.services import spotify as spmod
+            check(spmod.web_client({"signed_with": spmod.PLAYBACK_CLIENT_ID}) == spmod.PLAYBACK_CLIENT_ID
+                  and spmod.web_client({}) == spmod.WEB_CLIENT_ID and spmod.web_client({"client_id": "abc"}) == "abc",
+                  "Spotify signed in on a phone asks the Web API as playback's app (the one it signed in with)")
+            check(isinstance(spmod.SpotifyService.sign_in({"phone": True}, tmp), spmod.SpotifyPhoneLogin)
+                  and isinstance(spmod.SpotifyService.sign_in({}, tmp), spmod.SpotifyLogin),
+                  "a phone sign-in for Spotify, beside the browser's")
         finally:
             del SERVICE_TYPES["fakesignin"]
 
@@ -3817,8 +3924,44 @@ async def run():
         check(pc.find(pid) is None, "deleted on one device, it goes from the others")
         check(not deck.take(pc.shared(origin_on("pc")), on_deck) and deck.find(pid) is None,
               "...and doesn't come back from one that had it")
+        print("saved copies follow their original")
+        deck, pc = Playlists(os.path.join(tmp, "fl-deck")), Playlists(os.path.join(tmp, "fl-pc"))
+        song = lambda i: {"id": i, "title": i.upper()}
+        cid = deck.create("sc1", "Likes", [song("a"), song("b"), song("c")], source={"kind": "playlist", "id": "p9"})["id"]
+        ids = lambda store: [t["id"] for t in store.page(cid)["tracks"]]
+        check(not deck.follow(cid, [song("a"), song("b"), song("c")]), "an original that hasn't changed changes nothing")
+        check(deck.follow(cid, [song("d"), song("a"), song("b"), song("c")]) and ids(deck) == ["d", "a", "b", "c"],
+              "songs the original gained come in, in its order")
+        check(deck.follow(cid, [song("d"), song("a"), song("c")]) and ids(deck) == ["d", "a", "c"],
+              "songs it dropped go")
+        deck.remove(cid, "a")
+        deck.add(cid, [{"id": "q1", "title": "Mine", "source": "qz1"}])
+        deck.follow(cid, [song("d"), song("a"), song("c"), song("e")])
+        check(ids(deck) == ["d", "c", "e", "q1"], f"the user's own changes stay: one taken out, one added ({ids(deck)})")
+        deck.add(cid, [song("a")])
+        deck.follow(cid, [song("d"), song("a"), song("c"), song("e")])
+        check(ids(deck) == ["d", "a", "c", "e", "q1"], f"one taken out and put back is the original's again ({ids(deck)})")
+        check(not deck.follow(cid, []) and ids(deck) == ["d", "a", "c", "e", "q1"],
+              "an empty answer leaves it as it is")
+        check(not deck.follow(pl_plain := deck.create("sc1", "Plain", [song("x")])["id"], [song("y")])
+              and [t["id"] for t in deck.page(pl_plain)["tracks"]] == ["x"], "a playlist made here follows nothing")
+        deck.remove(cid, "c")
+        pc.take(deck.shared(origin_on("deck")), on_pc)
+        check(pc.find(cid)["source"] == {"kind": "playlist", "id": "p9"} and pc.find(cid)["instance_id"] == "pcsc",
+              "a paired device's copy follows the same original, from its own SoundCloud")
+        pc.follow(cid, [song("d"), song("a"), song("c"), song("e"), song("f")])
+        check(ids(pc) == ["d", "a", "e", "f", "q1"], f"...keeping what the user took out on the other device ({ids(pc)})")
+        time.sleep(0.01)
+        deck.rename(cid, "Likes 2")
+        older = deck.shared(origin_on("deck"))
+        for r in older["playlists"]:
+            r["follows"] = None
+        pc.take(older, on_pc)
+        check(pc.find(cid)["name"] == "Likes 2" and pc.find(cid)["source"] == {"kind": "playlist", "id": "p9"},
+              "a device that doesn't know the original (or is from before copies followed) doesn't make this one forget")
+
         old = Playlists(os.path.join(tmp, "pl-old"))
-        write(old.path, '{"version": 1, "playlists": [{"id": "abcdef", "instance_id": "x1", "name": "Old", '
+        write(old.path, '{"version": 1,"playlists": [{"id": "abcdef", "instance_id": "x1", "name": "Old", '
                         '"tracks": [{"id": "t1", "title": "T"}]}]}')
         check(Playlists(os.path.dirname(old.path)).page("md:abcdef")["tracks"][0]["source"] == "x1",
               "a playlist from before they mixed sources: each song its playlist's source's")
@@ -4098,6 +4241,8 @@ async def run():
                 return {"playlists": {"items": [{"id": 9, "name": "Picks", "images300": []}]}}
             if path == "playlist/getUserPlaylists":
                 return {"playlists": {"items": [{"id": 1, "name": "Mine", "images300": []}]}}
+            if path == "playlist/getTags":
+                return {"tags": []}  # no themes: Qobuz's editor picks, as before
             return {kw["type"]: {"items": []}}
 
         async def qob_open(kind, id):
@@ -4122,6 +4267,61 @@ async def run():
                                                 ("new-releases-full", None)], key=str)
               and len(genre["collections"]) == 8 and genre["title"] == "Pop/Rock",
               f"a genre's Show all goes well past its row: {asked}")
+
+        # Qobuz's newer answers (discover, artist/page, radio, album/suggest): "artists", "dates", names as
+        # {"display"}, playlists' covers in "image"
+        new_album = {"id": "n1", "title": "Homework", "version": "Remixes", "artists": [
+            {"id": 7, "name": "Guest", "roles": ["featured-artist"]}, {"id": 8, "name": "Daft Punk", "roles": ["main-artist"]}],
+            "dates": {"original": "1997-01-20"}, "image": {"large": "https://static.qobuz.com/c.jpg"},
+            "rights": {"hires_streamable": True}, "label": {"id": 55, "name": "Virgin"}}
+        qobuz_asked = []
+
+        async def qob_new(path, **kw):
+            qobuz_asked.append(path)
+            if path == "artist/page":
+                return {"id": 8, "name": {"display": "Daft Punk"}, "artist_category": "performer",
+                        "biography": {"content": "<p>First.</p><p>Second &amp; last.</p>"},
+                        "images": {"portrait": {"hash": "01070e8186c711139b41a04d8640f9e0", "format": "jpg"}},
+                        "top_tracks": [{"id": 1, "title": "Get Lucky", "duration": 369, "rights": {"streamable": True},
+                                        "artists": [{"id": 8, "name": "Daft Punk", "roles": ["main-artist"]}],
+                                        "album": {"id": "ram", "title": "RAM", "image": {"large": "x"}}},
+                                       {"id": 2, "title": "Not here", "rights": {"streamable": False}}],
+                        "releases": [{"type": "album", "has_more": False, "items": [new_album]},
+                                     {"type": "epSingle", "has_more": True, "items": [new_album]},
+                                     {"type": "live", "has_more": False, "items": []}],
+                        "similar_artists": {"has_more": True, "items": [{"id": 9, "name": {"display": "Justice"}}]},
+                        "playlists": {"items": [{"id": 4, "title": "Inspirations", "images": {"covers": ["p.jpg"]}}]},
+                        "tracks_appears_on": []}
+            if path == "artist/getReleasesList":
+                return {"items": [new_album, {**new_album, "id": "n2", "version": None}]}
+            if path == "artist/getSimilarArtists":
+                return {"artists": {"items": [{"id": 9, "name": "Justice"}, {"id": 10, "name": "Air"}]}}
+            if path == "radio/artist":
+                return {"title": "Daft Punk", "images": {"large": "r.jpg"},
+                        "tracks": {"items": [{"id": 3, "title": "One More Time", "album": new_album}]}}
+            return {"playlists": {"items": []}, "albums": {"items": []}, "artists": {"items": []}}
+        qob._get = qob_new
+        mapped = qob._album(new_album)
+        check(mapped["title"] == "Homework (Remixes)" and mapped["subtitle"] == "Daft Punk · 1997 · Hi-Res",
+              f"an album in the newer shape: its main artist, its year, its edition: {mapped}")
+        artist = await QobuzService.open(qob, "artist", "8")
+        rows = {s["title"]: len(s["items"]) for s in artist["shelves"]}
+        check(artist["title"] == "Daft Punk" and artist["subtitle"] == "" and [t["title"] for t in artist["tracks"]] == ["Get Lucky"]
+              and artist["art"].endswith("/01070e8186c711139b41a04d8640f9e0.jpg") and len(artist["collections"]) == 1,
+              f"an artist's page: their top tracks (what can't be streamed left out), picture and albums: {artist['title']}")
+        check(rows == {"Singles & EPs": 2, "Playlists": 1, "Radio": 1, "Similar artists": 2},
+              f"then a row of each other kind of release (all of one Qobuz has more of), their radio and similar artists: {rows}")
+        check(artist["about"] == "First.\nSecond & last.", f"their biography, a paragraph a line: {artist['about']!r}")
+        radio = await QobuzService.open(qob, "list", "radio:artist:8")
+        check(radio["title"] == "Daft Punk radio" and radio["tracks"][0]["artist"] == "Daft Punk",
+              f"an artist's radio opens as its songs: {radio['title']}")
+        for bad in ("radio:playlist:1", "radio:artist:1,2", "label:x#X", "tag:../x#X"):
+            try:
+                await QobuzService.open(qob, "list", bad)
+                check(False, f"a made-up list is refused: {bad}")
+            except ServiceErrorForTest:
+                pass
+        check(True, "made-up radios, labels and themes are refused")
 
         print("source types")
         from musicdeck.services import CATALOGUE, SERVICE_TYPES as TYPES
@@ -4176,6 +4376,42 @@ async def run():
                 os.environ.pop("MUSICDECK_PYTHON", None)
             else:
                 os.environ["MUSICDECK_PYTHON"] = real[3]
+
+        print("youtube music pages")
+        from musicdeck import ytdlp_worker
+        source = open(os.path.join(os.path.dirname(ytmod.__file__), "youtube.py"), encoding="utf-8").read()
+        import re as _re2
+        called = set(_re2.findall(r'_music\("([a-z_]+)"', source))
+        check(called <= ytdlp_worker.MUSIC_METHODS,
+              f"every YouTube Music call the source makes is one the worker allows: {sorted(called - ytdlp_worker.MUSIC_METHODS)}")
+        ytm = ytmod.YouTubeService("yt", {}, tmp)
+        ytm_asked = []
+
+        async def ytm_music(method, *args, **kwargs):
+            ytm_asked.append(method)
+            if method == "get_artist_albums":
+                return [{"browseId": f"MPREb_{args[1]}{i}", "title": f"{args[1]} {i}", "year": "2001"} for i in range(3)]
+            if method == "get_watch_playlist":
+                return {"tracks": [{"videoId": "aaaaaaaaaaa", "title": "One More Time", "artists": [{"name": "Daft Punk"}]}]}
+            return {}
+        ytm._music = ytm_music
+        page = await ytm._artist_page({
+            "name": "Daft Punk", "monthlyListeners": "68M", "description": "French duo.", "radioId": "RDEMni3jl65KF37F9JYsJM8DGg",
+            "songs": {"results": [{"videoId": "bbbbbbbbbbb", "title": "Get Lucky"}]},
+            "albums": {"browseId": "MPADUC", "params": "albums", "results": [{"browseId": "MPREb_x", "title": "only one"}]},
+            "singles": {"results": [{"browseId": "MPREb_s", "title": "Single"}]},
+            "related": {"results": [{"browseId": "UCq7VAQmXDurV-9VN2bSFXvw", "title": "Justice"}]}})
+        check(page["subtitle"] == "68M monthly listeners" and [c["title"] for c in page["collections"]] == ["albums 0", "albums 1", "albums 2"]
+              and {s["title"]: len(s["items"]) for s in page["shelves"]} == {"Singles & EPs": 1, "Radio": 1, "Similar artists": 1}
+              and page["about"] == "French duo.",
+              f"a YouTube Music artist: all their albums, then singles, their radio, related artists, their description: {page['shelves']}")
+        radio = await ytmod.YouTubeService.open(ytm, "list", page["shelves"][1]["items"][0]["id"])
+        check(radio["title"] == "Daft Punk radio" and radio["tracks"][0]["title"] == "One More Time", "the artist's radio opens as its songs")
+        try:
+            await ytmod.YouTubeService.open(ytm, "list", "radio:../x#X")
+            check(False, "a made-up radio is refused")
+        except ServiceErrorForTest:
+            check(True, "a made-up radio is refused")
 
         print("redaction")
         from musicdeck.debuglog import redact
@@ -4322,10 +4558,26 @@ async def run():
               "every source's albums in one grid, by title (\"The\" aside); the same id from two sources kept apart")
         home_merge = libmod.merge_home([{"id": "j", "kind": "album", "title": "J", "source": "one"}], [],
                                        [("one", "One", [{"title": "Jump back in", "items": [{"id": "j", "kind": "album", "title": "J"}]},
-                                                        {"title": "New", "items": [{"id": f"n{i}", "kind": "album", "title": "N"} for i in range(3)]},
-                                                        {"title": "Empty", "items": []}])])
-        check([s["title"] for s in home_merge] == ["Jump back in", "New · One"] and home_merge[1]["items"][0]["source"] == "one",
-              "Home: what was played from every source, then each source's own rows under its name (theirs Jump back in left out)")
+                                                        {"title": "Genres", "items": [{"id": "g", "kind": "list", "title": "Rock"}]},
+                                                        {"title": "Empty", "items": []},
+                                                        {"title": "New", "items": [{"id": f"n{i}", "kind": "album", "title": "N"} for i in range(3)],
+                                                         "tracks": [{"id": "t0", "title": "T"}]},
+                                                        {"title": "More", "items": [{"id": "m", "kind": "album", "title": "M"}]},
+                                                        {"title": "Hits", "items": [], "tracks": [{"id": "t1", "title": "T"}]}])])
+        check([(s["title"], len(s["items"]), len(s.get("tracks") or [])) for s in home_merge]
+              == [("Jump back in", 1, 0), ("One · New", 3, 0), ("One · New", 0, 1)]
+              and home_merge[1]["items"][0]["source"] == "one",
+              f"Home: what was played from every source, then for each source one row of its cards and one list of its "
+              f"songs, under its name (its Jump back in, empty rows and genres left out): {[s['title'] for s in home_merge]}")
+        albums = lambda n: [{"id": f"a{i}", "kind": "album", "title": "A"} for i in range(n)]  # noqa: E731
+        lists = lambda n: [{"id": f"p{i}", "kind": "playlist", "title": "P"} for i in range(n)]  # noqa: E731
+        turns = libmod.merge_home([], [{"id": "mine", "kind": "playlist", "title": "Mine"}], [
+            ("one", "One", [{"title": "Lists", "items": lists(4)}, {"title": "Albums", "items": albums(4)}]),
+            ("two", "Two", [{"title": "Albums", "items": albums(4)}, {"title": "Lists", "items": lists(4)}]),
+            ("three", "Three", [{"title": "Albums", "items": albums(4)}, {"title": "Lists", "items": lists(4)}])])
+        check([s["title"] for s in turns] == ["One · Albums", "Two · Lists", "Three · Albums"],
+              f"the sources' rows take turns, albums then playlists, where a source has both; your playlists aren't Home's "
+              f"(Browse has them): {[s['title'] for s in turns]}")
         check([t["id"] for t in libmod.merged_tabs([{"tabs": [{"id": "albums", "group": "yours"}, {"id": "genres", "group": "explore"}]}])]
               == ["playlists", "albums"], "Your music shows the parts some source has")
 

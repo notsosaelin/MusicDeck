@@ -469,6 +469,56 @@ def this_pc() -> None:
     check(all(d.startswith("\\\\.\\") for d in cd.drives()), f"CD drives ({cd.drives()})")
     watcher = devices.DeviceWatcher(None, None)
     check(watcher.available, "devices are watched on Windows")
+    folder_watching()
+
+
+def folder_watching() -> None:
+    """The library's folders watched for real: a song copied in is noticed, and stopping ends the watch at once, however
+    busy the folder is (a stop that came between two reads used to leave a read nobody cancelled, and closing its
+    handle then waited for it forever, the event loop with it: ejecting a player could hang MusicDeck)."""
+    import asyncio
+    import tempfile
+    import threading
+    import time
+    from musicdeck import watch
+
+    async def run() -> None:
+        with tempfile.TemporaryDirectory() as root:
+            noticed = asyncio.Event()
+            w = watch.FolderWatcher([root], noticed.set, quiet=0.05)
+            w.start()
+            check(w.available, "a library folder is watched")
+            with open(os.path.join(root, "01 Song.flac"), "wb") as f:
+                f.write(b"x" * 1000)
+            await asyncio.wait_for(noticed.wait(), 5)
+            check(True, "a song copied in is noticed")
+            worst = 0.0
+            # each change slow to read, so stops come between reads too (where the hang was)
+            parse = watch.parse_notify
+            watch.parse_notify = lambda data: (time.sleep(0.02), parse(data))[1]
+            for i in range(40):
+                w.start()
+                busy = True
+
+                def churn(n=i):
+                    k = 0
+                    while busy:
+                        with open(os.path.join(root, f"{n}-{k % 5}.flac"), "wb") as f:
+                            f.write(b"y")
+                        k += 1
+                writer = threading.Thread(target=churn)
+                writer.start()
+                await asyncio.sleep(0.01 * (i % 4))
+                began = time.monotonic()
+                w.stop()
+                worst = max(worst, time.monotonic() - began)
+                busy = False
+                writer.join()
+            watch.parse_notify = parse
+            check(worst < 1.0, f"stopped at once each time, changes pouring in ({worst * 1000:.0f} ms at worst)")
+            check(not w.handles, "...and nothing of the watch is left open")
+        check(True, "the watched folder could be deleted after (no handle on it left)")
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

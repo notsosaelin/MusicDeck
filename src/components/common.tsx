@@ -14,7 +14,7 @@ import {
 } from "@decky/ui";
 import { CSSProperties, FC, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { FaCompactDisc, FaFolder, FaHeart, FaListUl, FaSort, FaUsb, FaUser } from "react-icons/fa";
-import { Collection, CollectionKind, Track } from "../api";
+import { Collection, CollectionKind, NO_DISC, Track } from "../api";
 import { useArtLoad } from "../art";
 import { mediaUrl } from "../store";
 
@@ -364,7 +364,7 @@ export const CollectionRow: FC<{
         instanceId={instanceId}
         art={item.art}
         size={40}
-        fallback={KIND_ICONS[item.kind]}
+        fallback={item.id === NO_DISC ? <FaCompactDisc /> : KIND_ICONS[item.kind]}
         round={item.kind === "artist"}
       />
     }
