@@ -131,6 +131,7 @@ Details worth knowing:
 | `musicdeck/peers.py` | Your devices: finding each other (multicast and broadcast hellos), pairing (X25519, a code on both screens), signed requests and song links, each one's listens added to the other's (`sync_plays`, `"dev"` in plays.jsonl), the playlists kept the same on each (`/p/playlists`, fetched every 10 minutes, when a device comes back on the network, and at once when the other says they changed: `/p/playlists/changed`), and what each was playing (`sessions`). `PeerSource` plays another device's songs through it (`"peer~<device>~<its source>"`, resolved by `Plugin._lookup`). `Plugin._handed_over` maps another device's queue: its streaming services' songs to the same service here, the rest streamed from it. |
 | `musicdeck/cast/peer.py` | Another of the user's devices as a cast device: given each song (not a link), asked where it's got to once a second; the other side is `Plugin._cast_here` and `peer_cast` in `src/devices.tsx` (the player's `renderFor`: no listens, no next song of its own). |
 | `musicdeck/x25519.py` | RFC 7748's X25519 in plain Python, for pairing. |
+| `musicdeck/farlink.py` | `Farlink`: the internet link between paired devices, the `musicdeck-net` helper (`backend/musicdeck-net`, Rust, iroh) driven over JSON lines (`allow` the paired node ids, `call`, `reply`; it says `ready`, `peer` online/offline and `request`). `peers.py` swaps node ids in the signed hello, keeps them in peers.json, reaches a device that isn't nearby through it (`call`: only `FAR_ROUTES`), answers what comes through it (`_far_asked`), and tells the others at once when what plays changes (`session_changed`, `/p/session/changed`). `far-only` / `far-relay-only` files in the settings folder force it for testing at home. |
 | `musicdeck/firewall.py` | Windows: whether its firewall keeps the user's devices out, and allowing MusicDeck's two ports from the local subnet (replacing rules that block Decky's program), behind Windows' administrator prompt. |
 | `musicdeck/updates.py` | New versions: the latest GitHub release's zip for this platform and its SHA-256 (GitHub's digest, else the `.sha256` beside it), looked for 90 s after starting and twice a day. Installing is Decky's own installer's job (`src/update.ts`). |
 | `musicdeck/igd.py` | UPnP port forwarding on the home router (SSDP, the gateway's WANIPConnection, AddPortMapping renewed hourly), for Soulseek's port. |
@@ -341,14 +342,20 @@ SoundCloud scrape from their web players).
 - No source that works without an account asks for one (SoundCloud, YouTube, Bandcamp, radio).
 - The Spotify helper's loopback audio server requires its own per-start key (a header the stream
   server adds), so nothing else on the device can play through the account.
-- **Your devices** (`peers.py`) is the one thing listening beyond this machine: port 41378 (TCP) and 41377 (UDP, for
-  finding each other), answering home-network addresses only. Pairing is X25519 with a six-digit code both screens
+- **Your devices** (`peers.py`) is what listens beyond this machine: port 41378 (TCP) and 41377 (UDP, for
+  finding each other), answering home-network addresses only; and the internet link (`farlink.py`, the
+  `musicdeck-net` helper): QUIC through iroh, encrypted end to end and authenticated by each device's key (net.key in
+  the settings folder), answering only paired node ids and only the requests in its `ALLOWED` (checked again by
+  `peers.py`: what's playing, Continue, played on as a speaker, playlists, listens; never Local files, discs or
+  anything else), each one size-limited. It's found through n0's public DNS and relays and the Mainline DHT, which
+  see addresses and timing, never content; the router is never asked to open a port (no UPnP, NAT-PMP or PCP). Pairing is X25519 with a six-digit code both screens
   show, accepted on the device asked (numeric comparison: a passive listener learns nothing, a device in the middle
   makes the codes differ). After that every request is HMAC-signed with the pair's key, its time within 5 minutes
   and never seen before; links to songs and pictures are signed for 6 hours, for that song only. The traffic isn't
   encrypted (no fast cipher in Decky's Python): music and what was listened to, on the home network. On Windows the
-  firewall blocks it until Settings' "Let your devices reach this PC" (an administrator's yes) allows those two ports
-  from the local subnet only.
+  firewall blocks it until Settings' "Allow device connections" (an administrator's yes) allows those two ports
+  from the local subnet only, and the helper from anywhere; the helper doesn't start before that (or an Allow on
+  Windows' own prompt for it), so Windows never asks on its own.
 - Logs and error messages are redacted (`debuglog.redact`): no web address keeps its query, no
   credential-looking value survives. MusicDeck's settings, data and log folders are made 0700.
 

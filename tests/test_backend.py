@@ -2952,6 +2952,62 @@ async def run():
         radiomod.ITUNES = real_itunes
         rs.stations.put("s2", {"stationuuid": "s2", "url_resolved": "https://x/live.m3u8", "hls": 1})
         check(await rs.on_air("s2") is None, "HLS stations have no ICY title")
+
+        # Radio Browser down to one server that answers 503 for a while: retried, then the last good answer
+        directory = {"fail": 1, "asked": []}
+
+        async def dir_answer(request):
+            directory["asked"].append(request.path)
+            if request.path == "/json/servers":
+                return aioweb.json_response([])
+            if directory["fail"]:
+                directory["fail"] -= 1
+                return aioweb.Response(status=503, text="no available server")
+            if request.path.startswith("/json/stations/byuuid"):
+                return aioweb.json_response([{"stationuuid": "s9", "name": "Nine", "url_resolved": "https://x/nine.mp3"}])
+            return aioweb.json_response([{"stationuuid": "s9", "name": "Nine", "url_resolved": "https://x/nine.mp3"}])
+        icy_app2 = aioweb.Application()
+        icy_app2.router.add_get("/{tail:.*}", dir_answer)
+        dir_runner = aioweb.AppRunner(icy_app2)
+        await dir_runner.setup()
+        dir_site = aioweb.TCPSite(dir_runner, "127.0.0.1", 0)
+        await dir_site.start()
+        real_dir, real_retry = radiomod.DIRECTORY, radiomod.RETRY_AFTER
+        radiomod.DIRECTORY, radiomod.RETRY_AFTER = f"http://127.0.0.1:{dir_site._server.sockets[0].getsockname()[1]}", 0
+        rs.server = ""
+        popular = await rs._stations("/json/stations/topclick")
+        check([p["id"] for p in popular] == ["s9"], "a mirror's 503 is tried once more, and the answer shown")
+        directory["fail"] = 99
+        again = await rs._stations("/json/stations/topclick")
+        check([p["id"] for p in again] == ["s9"], "the directory down: its last good answer is shown")
+        try:
+            await rs._get("/json/tags")
+            check(False, "a request never answered fails")
+        except Exception as e:
+            check("try again" in str(e), f"a request never answered fails, saying to try again ({e})")
+        asked = len(directory["asked"])
+        t0 = time.monotonic()
+        rested = await rs._stations("/json/stations/topclick")
+        check([p["id"] for p in rested] == ["s9"] and len(directory["asked"]) == asked and time.monotonic() - t0 < 0.5,
+              "just after, it isn't asked again: the last good answer at once (Home doesn't wait on it)")
+        directory["fail"] = 0
+        rs.failed_at = 0.0  # a minute on
+        rs.stations = type(rs.stations)(1, 10)
+        played = await rs.stream("s9")
+        check(played.url == "https://x/nine.mp3" and "s9" in rs.kept, "a station played is kept on disk")
+        directory["fail"] = 99
+        rs.stations = type(rs.stations)(1, 10)
+        fresh = RadioService("rd", {"favourites": []}, tmp)
+        fresh.session = rs.session
+        asked = len(directory["asked"])
+        t0 = time.monotonic()
+        again = await fresh.stream("s9")
+        check(again.url == "https://x/nine.mp3" and time.monotonic() - t0 < 1,
+              "after a restart, with the directory down, it still plays at once")
+        await asyncio.sleep(0.2)
+        check(len(directory["asked"]) > asked, "its play is still counted, in the background")
+        radiomod.DIRECTORY, radiomod.RETRY_AFTER = real_dir, real_retry
+        await dir_runner.cleanup()
         await rs.stop()
         await icy_runner.cleanup()
 
@@ -4732,11 +4788,24 @@ async def run():
         own_peers, plugin.peers = plugin.peers, A
         A.paired["pp"] = {"name": "PC", "key": "00" * 32}
         qobuz_here = next((s["id"] for s in plugin.settings.services() if s["type"] == "qobuz"), None)
-        handed = plugin._handed_over("pp", {"services": [{"id": "loc", "type": "local", "name": "Local files"},
-                                                          {"id": "theirs", "type": "radio", "name": "Internet radio"}],
-                                            "session": {"queue": [{"instanceId": "loc", "track": {"id": "a"}},
-                                                                  {"instanceId": "peer~x~y", "track": {"id": "b"}}],
-                                                        "index": 0, "position": 10}})
+        theirs = {"services": [{"id": "loc", "type": "local", "name": "Local files"},
+                               {"id": "theirs", "type": "radio", "name": "Internet radio"}],
+                  "session": {"queue": [{"instanceId": "loc", "track": {"id": "a"}},
+                                        {"instanceId": "peer~x~y", "track": {"id": "b"}}],
+                              "index": 0, "position": 10}}
+        away = plugin._handed_over("pp", theirs)
+        check(away["queue"] == [], "away (over the internet), its Local files' songs don't come along")
+        if qobuz_here:
+            far = plugin._handed_over("pp", {"services": [{"id": "q", "type": "qobuz", "name": "Qobuz"},
+                                                          {"id": "loc", "type": "local", "name": "Local files"}],
+                                             "session": {"queue": [{"instanceId": "loc", "track": {"id": "a"}},
+                                                                   {"instanceId": "q", "track": {"id": "b"}},
+                                                                   {"instanceId": "loc", "track": {"id": "c"}}],
+                                                         "index": 1, "position": 33}})
+            check([q["instanceId"] for q in far["queue"]] == [qobuz_here] and far["index"] == 0 and far["position"] == 33,
+                  "but its streaming songs do, played from the same service here, from where it was")
+        A.nearby["pp"] = {"name": "PC", "address": "127.0.0.1", "port": 1, "seen": time.time()}
+        handed = plugin._handed_over("pp", theirs)
         back_home = plugin._handed_over("pp", {"services": [], "session": {
             "queue": [{"instanceId": f"peer~{A.me['id']}~mine", "track": {"id": "c"}}], "index": 0, "position": 0}})
         check([q["instanceId"] for q in back_home["queue"]] == ["mine"], "this device's own songs, handed back, play from here")

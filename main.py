@@ -142,6 +142,11 @@ class Plugin:
         self.settings = Settings(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.playlists = PlaylistStore(decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.recents = Recents(decky.DECKY_PLUGIN_RUNTIME_DIR)
+        # each source's last Home that came, for Home when it's slow this time (library_home); kept on disk, so
+        # the first Home after a restart doesn't wait on the slowest source either
+        self.last_homes_path = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "last-homes.json")
+        self.last_homes: dict[str, list[dict[str, Any]]] = _read_json(self.last_homes_path)
+        self.last_homes_saving = False
         # every listen, from every source, for the stats page (a user's own history: kept with the settings)
         self.play_log = stats.PlayLog(os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "plays.jsonl"))
         debuglog.configure(decky.DECKY_PLUGIN_LOG_DIR, bool(self.settings.get("debug_log")))
@@ -183,7 +188,11 @@ class Plugin:
                 self.peers = peermod.Peers(
                     decky.DECKY_PLUGIN_SETTINGS_DIR, _device_name(), decky.logger, decky.emit, self._session_for_peer,
                     lambda: [{"id": s["id"], "type": s["type"], "name": s["name"]} for s in self.settings.services()],
-                    self.play_log, self.server.for_peer, self.http, version.current())
+                    self.play_log, self.server.for_peer, self.http, version.current(),
+                    far_exe=self._far_exe())
+                # Windows asks "allow this app?" the first time a program listens: the internet link waits for
+                # Allow device connections (one administrator yes) instead, which lets it in for good
+                self.peers.far_held = await firewall.state(self._far_exe()) == "blocked"
                 self.peers.on_cast = self._cast_here
                 self.peers.playlists_shared = lambda: self.playlists.shared(self._origin)
                 self.peers.playlists_take = self._take_playlists
@@ -847,11 +856,45 @@ class Plugin:
 
             def home(sid: str):
                 async def get():
-                    return self._liked(sid, await self.instances[sid].cached_tab("home"))
+                    # a source that answered before isn't waited for long: past HOME_WAIT its last Home shows, and
+                    # the fresh one is kept for next time when it comes (a slow or failing source doesn't hold
+                    # every other's up)
+                    fresh = asyncio.ensure_future(self.instances[sid].cached_tab("home"))
+                    fresh.add_done_callback(lambda f: f.cancelled() or f.exception() or self._keep_home(sid, f.result()))
+                    last = self.last_homes.get(sid)
+                    if last is None:
+                        return self._liked(sid, await fresh)
+                    try:
+                        return self._liked(sid, await asyncio.wait_for(asyncio.shield(fresh), HOME_WAIT))
+                    except Exception:  # noqa: BLE001 - slow or failing this time: its last Home
+                        return self._liked(sid, last)
                 return get
             homes = await library.gather([(s["id"], home(s["id"])) for s in sources], log=decky.logger)
             return library.merge_home(played, playlists, [(sid, names[sid], sections) for sid, sections in homes])
         return await _result(work())
+
+    def _keep_home(self, sid: str, sections: list[dict[str, Any]]) -> None:
+        """A source's Home that came: kept for when it's slow next time, written to disk a moment later (one write for
+        every source's that come together)."""
+        if not isinstance(sections, list) or not any(s.get("items") or s.get("tracks") for s in sections):
+            return
+        self.last_homes[sid] = sections
+        if self.last_homes_saving:
+            return
+        self.last_homes_saving = True
+
+        async def save():
+            await asyncio.sleep(HOME_SAVE_AFTER)
+            self.last_homes_saving = False
+            kept = {k: v for k, v in self.last_homes.items() if k in self.instances}
+            try:
+                tmp = self.last_homes_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(kept, f)
+                os.replace(tmp, self.last_homes_path)
+            except (OSError, TypeError, ValueError) as e:
+                debuglog.debug("home", "last Homes not kept", error=str(e))
+        spawn(save(), "last homes")
 
     @_when_ready
     async def library_tab(self, tab_id: str) -> dict[str, Any]:
@@ -1558,10 +1601,14 @@ class Plugin:
         """Stores the queue locally (every source) and on the server when it supports queue sync."""
         session = {**_clean_session(session), "saved_at": time.time()}
         os.makedirs(decky.DECKY_PLUGIN_RUNTIME_DIR, exist_ok=True)
+        before = self._session_for_peer()
         tmp = self._session_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(session, f)
         os.replace(tmp, self._session_path())
+        if self.peers and _what_plays(before) != _what_plays(session):
+            # played, paused or another song: the paired devices that are on show it at once (Your devices)
+            self.peers.session_changed()
         items = session.get("queue", [])
         instance_ids = {item["instanceId"] for item in items}
         if len(instance_ids) == 1 and self.settings.get("playback").get("queue_sync", True):
@@ -1624,12 +1671,19 @@ class Plugin:
         # Your devices is showing: another device may ask to pair for a while
         self.peers.pairable_until = time.time() + peermod.PAIRABLE_FOR
         # Windows: whether its firewall lets the others reach this PC ("blocked": Settings offers to allow it)
-        return {"ok": True, "data": {**self.peers.listing(), "firewall": await firewall.state()}}
+        return {"ok": True, "data": {**self.peers.listing(), "firewall": await firewall.state(self._far_exe())}}
 
     @_when_ready
     async def allow_firewall(self) -> bool:
         """Windows: lets the user's devices reach this PC (Windows asks for an administrator's yes first)."""
-        return await firewall.allow()
+        allowed = await firewall.allow(self._far_exe())
+        if allowed and self.peers:
+            await self.peers.start_far()
+        return allowed
+
+    def _far_exe(self) -> Optional[str]:
+        """The internet link's helper for this platform (farlink.py), if there's one."""
+        return native.helper("musicdeck-net", decky.DECKY_PLUGIN_RUNTIME_DIR)
 
     @_when_ready
     async def pair_device(self, peer_id: str) -> dict[str, Any]:
@@ -1670,10 +1724,24 @@ class Plugin:
                     return pick["id"]
             return f"peer~{peer_id}~{their_instance}"
         session = _clean_session(found.get("session"))
-        # songs it had from a third device are left out (a device streams only its own)
-        queue = [{"instanceId": here(item["instanceId"]), "track": item["track"]} for item in session["queue"]
-                 if not item["instanceId"].startswith("peer~") or item["instanceId"].startswith(me)]
-        return {**session, "queue": queue}
+        # songs it had from a third device are left out (a device streams only its own), and so are its own when it
+        # isn't on this network: Local files and discs stay at home, only streaming services' songs go further
+        near = bool(self.peers) and self.peers.near(peer_id)
+        queue, index, current = [], 0, False
+        for i, item in enumerate(session["queue"]):
+            origin = item["instanceId"]
+            if origin.startswith("peer~") and not origin.startswith(me):
+                continue
+            instance = here(origin)
+            if instance.startswith("peer~") and not near:
+                continue
+            if i == session["index"]:
+                index, current = len(queue), True
+            queue.append({"instanceId": instance, "track": item["track"]})
+        if not current:
+            # what it was playing doesn't come along, so neither does where it was in it
+            return {**session, "queue": [], "index": 0}
+        return {**session, "queue": queue, "index": index}
 
     @_when_ready
     async def other_sessions(self) -> dict[str, Any]:
@@ -1683,7 +1751,7 @@ class Plugin:
             return {"ok": True, "data": []}
         out = []
         for found in await self.peers.sessions():
-            session = self._handed_over(found["peer"], found)
+            session = self._handed_over(found["peer"], _caught_up(found))
             if not session["queue"] or time.time() - session.get("saved_at", 0) > HANDOFF_FRESH:
                 continue
             item = session["queue"][session["index"]]
@@ -1701,10 +1769,11 @@ class Plugin:
             try:
                 # it stops first (and saves where it stopped, to the second), then its queue is read
                 with contextlib.suppress(peermod.PeerError):
-                    await self.peers.call(peer_id, "POST", "/p/took-over", {}, timeout=4)
-                    await asyncio.sleep(TOOK_OVER_SAVE)
+                    told = await self.peers.call(peer_id, "POST", "/p/took-over", {}, timeout=6)
+                    if not (isinstance(told, dict) and told.get("saved")):
+                        await asyncio.sleep(TOOK_OVER_SAVE)  # a version that answers before it has saved
                 found = await self.peers.call(peer_id, "GET", "/p/session")
-                session = self._handed_over(peer_id, found)
+                session = self._handed_over(peer_id, _caught_up(found))
                 if not session["queue"]:
                     raise ServiceError("Nothing's playing there")
             except peermod.PeerError as e:
@@ -2200,6 +2269,8 @@ FOLLOW_AGAIN = 300
 FOLLOW_ALL_EVERY = 6 * 3600
 #: another device's music is offered to continue here for this long after it was last played
 HANDOFF_FRESH = 12 * 3600
+HOME_WAIT = 3.0  # seconds Home waits for a source it has an earlier Home of
+HOME_SAVE_AFTER = 5  # seconds after a source's Home came that the last Homes are written
 
 
 def _quiet_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
@@ -2217,9 +2288,50 @@ def _quiet_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
     loop.set_exception_handler(handle)
 
 
+def _read_json(path: str) -> dict[str, Any]:
+    """A JSON object kept in a file; empty when there's none (or it's damaged)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _device_name() -> str:
     """What this device is called to the user's others: its computer name."""
     return (socket.gethostname() or "This device").split(".")[0][:80]
+
+
+def _what_plays(session: dict[str, Any]) -> tuple[Any, Any]:
+    """What another device's Your devices shows of a session: the song, and whether it plays."""
+    queue, index = session.get("queue") or [], session.get("index", 0)
+    item = queue[index] if isinstance(index, int) and 0 <= index < len(queue) else {}
+    return (item.get("track") or {}).get("id"), bool(session.get("playing"))
+
+
+def _caught_up(found: Any) -> Any:
+    """Another device's session as of now, by this device's clock: saved "age" seconds ago by its own (clocks of two
+    devices can be minutes apart), and if it's still playing, on by as much (to the end of the song at most)."""
+    if not isinstance(found, dict) or not isinstance(found.get("session"), dict):
+        return found
+    age = found.get("age")
+    if not isinstance(age, (int, float)) or isinstance(age, bool) or not 0 <= age < 10 * 365 * 86400:
+        return found
+    session = dict(found["session"])
+    session["saved_at"] = time.time() - age
+    position = session.get("position")
+    if session.get("playing") and isinstance(position, (int, float)) and not isinstance(position, bool):
+        queue, index = session.get("queue"), session.get("index")
+        track = queue[index].get("track") if isinstance(queue, list) and isinstance(index, int)             and 0 <= index < len(queue) and isinstance(queue[index], dict) else None
+        duration = track.get("duration") if isinstance(track, dict) else None
+        live = isinstance(track, dict) and track.get("live")
+        if not live:
+            position += age
+            if isinstance(duration, (int, float)) and duration > 0:
+                position = min(position, max(duration - 1, 0))
+            session["position"] = position
+    return {**found, "session": session}
 
 
 def _clean_session(session: Any) -> dict[str, Any]:

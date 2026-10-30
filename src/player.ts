@@ -360,7 +360,10 @@ export class Player {
       dlog("audio playing", { at: audio.currentTime });
       window.clearTimeout(this.idleRelease);
       this.applySpeed();
+      const was = this.state.get().playing;
       this.state.update({ playing: true, loading: false });
+      // from paused (not back from buffering): saved at once, as a pause is, so your other devices show it playing
+      if (!was) this.persistSession();
       this.onPlaying();
     });
     on("pause", () => {
@@ -1222,6 +1225,12 @@ export class Player {
     this.lastProgressSave = Date.now();
     const duration = Number.isFinite(this.audio.duration) ? this.audio.duration : item.track.duration;
     saveProgress(item.instanceId, item.track, position, duration || 0).catch(() => {});
+  }
+
+  /** Another device took over (devices.tsx): where it stopped here is saved at once, playing or not, so the other
+   * reads exactly that (peers.py waits for it). */
+  savedForHandoff() {
+    this.persistSession();
   }
 
   private persistSession() {

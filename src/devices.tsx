@@ -2,6 +2,7 @@ import { addEventListener, removeEventListener } from "@decky/api";
 import { ButtonItem, ConfirmModal, DialogButton, Field, PanelSection, PanelSectionRow, showModal } from "@decky/ui";
 import { FC, useEffect, useState } from "react";
 import { Devices, OtherSession, Track, reportRenderStatus, allowFirewall, answerPairing, devices, otherSessions, pairDevice, takeOver, unpairDevice } from "./api";
+import type { SectionFrame } from "./components/Settings";
 import { notify } from "./notify";
 import { player } from "./player";
 
@@ -28,6 +29,7 @@ export function watchDevices(): () => void {
   // another device picked up the music: it stops here
   const tookOver = (p: { id: string; name: string }) => {
     if (player.state.get().playing) player.toggle();
+    else player.savedForHandoff();
     notify("MusicDeck", `Playing on ${p.name}`);
     // play here again: on from where it's got to there, not from where it stopped here
     player.resumeElsewhere = async () => {
@@ -99,10 +101,14 @@ function playedOn(e: CastHere) {
 }
 
 /** The paired devices and the ones nearby, looked at again every few seconds while shown. */
-function useDevices(): Devices | null {
+/** This device, the paired ones and those nearby, looked at every few seconds while shown (and meanwhile another
+ * device may ask to pair). */
+function useDevices(): [Devices | null, () => void] {
   const [found, setFound] = useState<Devices | null>(null);
+  const [again, setAgain] = useState(0);
   useEffect(() => {
     let live = true;
+    // each look also asks the devices on this network to say where they are
     const look = () =>
       devices()
         .then((r) => live && r.ok && setFound(r.data))
@@ -113,8 +119,19 @@ function useDevices(): Devices | null {
       live = false;
       window.clearInterval(timer);
     };
-  }, []);
-  return found;
+  }, [again]);
+  return [found, () => setAgain((n) => n + 1)];
+}
+
+/** A paired device's line: what it's playing (to continue here) and where it is, on with nothing to continue, or
+ * offline. */
+export function deviceState(d: Devices["paired"][number], sessions: OtherSession[]): string {
+  if (!d.online) return "Offline";
+  const away = d.via === "internet" ? " · via internet" : "";
+  const s = sessions.find((x) => x.peer === d.id);
+  if (!s) return `Online, nothing to continue${away}`;
+  const what = [s.track.title, s.track.artist].filter(Boolean).join(" – ");
+  return `${s.playing ? "Playing" : "Paused"}: ${what}${away}`;
 }
 
 const pair = async (id: string) => {
@@ -134,12 +151,19 @@ const pair = async (id: string) => {
 };
 
 /** Settings' rows: each paired device (Unpair), then each one nearby (Pair). */
-export const DeviceRows: FC = () => {
-  const found = useDevices();
+export const DeviceRows: FC<{ Section?: SectionFrame }> = ({ Section = PanelSection }) => {
+  const [found, lookAgain] = useDevices();
   const [asking, setAsking] = useState(false);
-  if (!found || (!found.paired.length && !found.nearby.length && found.firewall !== "blocked")) return null;
+  // what each one that's on was playing: looked at again when one comes or goes
+  const sessions = useOtherSessions(
+    (found?.paired ?? [])
+      .filter((d) => d.online)
+      .map((d) => d.id)
+      .join(","),
+  );
+  if (!found) return null;
   return (
-    <PanelSection title="Your devices">
+    <Section title="Your devices">
       <PanelSectionRow>
         <Field label="This device" description={found.me.name} />
       </PanelSectionRow>
@@ -163,7 +187,7 @@ export const DeviceRows: FC = () => {
         <PanelSectionRow key={d.id}>
           <Field
             label={d.name}
-            description={d.online ? "Online" : "Offline"}
+            description={deviceState(d, sessions)}
             verticalAlignment="center"
           >
             <DialogButton
@@ -184,6 +208,21 @@ export const DeviceRows: FC = () => {
           </Field>
         </PanelSectionRow>
       ))}
+      <PanelSectionRow>
+        <Field
+          label="Pair a new device"
+          description={
+            found.nearby.length
+              ? "Pick it below: both show the same six digits, accepted on the other one."
+              : "Looking on this network. Open Your devices in MusicDeck's settings on your other PC, Deck or Steam Machine too, and it shows here. Once paired, they reach each other anywhere."
+          }
+          verticalAlignment="center"
+        >
+          <DialogButton style={{ minWidth: 120, width: 120, padding: "8px 12px" }} onClick={lookAgain}>
+            Look again
+          </DialogButton>
+        </Field>
+      </PanelSectionRow>
       {found.nearby.map((d) => (
         <PanelSectionRow key={d.id}>
           <Field label={d.name} description="Nearby" verticalAlignment="center">
@@ -193,26 +232,41 @@ export const DeviceRows: FC = () => {
           </Field>
         </PanelSectionRow>
       ))}
-    </PanelSection>
+    </Section>
   );
 };
 
-/** What the other devices were playing lately (looked at again every half minute while shown), newest first. */
-export function useOtherSessions(): OtherSession[] {
-  const [found, setFound] = useState<OtherSession[]>([]);
+let lastSessions: OtherSession[] = [];
+
+/** What the other devices were playing lately (looked at again every half minute while shown, and when `refresh`
+ * changes), newest first. */
+export function useOtherSessions(refresh = ""): OtherSession[] {
+  // the last that came, at once (Home's first row is there as it opens, and takes the controller)
+  const [found, setFound] = useState<OtherSession[]>(lastSessions);
   useEffect(() => {
     let live = true;
     const look = () =>
       otherSessions()
-        .then((r) => live && r.ok && setFound([...r.data].sort((a, b) => b.saved_at - a.saved_at)))
+        .then((r) => {
+          if (!r.ok) return;
+          lastSessions = [...r.data].sort((a, b) => b.saved_at - a.saved_at);
+          if (live) setFound(lastSessions);
+        })
         .catch(() => {});
     look();
     const timer = window.setInterval(look, 30_000);
+    // a device just came or went (over the internet), or what it plays changed: at once, not at the next half minute
+    const moved = () => void look();
+    addEventListener("peer_presence", moved);
+    // one played, paused or changed song
+    addEventListener("peer_session", moved);
     return () => {
       live = false;
       window.clearInterval(timer);
+      removeEventListener("peer_presence", moved);
+      removeEventListener("peer_session", moved);
     };
-  }, []);
+  }, [refresh]);
   // not what's playing here now (continued a moment ago); what stopped here when the other took it is offered, from
   // where it's got to there
   const here = player.current;

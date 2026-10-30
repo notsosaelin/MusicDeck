@@ -28,6 +28,7 @@ import {
   FaSearch,
   FaUser,
   FaUserCheck,
+  FaUsb,
   FaUserPlus,
 } from "react-icons/fa";
 import {
@@ -43,6 +44,8 @@ import {
   forgetSearch,
   getHome,
   isLocalPlaylist,
+  NO_DISC,
+  discCollection,
   libraryHome,
   libraryTab,
   openCollection,
@@ -235,6 +238,65 @@ const PART_ICONS: Record<string, ReactNode> = {
 /** Rows Jump back in and Your playlists show before their Show all */
 const LIBRARY_ROWS = 4;
 
+const ICON_BOX = { fontSize: 16, opacity: 0.85, width: 40, display: "flex", justifyContent: "center" } as const;
+
+/**
+ * The panel's Library's first part, when there's anything in it: your other MusicDeck devices that have something to
+ * continue (played here from where it is there; it stops), the disc and what's plugged in (each opens its page).
+ * Pairing and the rest of each device are Settings'.
+ */
+const PanelDevices: FC = () => {
+  const state = useStore(pluginState);
+  const sessions = useOtherSessions();
+  const local = state?.services.find((s) => s.type === "local")?.id;
+  const disc = state?.disc && (state.disc.id || state.disc.card.id !== NO_DISC) ? state.disc : null;
+  const plugged = local ? (state?.devices ?? []).filter((d) => d.kind !== "cd" && d.kind !== "disc") : [];
+  if (!sessions.length && !disc && !plugged.length) return null;
+  return (
+    <PanelSection title="Your devices">
+      {sessions.map((s) => (
+        <ListRow
+          key={`peer:${s.peer}`}
+          leading={<Art art={s.track.art ?? null} instanceId={s.instanceId} size={40} />}
+          title={s.name}
+          subtitle={`${s.playing ? "Playing" : "Paused"}: ${[s.track.title, s.track.artist].filter(Boolean).join(" – ")}`}
+          onActivate={() => continueFrom(s)}
+        />
+      ))}
+      {disc && (
+        <ListRow
+          leading={
+            <span style={ICON_BOX}>
+              <FaCompactDisc />
+            </span>
+          }
+          title={disc.card.title}
+          subtitle={disc.label}
+          onActivate={() => pushView("library", { type: "collection", collection: discCollection(disc) })}
+        />
+      )}
+      {plugged.map((d) => (
+        <ListRow
+          key={d.id}
+          leading={
+            <span style={ICON_BOX}>
+              <FaUsb />
+            </span>
+          }
+          title={d.name}
+          subtitle="Plugged in"
+          onActivate={() =>
+            pushView("library", {
+              type: "collection",
+              collection: { id: `dv~${d.id}~`, kind: "device", title: d.name, subtitle: "", source: local, art: null },
+            })
+          }
+        />
+      ))}
+    </PanelSection>
+  );
+};
+
 /**
  * The panel's Library: every source's music, not just the one playing. What to carry on with first (what your other
  * devices are playing, then what you played lately, from any source); then Your music (every source's playlists,
@@ -244,32 +306,16 @@ const LIBRARY_ROWS = 4;
 const LibraryHome: FC<{ instanceId: string }> = ({ instanceId }) => {
   const state = useStore(pluginState);
   const result = useResult<Section[]>("library:home", () => libraryHome(), true);
-  const sessions = useOtherSessions();
   const sections = result?.ok ? result.data : [];
   const jump = sections.find((s) => s.title === "Jump back in");
   const playlists = sections.find((s) => s.title === "Your playlists");
   const parts = state?.library_tabs ?? [];
   const sources = librarySources(state?.services ?? []);
-  const continuing = sessions.map((s) => (
-    <TrackRow
-      key={`peer:${s.peer}`}
-      track={{ ...s.track, artist: `On ${s.name}` }}
-      showAlbum={false}
-      artInstanceId={s.instanceId}
-      onPlay={() => continueFrom(s)}
-    />
-  ));
   return (
     <>
-      {(continuing.length > 0 || !!jump?.items.length) && (
-        <CollectionList
-          instanceId={instanceId}
-          stack="library"
-          title="Jump back in"
-          head={continuing}
-          items={jump?.items ?? []}
-          limit={Math.max(1, LIBRARY_ROWS - continuing.length)}
-        />
+      <PanelDevices />
+      {!!jump?.items.length && (
+        <CollectionList instanceId={instanceId} stack="library" title="Jump back in" items={jump.items} limit={LIBRARY_ROWS} />
       )}
       {!!jump?.tracks?.length && <TrackList instanceId={instanceId} tracks={jump.tracks} limit={3} />}
       {parts.length > 0 && (
@@ -299,7 +345,7 @@ const LibraryHome: FC<{ instanceId: string }> = ({ instanceId }) => {
           ))}
         </PanelSection>
       )}
-      {result === null && !sessions.length && <Loading result={null} />}
+      {result === null && <Loading result={null} />}
     </>
   );
 };

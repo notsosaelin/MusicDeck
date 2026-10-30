@@ -3,6 +3,28 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## Unreleased
+
+- **Your devices, anywhere**: paired devices find each other over the internet too (another network, a phone's
+  hotspot, mobile data), with no Tailscale, port forwarding or account, and nothing to set up. Each shows whether
+  it's playing, paused, on with nothing to continue, or offline; Continue picks up what the other was playing from
+  the very second it was at (and it pauses there); pressing play on the one that was taken over takes it back from
+  wherever the other got to. Playlists, listens and playing on the other device as a speaker work the same way.
+  Songs from Local files and discs stay on their own network. Encrypted end to end; only paired devices are answered.
+- **Your devices on Home**: a row at the top of Home (and of the panel's Library) with your other devices that have
+  something to continue, the disc, and what's plugged in. It's there as Home opens, and takes the controller.
+- **Pairing in Settings everywhere**: the media center's and the panel's Settings have Your devices (each device's
+  state, Unpair, and Pair a new device with Look again), as Decky → MusicDeck does.
+- **What the others play, at once**: a device that plays, pauses or changes song tells the others within a second
+  (it used to take up to half a minute to show).
+- **Windows: one setup, then no prompts**: Allow device connections (one administrator yes) also lets in the
+  internet link; until then it doesn't start, so Windows never stops to ask about it.
+- **Internet radio when its directory is down** (Radio Browser is down to one server that often answers "no
+  available server"): another try on another mirror, the last good lists shown meanwhile, and stations you saved
+  or played kept so they play at once. Home doesn't wait on it (or on any slow source: past 3 seconds a source shows
+  its last Home, also right after a restart).
+- **Windows, Big Picture**: the media center's tabs no longer go under Steam's top bar.
+
 ## 0.42.0
 
 - **Home, one source at a time** (media center): what you played lately, then each source in turn, a row of its

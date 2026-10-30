@@ -491,7 +491,8 @@ export const checkUpdate = callable<[], Result<Update | null>>("check_update");
 /** The user's other devices running MusicDeck (peers.py). */
 export interface Devices {
   me: { id: string; name: string };
-  paired: { id: string; name: string; online: boolean }[];
+  /** via: "nearby" (this network), "internet" (the internet link), null when offline */
+  paired: { id: string; name: string; online: boolean; via?: "nearby" | "internet" | null }[];
   /** nearby, not paired yet */
   nearby: { id: string; name: string }[];
   /** Windows: "blocked" while its firewall keeps the others from reaching this PC */

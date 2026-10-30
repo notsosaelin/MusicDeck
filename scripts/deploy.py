@@ -63,8 +63,11 @@ def upload(device: str, backend: bool) -> None:
     platform_name = "linux-arm64" if ssh(device, "uname -m").strip() in ("aarch64", "arm64") else "linux-x86_64"
     ssh(device, f"mkdir -p {data}/bin/{platform_name} && rm -f {data}/bin/qjs {data}/bin/spotify-helper")
     for binary in (ROOT / "bin" / platform_name).glob("*"):
-        scp(device, binary, f"{data}/bin/{platform_name}/{binary.name}")
-        ssh(device, f"chmod 755 {data}/bin/{platform_name}/{binary.name}")
+        # copied beside it and renamed over it: a running helper (musicdeck-net, restarted as soon as it's
+        # stopped) keeps its file busy, and a rename doesn't mind
+        target = f"{data}/bin/{platform_name}/{binary.name}"
+        scp(device, binary, f"{target}.new")
+        ssh(device, f"chmod 755 {target}.new && mv -f {target}.new {target}")
     print(f"backend copied ({platform_name})")
 
 

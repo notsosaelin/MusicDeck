@@ -14,8 +14,11 @@ A [Decky Loader](https://decky.xyz) plugin for SteamOS, Bazzite and other SteamO
   (the cast button) lists the other devices that are on: the music plays there as on a speaker, this one showing
   where it's got to and controlling it, and This Deck brings it back. **Playlists** are the same on all of them:
   one made or changed on any shows on the others within seconds. Songs from a
-  streaming service play from the same service here; songs from Local files stream from the device they're on. On
-  Windows, Settings first offers **Let your devices reach this PC** (Windows' firewall asks for an administrator's yes).
+  streaming service play from the same service here; songs from Local files stream from the device they're on. Once
+  paired, they find each other **anywhere**, not just at home (another network, a hotspot), with nothing to set up:
+  what each plays, Continue, Play on, playlists and listens all work across the internet (Local files and discs stay
+  home). On Windows, Settings first offers **Allow device connections** (Windows' firewall asks for an administrator's
+  yes, once).
 - **One library:** every source's music together, as Steam's library is every game whatever store it came from.
   Playlists mix sources (a Qobuz song, a SoundCloud one and your own files in one list).
   Home has what you played lately from all of them, then each source in turn: a row of its albums or playlists

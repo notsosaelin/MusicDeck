@@ -12,6 +12,7 @@ import { PlaybackSections } from "./Settings";
 import { MiniPlayer } from "./NowPlaying";
 import { PlayerPages } from "./PlayerPages";
 import { ACCENT, IconButton, Message, PLAYER_CSS } from "./common";
+import { DeviceRows } from "../devices";
 
 const TAB_LOOKS: Record<PanelTab, { label: string; icon: ReactNode }> = {
   playing: { label: "Now playing", icon: <FaCompactDisc /> },
@@ -87,6 +88,7 @@ const PanelSettings: FC = () => {
     <>
       <Equalizer />
       {state && <PlaybackSections state={state} />}
+      <DeviceRows />
       <CenterChoices Section={PanelSection} below />
       <PanelSection>
         <PanelSectionRow>

@@ -11,6 +11,7 @@ py_modules/musicdeck/      backend package (services/, stream server, settings, 
 py_modules/<others>/       vendored third-party packages (not in git; see scripts/vendor.py)
 src/                       frontend (TypeScript + React, built by rollup into dist/index.js)
 backend/spotify-helper/    Rust source of the Spotify helper
+backend/musicdeck-net/     Rust source of the internet link between paired devices (iroh)
 bin/<platform>/            built native helpers, spotify-helper and qjs, per platform (linux-x86_64,
                            linux-arm64, windows-x86_64; not in git; see musicdeck/native.py)
 scripts/                   vendor, package, deploy, helper build, CDP tool
@@ -38,6 +39,7 @@ pnpm install
 pnpm build                              # src/ -> dist/index.js
 python scripts/vendor.py                # third-party Python into py_modules/, QuickJS-NG into bin/<platform>/
 bash scripts/build_spotify_helper.sh    # bin/<platform>/spotify-helper: static musl for x86_64 and arm64 Linux, Windows .exe
+bash scripts/build_net_helper.sh        # bin/<platform>/musicdeck-net (the internet link): the same three; also from Git Bash on Windows
 bash scripts/build_hashab.sh            # bin/<platform>/hashab (the iPod nano 6G/7G signature), checked against its test vectors
 bash scripts/build_cdrskin.sh           # bin/linux-*/cdrskin (burning CDs): libburn's release, checked by SHA-256, static musl
 bash scripts/build_cdrskin_windows.sh   # bin/windows-x86_64/cdrskin.exe: libburn on libcdio, static (MSYS2 UCRT64 shell)
@@ -88,6 +90,8 @@ python scripts/vendor.py       # the tests use the vendored packages in py_modul
 pip install aiohttp certifi    # these come with Decky on a device, so they aren't vendored
 python tests/test_backend.py
 python tests/test_cast.py      # casting: mDNS, a fake Chromecast, a fake UPnP renderer, the network site
+python tests/test_farlink.py   # Your devices over the internet: two devices with real helpers (needs the helper built and internet)
+python scripts/net_test.py     # the helper's traffic: bytes per request, idle presence per hour, how fast Offline shows
 python tests/test_ipod.py      # iPods: the database format against libgpod's (fixtures), a pretend iPod synced
 python tests/test_burn.py      # burning CDs: cdrskin's output read, CD-Text, a burn planned and run (cdrskin stood in for)
 ```

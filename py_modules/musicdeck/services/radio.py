@@ -8,6 +8,9 @@ Ogg, or HLS), proxied like any other source. Most Icecast/Shoutcast streams also
 on air as ICY metadata, which on_air() reads with a short side request.
 """
 import asyncio
+import contextlib
+import json
+import os
 import random
 import re
 import time
@@ -26,6 +29,14 @@ DIRECTORY = "https://all.api.radio-browser.info"
 SERVER_TTL = 6 * 3600
 STATION_TTL = 3600
 STATIONS_KEPT = 1000
+# stations saved or played, kept on disk so they play while the directory is down
+STATIONS_ON_DISK = 300
+# the last good answer of each list the directory gave, for when it fails
+ANSWERS_KEPT = 40
+RETRY_AFTER = 1.5
+# once the directory has failed, it isn't asked again for this long: lists show their last good answer at once
+# (Home and Browse wait for every source, so a directory that's down mustn't hold them up each time)
+RESTING = 60
 LIST_SIZE = 50
 STREAM_TITLE = re.compile(rb"StreamTitle='(.*?)';", re.S)
 STREAM_URL = re.compile(rb"StreamUrl='(.*?)';", re.S)
@@ -164,7 +175,8 @@ def believable(song: dict[str, Any], station: str) -> bool:
 def _session() -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(ssl=tls()),
-        timeout=aiohttp.ClientTimeout(total=15), headers={"User-Agent": USER_AGENT})
+        # short: a slow mirror is tried again (_get), within the time a page waits
+        timeout=aiohttp.ClientTimeout(total=8), headers={"User-Agent": USER_AGENT})
 
 
 class RadioService(MusicService):
@@ -186,6 +198,11 @@ class RadioService(MusicService):
         self.song_art: Cache[str] = Cache(SONG_ART_TTL, SONG_ART_KEPT)
         # (when, the directory's genre names), for similar stations
         self.genres: Optional[tuple[float, set[str]]] = None
+        # the last good answer to each request (path and query), shown when the directory fails
+        self.answers: dict[str, Any] = {}
+        self.failed_at = 0.0
+        self.kept_path = os.path.join(runtime_dir, f"radio-{instance_id}.json")
+        self.kept: dict[str, dict[str, Any]] = self._load_kept()
 
     @classmethod
     def prepare_config(cls, config: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -199,6 +216,49 @@ class RadioService(MusicService):
     async def stop(self) -> None:
         if self.session:
             await self.session.close()
+
+    def remove(self) -> None:
+        with contextlib.suppress(OSError):
+            os.remove(self.kept_path)
+
+    # --- stations kept on disk ---
+
+    def _load_kept(self) -> dict[str, dict[str, Any]]:
+        try:
+            with open(self.kept_path, encoding="utf-8") as f:
+                data = json.load(f)
+            return {k: v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _keep(self, station: dict[str, Any]) -> None:
+        """A station saved or played: its directory record, on disk (the latest last; the oldest go)."""
+        uuid = station.get("stationuuid")
+        if not uuid:
+            return
+        self.kept.pop(uuid, None)
+        self.kept[uuid] = {k: station.get(k) for k in ("stationuuid", "name", "url", "url_resolved", "hls", "favicon",
+                                                       "tags", "country", "state", "language", "codec", "bitrate",
+                                                       "homepage") if station.get(k) not in (None, "")}
+        favourites = self._favourite_ids()
+        for old in [k for k in self.kept if k not in favourites][:max(0, len(self.kept) - STATIONS_ON_DISK)]:
+            self.kept.pop(old, None)
+        tmp = self.kept_path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.kept, f)
+            os.replace(tmp, self.kept_path)
+        except OSError as e:
+            debuglog.debug("radio", "stations not kept", error=str(e))
+
+    async def _keep_favourites(self) -> None:
+        """Favourites saved before stations were kept on disk: fetched once, while the directory answers."""
+        missing = [i for i in self._favourite_ids() if i not in self.kept]
+        if not missing:
+            return
+        with contextlib.suppress(ServiceError):
+            for station in await self._get("/json/stations/byuuid", uuids=",".join(missing[:100])) or []:
+                self._keep(station)
 
     # --- directory ---
 
@@ -217,17 +277,46 @@ class RadioService(MusicService):
         return self.server
 
     async def _get(self, path: str, **params: Any) -> Any:
+        """The directory's answer. A mirror that fails (it's often down to one server, which answers 503 for a while)
+        is tried once more, a moment later, on whichever mirror is picked then; when that fails too, the last good
+        answer to the same request is given, if there was one."""
         assert self.session
         query = {"hidebroken": "true", **{k: str(v).lower() if isinstance(v, bool) else v
                                           for k, v in params.items() if v is not None}}
-        try:
-            async with self.session.get(await self._base() + path, params=query) as resp:
-                if resp.status >= 400:
-                    raise ServiceError(f"The radio directory returned HTTP {resp.status}")
-                return await resp.json(content_type=None)
-        except aiohttp.ClientError as e:
-            self.server = ""  # try another mirror next time
-            raise ServiceError(f"Could not reach the radio directory: {e}") from e
+        key = path + "?" + "&".join(f"{k}={v}" for k, v in sorted(query.items()))
+        error = ServiceError("The radio directory isn't answering; try again soon")
+        if self.failed_at and time.monotonic() - self.failed_at < RESTING:
+            if key in self.answers:
+                return self.answers[key]
+            raise error
+        for attempt in range(2):
+            if attempt:
+                self.server = ""  # another mirror, if there's another
+                await asyncio.sleep(RETRY_AFTER)
+            try:
+                async with self.session.get(await self._base() + path, params=query) as resp:
+                    if resp.status >= 500:
+                        error = ServiceError(f"The radio directory is having trouble (HTTP {resp.status}); try again soon")
+                        continue
+                    if resp.status >= 400:
+                        raise ServiceError(f"The radio directory returned HTTP {resp.status}")
+                    answer = await resp.json(content_type=None)
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+                error = ServiceError(f"Could not reach the radio directory ({type(e).__name__}); try again soon")
+                continue
+            if not path.startswith("/json/url/"):  # a play counted: nothing to show later
+                self.answers.pop(key, None)
+                self.answers[key] = answer
+                while len(self.answers) > ANSWERS_KEPT:
+                    self.answers.pop(next(iter(self.answers)))
+            self.failed_at = 0.0
+            return answer
+        self.server = ""
+        self.failed_at = time.monotonic()
+        if key in self.answers:
+            debuglog.debug("radio", "directory failed: the last good answer given", path=path, error=str(error))
+            return self.answers[key]
+        raise error
 
     async def _stations(self, path: str, **params: Any) -> list[dict[str, Any]]:
         stations = await self._get(path, limit=params.pop("limit", LIST_SIZE), **params)
@@ -239,6 +328,9 @@ class RadioService(MusicService):
         hit = self.stations.get(uuid)
         if hit:
             return hit
+        if uuid in self.kept:
+            # saved or played before: no need to wait for the directory (which may be down)
+            return self.kept[uuid]
         found = await self._get("/json/stations/byuuid", uuids=uuid)
         if not found:
             raise ServiceError("This station is no longer listed")
@@ -295,6 +387,8 @@ class RadioService(MusicService):
             sections.append(models.section("Genres", [self._tag(t) for t in got["genres"]]))
         if not sections:
             raise next(v for v in got.values() if isinstance(v, Exception))
+        if any(isinstance(v, list) for v in got.values()):
+            asyncio.ensure_future(self._keep_favourites())
         return sections
 
     async def browse(self) -> list[dict[str, Any]]:
@@ -417,7 +511,9 @@ class RadioService(MusicService):
     async def star(self, track_id: str, starred: bool) -> None:
         favourites = [f for f in self.config.get("favourites") or [] if f["id"] != track_id]
         if starred:
-            favourites.insert(0, {**self._station(await self._station_info(track_id)), "starred": True})
+            info = await self._station_info(track_id)
+            favourites.insert(0, {**self._station(info), "starred": True})
+            self._keep(info)
         self.config["favourites"] = favourites
         if self.save_config:
             self.save_config(self.config)
@@ -480,16 +576,21 @@ class RadioService(MusicService):
 
     # --- media ---
 
+    async def _count_play(self, track_id: str) -> None:
+        try:
+            await self._get(f"/json/url/{track_id}")
+        except ServiceError as e:
+            debuglog.debug("radio", "click not counted", error=str(e))
+
     async def stream(self, track_id: str) -> StreamSource:
         info = await self._station_info(track_id)
         url = info.get("url_resolved") or info.get("url")
         if not url:
             raise ServiceError("This station has no stream address")
-        try:
-            # Radio Browser's etiquette: count a play, which also keeps its popularity lists honest
-            await self._get(f"/json/url/{track_id}")
-        except ServiceError as e:
-            debuglog.debug("radio", "click not counted", error=str(e))
+        # Radio Browser's etiquette: count a play, which also keeps its popularity lists honest (in the background:
+        # the song doesn't wait for the directory)
+        asyncio.ensure_future(self._count_play(track_id))
+        self._keep(info)
         hls = bool(info.get("hls")) or ".m3u8" in url.split("?")[0]
         return StreamSource(url=url, hls=hls)
 

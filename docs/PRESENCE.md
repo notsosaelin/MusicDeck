@@ -1,6 +1,7 @@
-# Device presence and handoff over the internet (research, not built yet)
+# Device presence and handoff over the internet
 
-Notes for picking this work back up. Nothing here is implemented; today's sync is LAN-only (`peers.py`).
+Built (farlink.py, backend/musicdeck-net): the research it came from, what was measured, and what's left.
+Where it lives in the code: ARCHITECTURE.md (farlink.py, Security).
 
 ## What's wanted
 
@@ -54,9 +55,72 @@ in playlists.py), and Local files streamed between devices.
   only if this device has the same source (catalogue types; never local/disc).
 - No settings to change. n0's public relays and discovery are used as they come.
 
-## Still to find out (run tests before building)
+## What n0's free relays are (checked 2026-10-30)
 
-1. **n0's public relays and discovery: what's allowed and how limited.** n0 describes them as free for anyone; check
+- n0's docs: the public relays are "free to use", "shared across all iroh developers worldwide", rate-limited
+  "to prevent abuse", with "no uptime or performance guarantees", and "suitable for development and testing";
+  for production they recommend their paid Shared Relays (Pro, $19/month) or dedicated ones, or self-hosting.
+  (https://docs.iroh.computer/concepts/relays)
+- Their blog (2026-09-08): the free relays are rate-limited "based on the total current unauthenticated traffic"
+  (no numbers published), enforced "more strictly" as iroh got popular; iroh 1.1+ tells an endpoint when it's
+  being rate-limited. Not said whether that throttles or blocks. (https://www.iroh.computer/blog/shared-relays)
+- Relays do two jobs: help two devices find each other and time the hole punch, and carry traffic when no direct
+  path can be made (roughly 1 network in 10). Without any relay, devices behind NAT mostly can't reach each other.
+- Discovery: n0's DNS/pkarr service (also n0-run), or the Mainline DHT (BitTorrent's; no operator, free; optional
+  in iroh), or local-network lookup.
+- Self-hosting a relay: one open-source binary on a server with a public IP and a DNS name; stateless; TLS built
+  in; can be limited to known endpoint ids. Costs a server (some clouds have always-free tiers, with an account).
+
+So "no cost to anyone" and "no configuration" points at n0's free relays, which n0 labels for development and
+testing, with unpublished limits that have been tightening. MusicDeck's traffic is tiny (see the estimate below),
+so throttling by volume should rarely matter, but nothing guarantees it stays available.
+
+## Decision (2026-10-30)
+
+n0's free relays and discovery, the Mainline DHT published to as well (so finding a device doesn't rest on n0
+alone), LAN as today when neither works. A hidden setting may point at a self-hosted relay later. No setup.
+
+## Risks and weak points
+
+What holds whatever the route: QUIC encrypted end to end and authenticated by each device's key, so no relay or
+DHT node can read, change or impersonate MusicDeck's traffic; only paired endpoint ids are answered, about the few
+things allowed (presence, session, playlists, plays), every message size- and schema-checked; nothing of Decky's
+RPC or the rest of the backend is reachable.
+
+- **n0**: availability (free, no SLA, rate limits shared by all unauthenticated users, unpublished and
+  tightening; could require accounts or end: then internet presence stops and LAN carries on); metadata (a relay
+  sees both ends' IPs, timing and volume; the DNS/pkarr records publish a device's current address and relay under
+  its id, so anyone who learns the id can look up its IP); a relay can drop or delay traffic (denial of service),
+  not read or forge it; reliance on one company and its jurisdiction.
+- **Mainline DHT**: public (records readable by anyone with the id; DHT nodes, which anyone runs and crawlers log,
+  see the publishing and querying IPs); unreliable (records expire and need republishing, lookups take seconds to
+  a minute or fail, some networks block or flag DHT traffic); Sybil/eclipse nodes can withhold records (denial of
+  service) but can't forge them (signed by the device's key).
+- **MusicDeck's own**: each device's secret key in the private settings folder: stolen, it lets someone pose as
+  that device to the others (session, playlists, plays; Local files streaming if it were allowed over the
+  internet, which it isn't); unpairing revokes it. A UDP port listens, so strangers can attempt connections
+  (refused after the handshake) or flood it like any open port. New dependencies (iroh's tree).
+- **Mitigations**: device ids only shared between paired devices; no Local files or disc audio over the internet;
+  strict message limits; immediate revocation on unpair; DHT as a backup only; no UPnP or port forwarding.
+
+## Measured (2026-10-30, scripts/net_test.py and the PC and the Ally)
+
+| | direct | through n0's relay only |
+|---|---|---|
+| session fetch (Jump back in) | 638 B, ~20 ms | 562 B, ~100 ms |
+| playlist sync, 400 songs (64 KB of JSON, deflated) | 6.4 KB | 6.3 KB |
+| idle presence, per paired device that's on | ~175 KB/hour | ~165 KB/hour |
+| Offline shown after a device vanishes | ~28 s | ~25 s |
+| Continue (pause there, read, play here) | 119-129 ms | 178-301 ms |
+
+The idle cost is iroh's own: its per-path keep-alive is fixed at 5 s or less (QuicTransportConfig ignores more),
+and hole punching retries every 5 s while only the relay works. About 4 MB a day for two devices on all day, none
+while one sleeps. A device on a phone hotspot was reached from home (hole punched, then direct). Continue lands on
+the same second it paused at; a change of what's playing shows on the others within ~1 s (`/p/session/changed`).
+
+## Still to find out
+
+1. (done: see above and "What n0's free relays are") **n0's public relays and discovery: what's allowed and how limited.** n0 describes them as free for anyone; check
    their current terms/docs for rate limits, bandwidth caps, and whether they're meant for production use, and what
    happens when limits are hit (degrade to direct-only? to LAN-only?). Nothing may cost the user or the developer,
    so if the free service can't be relied on, the fallback is LAN (as today) rather than a paid relay.

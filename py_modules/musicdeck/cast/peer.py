@@ -54,8 +54,12 @@ class PeerRenderer:
             pass
 
     async def load_track(self, instance: str, track: dict, start: float, autoplay: bool) -> None:
-        await self._call("POST", "/p/cast/load", {"instance": instance, "track": track, "start": float(start or 0),
-                                                  "autoplay": bool(autoplay), "services": self.services()})
+        got = await self._call("POST", "/p/cast/load", {"instance": instance, "track": track, "start": float(start or 0),
+                                                        "autoplay": bool(autoplay), "services": self.services()})
+        if isinstance(got, dict) and got.get("ok") is False:
+            away = not self.peers.near(self.peer_id)
+            raise PeerError(f"{self.name} can't play this song" + (
+                ": songs from Local files and discs only play on the same network" if away else ""))
 
     async def _control(self, action: str, value: Optional[float] = None) -> None:
         await self._call("POST", "/p/cast/control", {"action": action, "value": value})

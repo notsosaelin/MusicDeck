@@ -535,14 +535,11 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack; 
     () => (ours === "home" ? libraryHome() : ours ? libraryTab(ours) : getCenterTab(instanceId, tab)),
     true,
   );
-  // Home: what your other devices were playing leads Jump back in (a row of its own when there's none)
-  const sessions = useOtherSessions();
-  const lead = ours === "home" && sessions.length ? continueCards(sessions) : null;
+  // Home: your devices first (your other MusicDeck devices to continue from, the disc, what's plugged in)
+  const home = ours === "home" ? <YourDevicesShelf stack={stack} /> : null;
   if (!result) return null;
-  if (!result.ok) return after ? <>{after}</> : <Loading result={result} />;
+  if (!result.ok) return after ? <>{home}{after}</> : <Loading result={result} />;
   const sections = result.data.filter((s) => s.items.length || s.tracks?.length);
-  const jump = lead ? sections.find((s) => s.title === JUMP_BACK_IN && s.items.length) : undefined;
-  const home = lead && !jump ? <Shelf title={JUMP_BACK_IN}>{lead}</Shelf> : null;
   const notes = result.data.filter((s) => s.notice);
   if (!sections.length)
     return (
@@ -557,7 +554,7 @@ export const TabPage: FC<{ instanceId: string; tab: string; stack: CenterStack; 
     <>
       {home}
       {sections.map((s) => (
-        <SectionView key={s.title} instanceId={instanceId} stack={stack} section={s} headed={headed} lead={s === jump ? lead : undefined} />
+        <SectionView key={s.title} instanceId={instanceId} stack={stack} section={s} headed={headed} />
       ))}
       {after}
     </>
@@ -597,20 +594,73 @@ export const DevicesShelf: FC<{ instanceId: string; stack: CenterStack }> = ({ i
   );
 };
 
-const JUMP_BACK_IN = "Jump back in";
-
-/** What your other devices were playing, a card each (the device under the song), played here from where it was */
-const continueCards = (sessions: ReturnType<typeof useOtherSessions>) =>
-  sessions.map((s) => (
-    <TrackCard key={`peer:${s.peer}`} instanceId={s.instanceId} track={{ ...s.track, artist: `On ${s.name}` }} onPlay={() => continueFrom(s)} />
-  ));
+/**
+ * Home's first row, when there's anything in it: your other MusicDeck devices that have something to continue (its
+ * cover, the device's name, what it's playing; played here from where it is there, and it stops), the disc, and what's
+ * plugged in (each opens its page).
+ */
+const YourDevicesShelf: FC<{ stack: CenterStack }> = ({ stack }) => {
+  const state = useStore(pluginState);
+  const sessions = useOtherSessions();
+  const devices = (state?.devices ?? []).filter((d) => d.kind !== "cd" && d.kind !== "disc");
+  const disc = state?.disc;
+  const local = state?.services.find((s) => s.type === "local")?.id;
+  const box = useRef<HTMLDivElement>(null);
+  const shown = sessions.length > 0 || !!disc || (!!local && devices.length > 0);
+  useEffect(() => {
+    // it came after Home opened (the controller went to Jump back in's first card): the controller comes up to it,
+    // unless it has been moved since
+    if (!shown) return;
+    const first = box.current?.querySelector<HTMLElement>(".mc-card");
+    const below = box.current?.nextElementSibling?.querySelector<HTMLElement>(".mc-card");
+    if (first && below && box.current?.ownerDocument.activeElement === below) first.focus({ preventScroll: true });
+  }, [shown]);
+  if (!shown) return null;
+  const continueHere = async (s: (typeof sessions)[number]) => {
+    // its card goes once it plays here (and the row with it, when it was the only one): the focus moves on to the
+    // next card, or the next row's first, rather than being lost
+    const cards = [...(box.current?.querySelectorAll<HTMLElement>(".mc-card") ?? [])];
+    const at = cards.findIndex((c) => c.contains(document.activeElement));
+    const after = box.current?.nextElementSibling?.querySelector<HTMLElement>(".mc-card");
+    await continueFrom(s);
+    window.setTimeout(() => {
+      if (document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected) return;
+      const next = cards.slice(at + 1).find((c) => c.isConnected) ?? cards.find((c) => c.isConnected) ?? after;
+      next?.focus();
+    }, 300);
+  };
+  return (
+    <div ref={box} style={{ display: "contents" }}>
+      <Shelf title="Your devices">
+        {sessions.map((s) => (
+          <TrackCard
+            key={`peer:${s.peer}`}
+            instanceId={s.instanceId}
+            track={{ ...s.track, title: s.name, artist: `${s.playing ? "Playing" : "Paused"}: ${s.track.title}` }}
+            onPlay={() => void continueHere(s)}
+          />
+        ))}
+        {disc && collectionCard(disc.source, stack, discCollection(disc))}
+        {local &&
+          devices.map((d) =>
+            collectionCard(local, stack, {
+              id: `dv~${d.id}~`,
+              kind: "device",
+              title: d.name,
+              subtitle: d.kind === "ipod" ? d.status?.model || "iPod" : (DEVICE_KINDS[d.kind] ?? "USB"),
+              art: null,
+            }),
+          )}
+      </Shelf>
+    </div>
+  );
+};
 
 /**
  * A section, its cards saying which source each is from, unless the whole row is one source's and its title says so
- * (Home's "Qobuz · New releases"). `lead`: cards ahead of the section's own in its row (Home's Jump back in: your
- * other devices').
+ * (Home's "Qobuz · New releases").
  */
-const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean; lead?: ReactNode }> = (
+const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean }> = (
   props,
 ) => {
   const s = props.section;
@@ -624,12 +674,11 @@ const SectionView: FC<{ instanceId: string; stack: CenterStack; section: Section
   );
 };
 
-const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean; lead?: ReactNode }> = ({
+const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Section; headed: boolean }> = ({
   instanceId,
   stack,
   section: s,
   headed,
-  lead,
 }) => {
   // the one library's songs from several sources: a list for each, under its name (a list plays from one source)
   const parts = bySource(s.tracks ?? [], instanceId);
@@ -638,7 +687,7 @@ const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Sect
     const name = (id: string) => names.find((x) => x.id === id)?.name ?? "";
     return (
       <>
-        {s.items.length > 0 && <SectionView instanceId={instanceId} stack={stack} section={{ ...s, tracks: [] }} headed={headed} lead={lead} />}
+        {s.items.length > 0 && <SectionView instanceId={instanceId} stack={stack} section={{ ...s, tracks: [] }} headed={headed} />}
         {parts.map((p) => (
           <SectionView
             key={p.source}
@@ -652,7 +701,7 @@ const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Sect
     );
   }
   if (parts.length === 1 && parts[0].source !== instanceId)
-    return <SectionView instanceId={parts[0].source} stack={stack} section={s} headed={headed} lead={lead} />;
+    return <SectionView instanceId={parts[0].source} stack={stack} section={s} headed={headed} />;
   const tracks = s.tracks ?? [];
   const songs = tracks.length > 0 && (
     <div style={{ marginBottom: 28 }}>
@@ -687,7 +736,6 @@ const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Sect
   if (s.display === "covers")
     return (
       <Shelf title={s.title}>
-        {lead}
         {s.items.slice(0, rowCut(s.items.length + tracks.length)).map((c) => collectionCard(instanceId, stack, c))}
         {tracks.slice(0, Math.max(0, rowCut(s.items.length + tracks.length) - s.items.length)).map((t, i) =>
           t.live ? (
@@ -727,7 +775,6 @@ const SectionContent: FC<{ instanceId: string; stack: CenterStack; section: Sect
     <>
       {s.items.length > 0 && (
         <Shelf title={s.title}>
-          {lead}
           {s.items.slice(0, rowCut(s.items.length)).map((c) => collectionCard(instanceId, stack, c))}
           {s.items.length > ROW_SIZE && rowEnd(stack, s.title, s.items, [])}
         </Shelf>

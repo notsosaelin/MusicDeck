@@ -1,9 +1,11 @@
 """
 Windows Firewall and your devices: another device reaches this PC on MusicDeck's two ports (peers.py), which Windows
 blocks until it's allowed, and blocks for good once its "allow this app" prompt was turned down (rules blocking
-Decky's program, which win over any rule allowing a port). Settings shows "Let your devices reach this PC" while
-that's so; it asks Windows (an administrator's yes, Windows' own prompt) to replace those blocks with rules letting
-in MusicDeck's ports only, from the home network only.
+Decky's program, which win over any rule allowing a port). Settings shows "Allow device connections" while that's
+so; it asks Windows (an administrator's yes, Windows' own prompt) to replace those blocks with rules letting in
+MusicDeck's ports only, from the home network only, and the internet link's helper (farlink.py: musicdeck-net.exe,
+which only answers paired devices) from anywhere. It's done once: the helper waits for it to start (main.py), so
+Windows never stops to ask "allow this app?" about it, and its rules stay as MusicDeck updates (the same path).
 """
 import asyncio
 import base64
@@ -15,6 +17,7 @@ from typing import Optional
 from . import peers
 
 RULE = "MusicDeck: your devices"
+FAR_RULE = RULE + " (over the internet)"
 WINDOWS = os.name == "nt"
 
 
@@ -39,43 +42,53 @@ def _program() -> str:
     return sys.executable
 
 
-async def state() -> str:
-    """"ok" (nothing in the way, or MusicDeck's rules there), "blocked" (Windows blocks Decky's program), "" (not
-    Windows, or unknown)."""
+async def state(helper: Optional[str] = None) -> str:
+    """"ok" (nothing in the way, or MusicDeck's rules there), "blocked" (Windows blocks Decky's program or the
+    internet link's `helper`, or MusicDeck's rules aren't there yet), "" (not Windows, or unknown)."""
     if not WINDOWS:
         return ""
     program = _program().replace("'", "''")
+    far = (helper or "").replace("'", "''")
     out = await _powershell(
-        f"$p = '{program}'; "
-        "$block = @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | Where-Object { $_.Program -eq $p } | "
+        f"$p = '{program}'; $h = '{far}'; "
+        "$block = @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Program -eq $p -or ($h -and $_.Program -eq $h) } | "
         "Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' }).Count; "
         f"$ours = @(Get-NetFirewallRule -DisplayName '{RULE}*' -ErrorAction SilentlyContinue).Count; "
-        "Write-Output \"$block $ours\"")
+        # the helper let in: by Allow device connections, or by someone's "Allow" on Windows' own prompt
+        "$link = if ($h) { @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Program -eq $h } | Get-NetFirewallRule | "
+        "Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' }).Count } else { 1 }; "
+        "Write-Output \"$block $ours $link\"")
     if not out:
         return ""
     try:
-        block, ours = (int(x) for x in out.split()[-2:])
+        block, ours, link = (int(x) for x in out.split()[-3:])
     except ValueError:
         return ""
-    return "blocked" if block or not ours else "ok"
+    return "blocked" if block or not ours or not link else "ok"
 
 
-async def allow() -> bool:
-    """Asks Windows (its administrator prompt) to let MusicDeck's ports in from the home network, taking out the
-    rules that block Decky's program. True once it's done."""
+async def allow(helper: Optional[str] = None) -> bool:
+    """Asks Windows (its administrator prompt) to let MusicDeck's ports in from the home network and the internet
+    link's `helper` in from anywhere, taking out the rules that block either. True once it's done."""
     if not WINDOWS:
         return False
     program = _program().replace("'", "''")
+    far = (helper or "").replace("'", "''")
     inner = (
-        f"$p = '{program}'; "
-        "Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $p } | Get-NetFirewallRule | "
-        "Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | Remove-NetFirewallRule; "
+        f"$p = '{program}'; $h = '{far}'; "
+        "Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $p -or ($h -and $_.Program -eq $h) } | "
+        "Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | Remove-NetFirewallRule; "
         f"Get-NetFirewallRule -DisplayName '{RULE}*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule; "
         f"New-NetFirewallRule -DisplayName '{RULE}' -Direction Inbound -Program $p -Protocol TCP "
         f"-LocalPort {peers.PORT} -RemoteAddress LocalSubnet -Action Allow | Out-Null; "
         f"New-NetFirewallRule -DisplayName '{RULE} (finding them)' -Direction Inbound -Program $p -Protocol UDP "
-        f"-LocalPort {peers.GROUP[1]} -RemoteAddress LocalSubnet -Action Allow | Out-Null")
+        f"-LocalPort {peers.GROUP[1]} -RemoteAddress LocalSubnet -Action Allow | Out-Null; "
+        # the internet link: UDP from anywhere, to the helper only (it answers paired devices and nothing else)
+        f"if ($h) {{ New-NetFirewallRule -DisplayName '{FAR_RULE}' -Direction Inbound -Program $h -Protocol UDP "
+        "-Action Allow | Out-Null }")
     await _powershell(
         "Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden "
         f"-ArgumentList '-NoProfile','-EncodedCommand','{_encoded(inner)}'", timeout=180)
-    return await state() == "ok"
+    return await state(helper) == "ok"

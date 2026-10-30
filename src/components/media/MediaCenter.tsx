@@ -57,6 +57,7 @@ import { CENTER_CSS, Cover, Notice, SectionTitle, StationArt, focusInto, snapRow
 import { SourcePager } from "./sources";
 import { librarySources } from "../../library";
 import { playCollection, useResult } from "../Browser";
+import { DeviceRows } from "../../devices";
 import { useOnAir } from "../NowPlaying";
 import {
   AllPage,
@@ -880,35 +881,42 @@ function useSteamBars(ref: RefObject<HTMLElement | null>): { top: number; bottom
     const measure = () => {
       const area = el.getBoundingClientRect();
       if (!area.height) return;
-      // a bar of Steam's along the window's edge at height y: not ours, across most of it, not tall
-      const barAt = (y: number) =>
-        doc
+      // Steam's bar along the window's edge at height y: what's there that isn't ours, across most of it, not tall;
+      // all of it together (on Windows the header's search box, a shorter box, is found before the bar itself)
+      const barAt = (y: number) => {
+        const found = doc
           .elementsFromPoint(win.innerWidth / 2, y)
           .filter((h) => !el.contains(h))
           .map((h) => h.getBoundingClientRect())
-          .find(
+          .filter(
             (r) =>
               (r.top <= 1 || r.bottom >= win.innerHeight - 1) &&
               r.width > win.innerWidth / 2 &&
               r.height > 8 &&
               r.height < win.innerHeight / 5,
           );
+        if (!found.length) return undefined;
+        return { top: Math.min(...found.map((r) => r.top)), bottom: Math.max(...found.map((r) => r.bottom)) };
+      };
       const footer =
         doc.querySelector<HTMLElement>(`.${footerClasses.BasicFooter}`)?.getBoundingClientRect() ??
         barAt(win.innerHeight - 2);
       const header = barAt(2);
       const bottom =
-        footer && footer.height > 8 && footer.top > area.top + area.height / 2 ? area.bottom - footer.top : 0;
+        footer && footer.bottom - footer.top > 8 && footer.top > area.top + area.height / 2 ? area.bottom - footer.top : 0;
       const top = header ? Math.max(0, header.bottom - area.top) : 0;
       if (top > 0 || bottom > 0 || settled) setBars({ top: Math.round(top), bottom: Math.round(bottom) });
     };
     let settled = false;
     measure();
-    // Steam lays its bars out after the page arrives: by then, one that isn't there is one a theme took away
-    const later = win.setTimeout(() => {
-      settled = true;
-      measure();
-    }, 500);
+    // Steam lays its bars out after the page arrives (on Windows, a while after): looked at again for a few
+    // seconds; one that isn't there by then is one a theme took away
+    const laters = [500, 1500, 3000, 6000].map((ms) =>
+      win.setTimeout(() => {
+        settled = true;
+        measure();
+      }, ms),
+    );
     const stop = watchSize(el, measure);
     // a theme turned on or off (CSS Loader adds and removes its styles in the page's head), the window resized
     let soon = 0;
@@ -920,7 +928,7 @@ function useSteamBars(ref: RefObject<HTMLElement | null>): { top: number; bottom
     themes.observe(doc.head, { childList: true, subtree: true, characterData: true });
     win.addEventListener("resize", restyled);
     return () => {
-      win.clearTimeout(later);
+      laters.forEach((t) => win.clearTimeout(t));
       win.clearTimeout(soon);
       themes.disconnect();
       win.removeEventListener("resize", restyled);
@@ -1243,6 +1251,7 @@ const SettingsPage: FC = () => {
       <Equalizer Section={CenterSection} />
       <CenterChoices Section={CenterSection} />
       {state && <PlaybackSections state={state} Section={CenterSection} />}
+      <DeviceRows Section={CenterSection} />
       <div style={{ fontSize: 13, opacity: 0.55, marginTop: 24, lineHeight: 1.5 }}>
         Sources are added and chosen in Decky → MusicDeck. Press the View button to go back to the Quick Access panel.
       </div>

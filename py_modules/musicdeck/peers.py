@@ -19,6 +19,11 @@ query, the time and the body's hash), refused when the time is more than SKEW of
 links to songs and pictures carry a signature of their own and a time they stop working. Only addresses of the home
 network are answered. The traffic itself isn't encrypted (Decky's Python has no fast cipher): what passes is the
 music and what was listened to, on the home network only.
+
+Away from each other (another network, anywhere): farlink.py. Paired devices swap their node ids (the public half of
+each one's internet key) in the signed hello, and the helper keeps an encrypted connection to each that's on. Over
+it go only FAR_ROUTES: what's playing ("Jump back in"), "Continue here", playing on it as a speaker, playlists and
+listens. Songs from Local files and discs stay on the home network.
 """
 import asyncio
 import contextlib
@@ -32,13 +37,14 @@ import socket
 import struct
 import time
 from typing import Any, Awaitable, Callable, Optional
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote
 
 import aiohttp
 from aiohttp import web
 
 from . import x25519
 from .cast import netif
+from .farlink import FarError, Farlink
 
 GROUP = ("239.255.77.82", 41377)
 PORT = 41378  # the API's; another when it's taken
@@ -55,6 +61,10 @@ PAIRABLE_FOR = 120
 MAX_BODY = 1 << 20
 PLAYS_PAGE = 5000
 SYNC_EVERY = 600
+LEARN_TRIES, LEARN_GAP = 6, 5  # asking a paired device for its node id: times, seconds apart
+NODE_ASK_GAP = 60  # seconds between asking a nearby paired device for its node id
+TOOK_OVER_WAIT = 2.5
+SESSION_TELL_GAP = 1.0  # seconds a change of what's playing waits to be told (a few at once go as one)  # seconds a device taken over waits to have saved where it stopped
 
 
 class PeerError(Exception):
@@ -97,7 +107,7 @@ class Peers:
     def __init__(self, folder: str, name: str, log, emit: Callable[..., Awaitable[None]],
                  session: Callable[[], dict[str, Any]], services: Callable[[], list[dict[str, Any]]],
                  plays, serve: Callable[[web.Request, str, str, str], Awaitable[web.StreamResponse]],
-                 http: aiohttp.ClientSession, version: str = ""):
+                 http: aiohttp.ClientSession, version: str = "", far_exe: Optional[str] = None):
         self.path = os.path.join(folder, "peers.json")
         self.log = log
         self.emit = emit
@@ -126,6 +136,17 @@ class Peers:
         self.playlists_shared: Optional[Callable[[], dict[str, Any]]] = None
         self.playlists_take: Optional[Callable[[str, Any], Awaitable[bool]]] = None
         self.seen_sigs: dict[str, float] = {}
+        # the internet link (farlink.py), when there's a helper for this platform
+        # for testing the internet link at home: a file "far-only" in the settings folder has paired devices reached
+        # over it even when they're nearby, and "far-relay-only" sends that through the relays
+        self.node_asked: dict[str, float] = {}
+        # Windows: the internet link waits for its firewall rule (firewall.py), set before start(); start_far() then
+        self.far_held = False
+        self.telling_session = False
+        self.far_only = os.path.exists(os.path.join(folder, "far-only"))
+        far_args = ["--relay-only"] if os.path.exists(os.path.join(folder, "far-relay-only")) else []
+        self.far: Optional[Farlink] = Farlink(far_exe, os.path.join(folder, "net.key"), log, self._far_asked,
+                                              self._far_seen, far_args) if far_exe else None
         self.port = 0
         self.runner: Optional[web.AppRunner] = None
         self.transport: Optional[asyncio.DatagramTransport] = None
@@ -159,6 +180,7 @@ class Peers:
         app.router.add_get("/p/hello", self._signed(self._hello))
         app.router.add_get("/p/session", self._signed(self._session))
         app.router.add_post("/p/took-over", self._signed(self._took_over))
+        app.router.add_post("/p/session/changed", self._signed(self._session_changed))
         for action in ("start", "load", "control", "end"):
             app.router.add_post(f"/p/cast/{action}", self._signed(self._casting(action)))
         app.router.add_get("/p/cast/status", self._signed(self._casting("status")))
@@ -183,6 +205,8 @@ class Peers:
             self.port = sock.getsockname()[1]
             break
         await self._listen()
+        if not self.far_held:
+            await self.start_far()
         self.tasks.append(asyncio.ensure_future(self._announcing()))
         self.tasks.append(asyncio.ensure_future(self._syncing()))
         self.log.info(f"Your devices: this is {self.me['name']}, on port {self.port}; {len(self.paired)} paired")
@@ -190,6 +214,8 @@ class Peers:
     async def stop(self) -> None:
         for task in self.tasks:
             task.cancel()
+        if self.far:
+            await self.far.stop()
         if self.transport:
             self.transport.close()
         if self.runner:
@@ -256,6 +282,8 @@ class Peers:
             self._save()
         if hello.get("ask"):
             asyncio.ensure_future(self.announce())
+        if known:
+            self._ask_node(peer_id)
         if back:
             # a paired device just switched on (or came back to this network): playlists made meanwhile, either way
             asyncio.ensure_future(self.sync_playlists(peer_id))
@@ -264,6 +292,17 @@ class Peers:
     def _near(self, peer_id: str) -> bool:
         near = self.nearby.get(peer_id)
         return bool(near) and time.time() - near["seen"] < NEARBY_FOR
+
+    def near(self, peer_id: str) -> bool:
+        """On this network now (so songs from its Local files can stream, and it can be played on)."""
+        return self._near(peer_id) and not (self.far_only and self._far(peer_id))
+
+    def _far(self, peer_id: str) -> bool:
+        """Reachable over the internet link now."""
+        return bool(self.far) and self.far.online(self.paired.get(peer_id, {}).get("node"))
+
+    def reachable(self, peer_id: str) -> bool:
+        return self._near(peer_id) or self._far(peer_id)
 
     def _where(self, peer_id: str) -> Optional[str]:
         near = self.nearby.get(peer_id)
@@ -275,11 +314,16 @@ class Peers:
         return None
 
     def listing(self) -> dict[str, Any]:
-        """{"me", "paired": [{"id", "name", "online"}], "nearby": [{"id", "name"}] (not paired)}."""
+        """{"me", "paired": [{"id", "name", "online", "via"}], "nearby": [{"id", "name"}] (not paired)}; "via" is
+        "nearby" (this network), "internet" or None (offline)."""
         now = time.time()
         fresh = {k for k, v in self.nearby.items() if now - v["seen"] < NEARBY_FOR}
+
+        def via(k: str) -> Optional[str]:
+            return "nearby" if k in fresh and self.near(k) else "internet" if self._far(k) else None
         return {"me": self.me,
-                "paired": [{"id": k, "name": v.get("name", ""), "online": k in fresh} for k, v in self.paired.items()],
+                "paired": [{"id": k, "name": v.get("name", ""), "online": bool(via(k)), "via": via(k)}
+                           for k, v in self.paired.items()],
                 "nearby": [{"id": k, "name": self.nearby[k]["name"]} for k in sorted(fresh) if k not in self.paired]}
 
     # --- pairing: asked here ---
@@ -342,6 +386,7 @@ class Peers:
                                          "port": port if isinstance(port, int) else PORT, "since": time.time()}
             self._save()
             self.log.info(f"Your devices: paired with {prompt['name']}")
+            asyncio.ensure_future(self.learn_node(prompt["id"]))
             asyncio.ensure_future(self.sync_plays(prompt["id"]))
         return True
 
@@ -393,6 +438,7 @@ class Peers:
                 self._save()
                 self.log.info(f"Your devices: paired with {name}")
                 await self.emit("peer_paired", {"id": peer_id, "name": name})
+                await self.learn_node(peer_id)
                 await self.sync_plays(peer_id)
                 return
             break
@@ -406,6 +452,8 @@ class Peers:
         self.paired.pop(peer_id, None)
         self.synced.pop(peer_id, None)
         self._save()
+        if self.far:
+            self.far.allow(self._nodes())
 
     # --- signed requests ---
 
@@ -417,7 +465,14 @@ class Peers:
                 "X-MD-Sig": _mac(key, method, path, now, nonce, hashlib.sha256(body).hexdigest())}
 
     async def call(self, peer_id: str, method: str, path: str, payload: Any = None, timeout: float = 8) -> Any:
-        """A signed request to a paired device; its JSON answer."""
+        """A request to a paired device; its JSON answer. On this network it's signed HTTP; away, the internet link
+        (only FAR_ROUTES go that way); otherwise the address it was last seen at (it may still be reachable there,
+        through a VPN such as Tailscale)."""
+        if not self.near(peer_id) and self._far(peer_id) and (method, path.split("?")[0]) in FAR_ROUTES:
+            try:
+                return await self.far.call(self.paired[peer_id]["node"], method, path, payload, timeout=max(timeout, 10))
+            except FarError as e:
+                raise PeerError(f"Couldn't reach {self.paired[peer_id].get('name', 'that device')} ({e})")
         base = self._where(peer_id)
         if not base or peer_id not in self.paired:
             raise PeerError("That device isn't paired")
@@ -455,6 +510,7 @@ class Peers:
         if request.remote and peer.get("address") != request.remote:
             peer["address"] = request.remote
             self._save()
+        self._ask_node(peer_id)
         return peer_id
 
     def _signed(self, handler: Callable[[web.Request, str, Any], Awaitable[Any]]):
@@ -496,14 +552,50 @@ class Peers:
     # --- what a paired device asks ---
 
     async def _hello(self, request, peer_id, payload) -> dict[str, Any]:
-        return {"id": self.me["id"], "name": self.me["name"], "version": self.version}
+        node = self.far.node if self.far else None
+        return {"id": self.me["id"], "name": self.me["name"], "version": self.version, **({"node": node} if node else {})}
 
     async def _session(self, request, peer_id, payload) -> dict[str, Any]:
-        return {"name": self.me["name"], "session": self.session(), "services": self.services()}
+        session = self.session()
+        # how long ago it was saved, by this device's clock (the other's may be off): it works out where the song
+        # has got to since, if it's still playing
+        age = max(0.0, time.time() - session["saved_at"]) if isinstance(session.get("saved_at"), (int, float)) else None
+        return {"name": self.me["name"], "session": session, "services": self.services(),
+                **({"age": age} if age is not None else {})}
+
+    async def _session_changed(self, request, peer_id, payload) -> dict[str, Any]:
+        """A paired device played, paused or changed song: the frontend looks at it again (Your devices)."""
+        await self.emit("peer_session", {"id": peer_id})
+        return {"ok": True}
+
+    def session_changed(self) -> None:
+        """This device played, paused or changed song: the paired devices that are on are told (at most once a
+        second; what changed in the meantime goes with the last)."""
+        if self.telling_session:
+            return
+        self.telling_session = True
+
+        async def tell():
+            await asyncio.sleep(SESSION_TELL_GAP)
+            self.telling_session = False
+            for peer_id in list(self.paired):
+                if self.reachable(peer_id):
+                    asyncio.ensure_future(self._tell(peer_id, "/p/session/changed"))
+        asyncio.ensure_future(tell())
 
     async def _took_over(self, request, peer_id, payload) -> dict[str, Any]:
+        """Another device continues what's playing here: it pauses here (the frontend, on the event) and saves where
+        it stopped; answered once that's saved (or a moment later), so the other reads exactly where."""
+        was = self.session()
+        before = was.get("saved_at", 0)
         await self.emit("peer_took_over", {"id": peer_id, "name": self.paired[peer_id].get("name", "")})
-        return {"ok": True}
+        if not was.get("playing"):
+            return {"ok": True, "saved": True}  # paused already: where it stopped is saved
+        for _ in range(int(TOOK_OVER_WAIT / 0.1)):
+            if self.session().get("saved_at", 0) != before:
+                return {"ok": True, "saved": True}
+            await asyncio.sleep(0.1)
+        return {"ok": True, "saved": False}
 
     def _casting(self, action: str):
         async def handle(request, peer_id, payload) -> Any:
@@ -513,10 +605,10 @@ class Peers:
         return handle
 
     def targets(self) -> list[dict[str, str]]:
-        """The paired devices that are on, as places to play ("Play on"): {"id": "musicdeck:<id>", "name", ...}."""
-        now = time.time()
+        """The paired devices that are on, nearby or over the internet, as places to play ("Play on"):
+        {"id": "musicdeck:<id>", "name", ...}."""
         return [{"id": f"musicdeck:{k}", "name": v.get("name", ""), "model": "MusicDeck", "kind": "musicdeck"}
-                for k, v in self.paired.items() if k in self.nearby and now - self.nearby[k]["seen"] < NEARBY_FOR]
+                for k, v in self.paired.items() if self.reachable(k)]
 
     async def _plays(self, request, peer_id, payload) -> dict[str, Any]:
         """This device's own listens (not ones it was told of) since `since`, a page at a time."""
@@ -539,7 +631,78 @@ class Peers:
         self.paired.pop(peer_id, None)
         self.synced.pop(peer_id, None)
         self._save()
+        if self.far:
+            self.far.allow(self._nodes())
         return {"ok": True}
+
+    # --- over the internet (farlink.py) ---
+
+    async def start_far(self) -> None:
+        """Starts the internet link (once)."""
+        self.far_held = False
+        if self.far and not self.far.task:
+            self.far.allow(self._nodes())
+            await self.far.start()
+
+    def _nodes(self) -> list[str]:
+        return [v["node"] for v in self.paired.values() if isinstance(v.get("node"), str)]
+
+    def _ask_node(self, peer_id: str) -> None:
+        """A paired device heard from at home whose internet id isn't known here (paired just now, or before the
+        internet link, or its link started after this one's): asked for it, once a minute at most."""
+        known = self.paired.get(peer_id)
+        if self.far and known and not known.get("node") and time.time() - self.node_asked.get(peer_id, 0) > NODE_ASK_GAP:
+            self.node_asked[peer_id] = time.time()
+            asyncio.ensure_future(self.learn_node(peer_id))
+
+    async def learn_node(self, peer_id: str) -> None:
+        """A paired device's node id, asked over this network (signed), so it can be reached when away. Asked again a
+        few times while it has none to give (its link still starting, or it's just been paired and doesn't know this
+        one yet; or it's a version without the link, which never has one)."""
+        for attempt in range(LEARN_TRIES):
+            if attempt:
+                await asyncio.sleep(LEARN_GAP)
+            if not self.far or not self._near(peer_id) or peer_id not in self.paired:
+                return
+            try:
+                got = await self.call(peer_id, "GET", "/p/hello", timeout=5)
+            except PeerError:
+                continue
+            node = got.get("node") if isinstance(got, dict) else None
+            if not isinstance(node, str) or len(node) != 64 or not all(c in "0123456789abcdef" for c in node):
+                continue
+            peer = self.paired.get(peer_id)
+            if peer is not None and peer.get("node") != node:
+                peer["node"] = node
+                self._save()
+                self.far.allow(self._nodes())
+            return
+
+    async def _far_asked(self, node: str, req: dict[str, Any]) -> Any:
+        """A request from a paired device over the internet (the helper checked who it is and what it asks; it's
+        checked again here)."""
+        peer_id = next((k for k, v in self.paired.items() if v.get("node") == node), None)
+        method, full = req.get("method"), req.get("path")
+        if not peer_id or not isinstance(full, str) or not isinstance(method, str):
+            raise PermissionError
+        path, _, query = full.partition("?")
+        handler = FAR_ROUTES.get((method, path))
+        if not handler:
+            raise PermissionError
+        asked = _FarRequest(dict(parse_qsl(query)), path)
+        answer = self._casting(handler[5:]) if handler.startswith("cast:") else getattr(self, handler)
+        return await answer(asked, peer_id, req.get("body"))
+
+    async def _far_seen(self, node: str, online: bool, via: Optional[str]) -> None:
+        peer_id = next((k for k, v in self.paired.items() if v.get("node") == node), None)
+        if not peer_id:
+            return
+        name = self.paired[peer_id].get("name", "")
+        self.log.info(f"Your devices: {name} {'reachable over the internet (' + str(via) + ')' if online else 'gone'}")
+        await self.emit("peer_presence", {"id": peer_id, "online": online or self._near(peer_id)})
+        if online and not self.near(peer_id):
+            asyncio.ensure_future(self.sync_playlists(peer_id))
+            asyncio.ensure_future(self._tell(peer_id, "/p/playlists/changed"))
 
     # --- keeping up with each other ---
 
@@ -583,28 +746,50 @@ class Peers:
     def playlists_changed(self) -> None:
         """This device's playlists changed: the paired devices that are on are told (each fetches them)."""
         for peer_id in list(self.paired):
-            if self._near(peer_id):
+            if self.reachable(peer_id):
                 asyncio.ensure_future(self._tell(peer_id, "/p/playlists/changed"))
 
     async def _syncing(self) -> None:
         while True:
             await asyncio.sleep(SYNC_EVERY)
             for peer_id in list(self.paired):
-                if self._where(peer_id):
+                if self._where(peer_id) or self._far(peer_id):
+                    if self.far and self._near(peer_id):
+                        await self.learn_node(peer_id)  # in case it has a new one
                     await self.sync_plays(peer_id)
                     await self.sync_playlists(peer_id)
 
     async def sessions(self) -> list[dict[str, Any]]:
-        """What each paired device that's on was playing: {"peer", "name", "session", "services"}."""
+        """What each paired device that's on was playing: {"peer", "name", "session", "services", "age" (seconds since
+        it was saved, by its clock)}."""
         async def one(peer_id: str) -> Optional[dict[str, Any]]:
             try:
                 got = await self.call(peer_id, "GET", "/p/session", timeout=4)
             except PeerError:
                 return None
             return {"peer": peer_id, "name": self.paired[peer_id].get("name") or got.get("name", ""),
-                    "session": got.get("session") or {}, "services": got.get("services") or []}
-        found = await asyncio.gather(*[one(p) for p in self.paired if self._where(p)])
+                    "session": got.get("session") or {}, "services": got.get("services") or [],
+                    **({"age": got["age"]} if "age" in got else {})}
+        found = await asyncio.gather(*[one(p) for p in self.paired if self._where(p) or self._far(p)])
         return [f for f in found if f]
+
+
+# what a paired device may ask over the internet: (method, path) -> the handler (the helper allows the same)
+FAR_ROUTES = {("GET", "/p/hello"): "_hello", ("GET", "/p/session"): "_session", ("GET", "/p/plays"): "_plays",
+              ("GET", "/p/playlists"): "_playlists", ("POST", "/p/playlists/changed"): "_playlists_changed",
+              ("POST", "/p/took-over"): "_took_over", ("POST", "/p/session/changed"): "_session_changed",
+              ("POST", "/p/unpair"): "_unpaired",
+              # played on from another device, as a speaker (cast/peer.py there)
+              ("POST", "/p/cast/start"): "cast:start", ("POST", "/p/cast/load"): "cast:load",
+              ("POST", "/p/cast/control"): "cast:control", ("POST", "/p/cast/end"): "cast:end",
+              ("GET", "/p/cast/status"): "cast:status"}
+
+
+class _FarRequest:
+    """What the handlers read of a request (its query), for one that came over the internet."""
+    def __init__(self, query: dict[str, str], path: str):
+        self.query = query
+        self.path = path
 
 
 class PeerSource:
