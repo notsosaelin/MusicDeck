@@ -7,6 +7,7 @@ __pycache__/
 *.pyc
 .vscode/settings.json
 .env
+CLAUDE.local.md
 # vendored third-party Python packages (installed by scripts/vendor.py)
 py_modules/*
 !py_modules/musicdeck/
