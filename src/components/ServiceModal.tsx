@@ -17,7 +17,17 @@ import { FC, useEffect, useRef, useState } from "react";
 import { FaExternalLinkAlt, FaFolderPlus, FaTimes } from "react-icons/fa";
 import { DialogActions, ScrollingText, countryName } from "./common";
 import { QrCode } from "./QrCode";
-import { ServiceDraft, ServiceInfo, signInCancel, signInPoll, signInStart, saveService, testService } from "../api";
+import {
+  ServiceDraft,
+  ServiceInfo,
+  SoloistSetup,
+  signInCancel,
+  signInPoll,
+  signInStart,
+  saveService,
+  soloistSetup,
+  testService,
+} from "../api";
 import { pluginState, refreshState } from "../store";
 import { invalidateBrowserCache } from "../nav";
 import { syncSteam } from "../steam";
@@ -270,6 +280,115 @@ const SPOTIFY_DASHBOARD = "https://developer.spotify.com/dashboard";
 /** A Spotify client ID: 32 hex digits, wherever it sits in what was copied. */
 const findClientId = (text: string | null) => text?.match(/\b[0-9a-f]{32}\b/i)?.[0].toLowerCase() ?? null;
 
+/** Where Spotify Soloist's API keys are made (py_modules/musicdeck/soloist.py DASHBOARD) */
+const SOLOIST_DASHBOARD = "https://developer.spotify.com/dashboard/soloist";
+/** A Soloist API key in what was copied: letters and digits around an underscore. */
+const findSoloistKey = (text: string | null) => text?.match(/\b[A-Za-z0-9]{2,12}_[A-Za-z0-9_-]{16,120}\b/)?.[0] ?? null;
+
+/** What Soloist is doing, in words, for the source's settings. */
+const soloistNote = (setup: SoloistSetup, switched: boolean): string => {
+  switch (setup.phase) {
+    case "installing":
+      return "Getting Spotify Soloist from Spotify…";
+    case "starting":
+      return "Starting Spotify Soloist…";
+    case "pairing":
+      return `Last step: in Spotify on your phone (on the same Wi-Fi as this device), open Devices and choose “${setup.device}”. Once is enough.`;
+    case "ready":
+      return switched
+        ? "Ready: this account's songs play through Spotify Soloist."
+        : "Ready. Songs play through MusicDeck's own player, and through Soloist if Spotify refuses this account's audio.";
+    case "unsupported":
+      return "Spotify Soloist isn't made for this system.";
+    case "off":
+      return "";
+    default:
+      return setup.problem || "Spotify Soloist isn't working.";
+  }
+};
+
+/**
+ * Spotify Soloist, Spotify's own player, for the accounts Spotify won't give audio to MusicDeck's own player
+ * (some newer ones): the user's API key, and how its setup is getting on once saved.
+ */
+const SoloistFields: FC<{
+  draft: ServiceDraft;
+  setConfig: (c: Record<string, any>) => void;
+  openSoloistDashboard: () => void;
+}> = ({ draft, setConfig, openSoloistDashboard }) => {
+  const [setup, setSetup] = useState<SoloistSetup | null>(null);
+  const saved = !!draft.id && !!draft.config.soloist_set;
+  const typed: string = draft.config.soloist_key ?? "";
+  const needed = !!draft.config.needs_soloist;
+  const switched = draft.config.audio === "soloist";
+  useEffect(() => {
+    if (!saved || !draft.id) {
+      setSetup(null);
+      return;
+    }
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const r = await soloistSetup(draft.id!).catch(() => null);
+      if (stopped) return;
+      if (r?.ok) setSetup(r.data);
+      // quickly while it's fetched, started and paired; now and then once it's ready
+      timer = window.setTimeout(poll, r?.ok && r.data.phase === "ready" ? 5000 : 1500);
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [saved, draft.id]);
+  const note = setup ? soloistNote(setup, switched) : typed.trim() ? "Save to start Spotify Soloist." : "";
+  return (
+    <>
+      <Field
+        label="Spotify Soloist API key"
+        hint={
+          needed
+            ? "This account needs it: Spotify won't give its audio to MusicDeck's own player. Make a key with a Premium account; songs played through Soloist skip the equalizer, volume levelling and crossfade, and can't be cast."
+            : "Only for accounts Spotify won't give audio to MusicDeck's own player (some newer ones); MusicDeck switches over by itself when it needs to."
+        }
+      >
+        <Focusable style={{ display: "flex", gap: 8 }} flow-children="row">
+          <div style={{ flex: 1 }}>
+            <TextField
+              bIsPassword
+              value={typed}
+              placeholder={draft.config.soloist_set ? "Saved" : needed ? "Needed for this account" : "Not needed for most accounts"}
+              // a paste can bring text along with the key; keep just the key
+              onChange={(e) => setConfig({ ...draft.config, soloist_key: findSoloistKey(e.target.value) ?? e.target.value })}
+            />
+          </div>
+          <DialogButton style={{ minWidth: 0, width: "auto", padding: "0 14px" }} onClick={openSoloistDashboard}>
+            <FaExternalLinkAlt />
+          </DialogButton>
+          {draft.config.soloist_set && (
+            <DialogButton
+              style={{ minWidth: 0, width: "auto", padding: "0 14px" }}
+              // takes the key away on save, and Soloist with it
+              onClick={() => setConfig({ ...draft.config, soloist_key: "", soloist_set: false, audio: "auto" })}
+            >
+              <FaTimes />
+            </DialogButton>
+          )}
+        </Focusable>
+        {note && <div style={{ fontSize: 13, marginTop: 8, lineHeight: 1.35 }}>{note}</div>}
+      </Field>
+      {(draft.config.soloist_set || typed.trim()) && (
+        <ToggleField
+          label="Play through Spotify Soloist"
+          description="Turns on by itself when Spotify refuses this account's audio"
+          checked={switched}
+          onChange={(on) => setConfig({ ...draft.config, audio: on ? "soloist" : "auto" })}
+        />
+      )}
+    </>
+  );
+};
+
 const SPOTIFY_BITRATES = [
   { data: 96, label: "Low (96 kbps)" },
   { data: 160, label: "Normal (160 kbps)" },
@@ -283,7 +402,8 @@ const SpotifyFields: FC<{
   signedIn: boolean;
   closeModal?: () => void;
   openDashboard: () => void;
-}> = ({ draft, setConfig, signedIn, closeModal, openDashboard }) => {
+  openSoloistDashboard: () => void;
+}> = ({ draft, setConfig, signedIn, closeModal, openDashboard, openSoloistDashboard }) => {
   const clientId = (draft.config.client_id ?? "").trim();
   // a refresh token only works with the app that issued it
   // (a phone sign-in is with playback's app, which stands in for the shared one)
@@ -338,6 +458,7 @@ const SpotifyFields: FC<{
           </DialogButton>
         </Focusable>
       </Field>
+      <SoloistFields draft={draft} setConfig={setConfig} openSoloistDashboard={openSoloistDashboard} />
     </>
   );
 };
@@ -745,6 +866,19 @@ export const ServiceModal: FC<{
       showModal(<ServiceModal type={type} typeName={typeName} existing={existing} initialDraft={back} />);
     });
   };
+  // the same for a Soloist API key
+  const openSoloistDashboard = () => {
+    closeModal?.();
+    browseThenReturn(SOLOIST_DASHBOARD, async () => {
+      let back = draft;
+      const key = !draft.config.soloist_key && findSoloistKey(await readClipboard());
+      if (key) {
+        back = { ...draft, config: { ...draft.config, soloist_key: key } };
+        notify("Spotify", "Soloist API key pasted from the clipboard");
+      }
+      showModal(<ServiceModal type={type} typeName={typeName} existing={existing} initialDraft={back} />);
+    });
+  };
 
   // a ref as well as state: a double tap arrives before the re-render that disables Save
   const savingNow = useRef(false);
@@ -849,6 +983,7 @@ export const ServiceModal: FC<{
             signedIn={!!existing?.has_credentials}
             closeModal={closeModal}
             openDashboard={openDashboard}
+            openSoloistDashboard={openSoloistDashboard}
           />
         )}
         {type === "radio" && <RadioFields draft={draft} setConfig={setConfig} />}

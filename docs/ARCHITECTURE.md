@@ -49,6 +49,7 @@ flowchart LR
 | Backend (`main.py`, `py_modules/musicdeck/`) | Decky's plugin process (a frozen Python 3) | Plugin load → unload | Talks to services, stores settings, serves audio and art over loopback |
 | yt-dlp worker | System Python (`/usr/bin/python3`) | Started on first YouTube stream | Runs yt-dlp, which needs stdlib modules Decky's Python lacks |
 | Spotify helper | Native binary (`bin/<platform>/spotify-helper`) | Started on first Spotify request | Holds the librespot session; serves decrypted audio and Spotify's own catalogue reads |
+| Spotify Soloist | Spotify's own headless player, fetched from Spotify into the data folder (`soloist/bin/`) | Started for a Spotify source that plays through it (its first track, or its settings) | Plays the audio of Spotify accounts librespot is refused audio for, straight to the system's audio; driven over a loopback WebSocket (`musicdeck/soloist.py`) |
 
 ### Why playback lives in Steam's browser engine
 
@@ -150,6 +151,7 @@ Details worth knowing:
 | `musicdeck/musicbrainz.py` | MusicBrainz (release search and details, one request a second, a User-Agent naming the app) and the Cover Art Archive (front covers), for the local source's look-ups and artwork; tracks carry their lengths, for `identify.py`. |
 | `musicdeck/background.py` | `spawn()`: work nothing awaits (play reports, a re-read after a change), held until done (asyncio only keeps a weak reference) with its failure logged; `cancel_all()` at unload, so nothing outlives the plugin. |
 | `musicdeck/version.py` | The version from `package.json` (`current()` reads it fresh, so a frontend-only update shows its own), and the User-Agent built from it. |
+| `musicdeck/soloist.py` | Spotify Soloist for accounts librespot can't get audio for: fetched from Spotify (never shipped; again before a build's 90 days run out), its API key stored, the process and its loopback WebSocket, and the one track it plays for the player, reported as casting's devices report (autoplay's track after ours is paused and counted as the end). |
 | `musicdeck/net.py`, `musicdeck/cache.py` | The one TLS context every HTTPS connection shares (certifi's bundle costs ~1 MB per context), and the bounded, expiring cache every in-memory cache uses. |
 | `musicdeck/services/*.py` | One file per source. See [SOURCES.md](SOURCES.md). |
 | `musicdeck/server.py` | `StreamServer`: loopback HTTP server for `/stream`, `/art`, `/fetch`; downloaded files first, then range proxying, HLS rewriting, resolved-source cache. While casting, a second site on the home network (`open_lan`) serves the one device being cast to: a fresh random link per track, only that device's address answered, HLS pieces only from that track's own hosts. |
@@ -343,6 +345,9 @@ SoundCloud scrape from their web players).
 - No source that works without an account asks for one (SoundCloud, YouTube, Bandcamp, radio).
 - The Spotify helper's loopback audio server requires its own per-start key (a header the stream
   server adds), so nothing else on the device can play through the account.
+- Spotify Soloist's WebSocket has no authentication of its own (Spotify's docs say so), so it's only ever
+  opened on 127.0.0.1, on a port the system picks; its API key is a secret (`SECRET_KEYS`: never sent to
+  the frontend or put in backups) and reaches it on stdin (`setup-api-key`), not on its command line.
 - **Your devices** (`peers.py`) is what listens beyond this machine: port 41378 (TCP) and 41377 (UDP, for
   finding each other), answering home-network addresses only; and the internet link (`farlink.py`, the
   `musicdeck-net` helper): QUIC through iroh, encrypted end to end and authenticated by each device's key (net.key in
@@ -465,6 +470,9 @@ and CDP's `Performance.getMetrics` (`ScriptDuration`, `TaskDuration`) on `Shared
   runs in a worker on the system Python.
 - **No DRM in Steam's browser engine.** Only sources with unencrypted streams can be played; the
   Spotify helper decrypts with librespot, the open-source client engine for Spotify Premium accounts.
+  Accounts librespot is refused audio keys for (some newer ones) play through Spotify Soloist instead,
+  Spotify's own player, which plays outside the browser: the player hands those tracks to it as it hands
+  them to a speaker when casting, so they have no EQ, levelling, crossfade or gapless.
 - **Signed URLs expire.** Services set `StreamSource.expires`; the server re-resolves on expiry or a
   403, and the player recovers once.
 - **Rate limits.** Spotify's public Web API app is shared and rate-limited; most Spotify reads go

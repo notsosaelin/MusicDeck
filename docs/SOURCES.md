@@ -22,7 +22,7 @@ How each source works, what it stores, and where it can break. Each section matc
 | Live Music Archive | `livemusic` | — | — | archive.org's MP3s of each recording | favourites (on the Deck), radio |
 | Qobuz | `qobuz` | Subscription | OAuth on qobuz.com | FLAC up to 24/192, MP3 | favourites, play reports, playlists |
 | TIDAL | `tidal` | Subscription | Device login on link.tidal.com | FLAC 16/44.1, AAC | favourites, radio, lyrics, playlists |
-| Spotify | `spotify` | Premium | Two OAuth consents (PKCE) | Ogg Vorbis via librespot | favourites, radio, lyrics, playlists |
+| Spotify | `spotify` | Premium | Two OAuth consents (PKCE) | Ogg Vorbis via librespot (or Spotify Soloist for accounts librespot is refused) | favourites, radio, lyrics, playlists |
 
 "Favourites" means the heart and a favourites list, kept on the service where it has one and on
 the Deck otherwise. The track menu names them in each source's own words (`LIKE_WORDS`): Save to Liked
@@ -617,7 +617,28 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
   needs the `user-follow-modify` scope, asked for since 0.17.0: a sign-in from before is told to sign in
   again when it tries.
 - **Requirements**: Spotify Premium. Some newer accounts can't get audio keys through librespot
-  ("audio key error"); that is a librespot/Spotify limitation.
+  ("audio key error"), while everything else librespot does for them (sign-in, the session reads above)
+  works: their audio comes from Spotify Soloist instead.
+- **Spotify Soloist** (`musicdeck/soloist.py`), Spotify's own headless player, for those accounts only:
+  - The user makes an API key at developer.spotify.com/dashboard/soloist (with Premium) and enters it in
+    the source's settings (`soloist_key`, a secret). The first "audio key error" switches the source over
+    (`"audio": "soloist"`; `needs_soloist` remembers the account needs it, so a key entered later switches
+    it at once). It can also be turned on or off by hand.
+  - Not shipped (Spotify's terms: "Do not redistribute"): fetched from `soloist-builds.spotifycdn.com` on
+    first use into `<data>/soloist/bin/`, and again 75 days after the build's date (builds stop at 90, exit
+    code 10, which also fetches a new one). Linux x86_64 and arm64, Windows x86_64.
+  - Paired once through Spotify Connect: in Spotify on a phone on the same network, Devices → "MusicDeck
+    (<host name>)"; the session is kept in `<data>/spotify/soloist/<username>/` (beside librespot's folder,
+    not in it: signing in again replaces that one). A pairing with another account than the source's is
+    refused (its output says whom it signed in as).
+  - The player gives it one track at a time (`stream_info` says `plays_itself`; the player's Soloist deck,
+    a `RemoteAudio` as casting's, `soloist_load`/`soloist_control`, `soloist_status` events). It plays to the
+    system's audio itself, so the EQ, levelling, crossfade, gapless, the visualizer and casting don't apply;
+    its volume is the player's (lowered under games as the rest is). When a track ends, Spotify's autoplay
+    starts another: that's paused at once and reported as the end. Another track coming on mid-way is the
+    phone taking over: paused here, theirs left alone; play here brings ours back from where it was.
+  - Its WebSocket has no authentication: 127.0.0.1 only, on a port the system picks.
+  - Playing Spotify somewhere else on the account takes the stream from it, as from any Connect device.
 - Build: `scripts/build_spotify_helper.sh` (cargo-zigbuild: x86_64 and arm64 musl, x86_64 Windows).
 
 ---

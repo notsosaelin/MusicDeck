@@ -90,6 +90,7 @@ python scripts/vendor.py       # the tests use the vendored packages in py_modul
 pip install aiohttp certifi    # these come with Decky on a device, so they aren't vendored
 python tests/test_backend.py
 python tests/test_cast.py      # casting: mDNS, a fake Chromecast, a fake UPnP renderer, the network site
+python tests/test_soloist.py   # Spotify through Spotify Soloist: a fake Soloist WebSocket, its downloads, the switch-over
 python tests/test_farlink.py   # Your devices over the internet: two devices with real helpers (needs the helper built and internet)
 python scripts/net_test.py     # the helper's traffic: bytes per request, idle presence per hour, how fast Offline shows
 python tests/test_ipod.py      # iPods: the database format against libgpod's (fixtures), a pretend iPod synced
@@ -292,7 +293,7 @@ an entry in `CHANGELOG.md` (what changed, for the people using it).
 
 1. `python scripts/bump.py [minor|major]`.
 2. Update the docs and add the version to `CHANGELOG.md`.
-3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_ipod.py && python tests/test_burn.py && python tests/test_windows.py && python tests/test_desktop.py` (on Windows
+3. `pnpm typecheck && pnpm test && python tests/test_backend.py && python tests/test_cast.py && python tests/test_soloist.py && python tests/test_ipod.py && python tests/test_burn.py && python tests/test_windows.py && python tests/test_desktop.py` (on Windows
    too: `test_windows.py` asks the PC's own drives and sound output there).
 4. `pnpm build && pnpm smoke && python scripts/vendor.py && bash scripts/build_spotify_helper.sh && bash scripts/build_hashab.sh && bash scripts/build_cdrskin.sh && python scripts/package.py`, with `bash scripts/build_cdrskin_windows.sh` and
    `bash scripts/build_mtp_helper.sh` run in MSYS2's UCRT64 shell before `package.py`

@@ -3,6 +3,16 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
+## Unreleased
+
+- **Spotify for newer accounts**: accounts Spotify refuses to give MusicDeck's own player audio for ("audio key
+  error") play through Spotify Soloist, Spotify's own player, once you've made a Soloist API key
+  (developer.spotify.com/dashboard/soloist) and entered it in the Spotify source's settings. MusicDeck fetches
+  Soloist from Spotify, switches the source over by itself the first time Spotify refuses it, and shows what's left
+  to do (choosing "MusicDeck (this device)" once under Devices in Spotify on your phone). Library, search, playlists
+  and lyrics work as before; songs played through Soloist skip the equalizer, volume levelling and crossfade, and
+  can't be cast. Accounts that play now carry on as they are. Tested on Windows; Linux (the Deck) not yet.
+
 ## 0.43.0
 
 - **Your devices, anywhere**: paired devices find each other over the internet too (another network, a phone's

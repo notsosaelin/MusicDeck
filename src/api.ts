@@ -622,9 +622,10 @@ export const streamInfo = callable<
   [id: string, trackId: string],
   /**
    * start_at: where a long track (a podcast episode) was left, in seconds; expires: when the stream's
-   * link stops working (Unix seconds), if it does
+   * link stops working (Unix seconds), if it does; plays_itself: the source plays it outside Steam's browser
+   * (Spotify through Soloist), handed over with soloistLoad
    */
-  Result<{ hls: boolean; gain?: Track["gain"]; start_at?: number; expires?: number | null }>
+  Result<{ hls: boolean; gain?: Track["gain"]; start_at?: number; expires?: number | null; plays_itself?: boolean }>
 >("stream_info");
 export const collectionAction = callable<
   [id: string, kind: CollectionKind, collectionId: string, call: string],
@@ -778,3 +779,26 @@ export const castLoad = callable<[id: string, track: Track, start: number, autop
 );
 export const castControl = callable<[action: string, value?: number], Result<null>>("cast_control");
 export const castStop = callable<[], Result<null>>("cast_stop");
+
+// --- Spotify through Spotify Soloist (py_modules/musicdeck/soloist.py) ---
+
+/** Its reports, as casting's, for one source: "soloist_status" events */
+export interface SoloistStatus extends CastStatus {
+  instance: string;
+}
+/** How far Soloist has got, for the source's settings */
+export interface SoloistSetup {
+  phase: "off" | "unsupported" | "installing" | "starting" | "pairing" | "ready" | "other_account" | "error";
+  /** what it's called in Spotify's Devices list */
+  device: string;
+  problem: string;
+  /** where API keys are made */
+  dashboard: string;
+}
+export const soloistLoad = callable<[id: string, track: Track, start: number, autoplay: boolean], Result<null>>(
+  "soloist_load",
+);
+export const soloistControl = callable<[id: string, action: string, value?: number], Result<null>>(
+  "soloist_control",
+);
+export const soloistSetup = callable<[id: string], Result<SoloistSetup>>("soloist_setup");

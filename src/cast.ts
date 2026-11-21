@@ -1,5 +1,5 @@
 import { addEventListener, removeEventListener } from "@decky/api";
-import { CastStatus, Track, castControl, castLoad } from "./api";
+import { CastStatus, Result, SoloistStatus, Track, castControl, castLoad, soloistControl, soloistLoad } from "./api";
 import { dlog } from "./log";
 
 /** How often the position moves on between the device's own reports (it only reports changes). */
@@ -15,14 +15,54 @@ const VOLUME_EVERY_MS = 250;
 const CATCH_UP_MS = 6000;
 
 type DeviceState = NonNullable<CastStatus["state"]>;
+type RemoteItem = { instanceId: string; track: Track };
+
+/** Where a RemoteAudio's track plays, and how it's told what to do. */
+export interface RemoteTransport {
+  /** for the log */
+  name: string;
+  load(item: RemoteItem, startAt: number, autoplay: boolean, volume: number): Promise<Result<null>>;
+  control(item: RemoteItem | undefined, action: string, value?: number): Promise<Result<null>>;
+  /** how long reports that disagree with what was just asked for are put down to it catching up */
+  catchUpMs: number;
+}
+
+/** A speaker or TV (py_modules/musicdeck/cast): one at a time, so no source in its calls */
+export const castTransport: RemoteTransport = {
+  name: "cast",
+  load: (item, startAt, autoplay) => castLoad(item.instanceId, item.track, startAt, autoplay),
+  control: (_item, action, value) => castControl(action, value),
+  catchUpMs: CATCH_UP_MS,
+};
+
+/**
+ * Spotify Soloist on this machine (py_modules/musicdeck/soloist.py), for Spotify accounts librespot can't get
+ * audio for: per source, and quick to act (it's local), so it catches up in a moment.
+ */
+export const soloistTransport: RemoteTransport = {
+  name: "soloist",
+  load: async (item, startAt, autoplay, volume) => {
+    // it may not be running yet: the volume goes first, and it starts at it
+    await soloistControl(item.instanceId, "volume", volume).catch(() => {});
+    return soloistLoad(item.instanceId, item.track, startAt, autoplay);
+  },
+  control: (item, action, value) =>
+    item ? soloistControl(item.instanceId, action, value) : Promise.resolve({ ok: true as const, data: null }),
+  catchUpMs: 1500,
+};
 
 /**
  * Stands in for the player's <audio> element while casting: the same properties, methods and events
  * the player uses, forwarded to the device (py_modules/musicdeck/cast) and fed by its "cast_status"
  * reports. So the player's queue, play reports, sleep timer and so on work unchanged; only its
- * Web Audio parts (EQ, levelling, crossfade, gapless) have nothing to act on.
+ * Web Audio parts (EQ, levelling, crossfade, gapless) have nothing to act on. The same stands in for
+ * Spotify Soloist, which plays Spotify's tracks for some accounts ("soloist_status" reports).
  */
 export class RemoteAudio extends EventTarget {
+  constructor(private readonly transport: RemoteTransport = castTransport) {
+    super();
+  }
+
   paused = true;
   ended = false;
   loop = false;
@@ -103,7 +143,8 @@ export class RemoteAudio extends EventTarget {
     this.paused = !autoplay;
     this.fire("durationchange");
     if (autoplay) this.fire("waiting");
-    castLoad(item.instanceId, item.track, startAt, autoplay)
+    this.transport
+      .load(item, startAt, autoplay, this.level)
       .then((r) => {
         if (generation !== this.generation) return;
         this.loading = false;
@@ -155,9 +196,9 @@ export class RemoteAudio extends EventTarget {
   /** The player letting go of the track (clearing the queue, say): the device stops too. */
   removeAttribute(name: string) {
     if (name !== "src" || !this.src) return;
-    const had = !!this.item;
+    const had = this.item;
     this.detach();
-    if (had) this.send("stop");
+    if (had) this.send("stop", undefined, had);
   }
 
   load() {}
@@ -222,7 +263,7 @@ export class RemoteAudio extends EventTarget {
   }
 
   private expect(what: { playing?: boolean; position?: number }) {
-    this.expected = { ...this.expected, ...what, until: Date.now() + CATCH_UP_MS };
+    this.expected = { ...this.expected, ...what, until: Date.now() + this.transport.catchUpMs };
   }
 
   /**
@@ -250,7 +291,7 @@ export class RemoteAudio extends EventTarget {
   }
 
   private finish() {
-    dlog("cast ended", { loop: this.loop });
+    dlog(`${this.transport.name} ended`, { loop: this.loop });
     if (this.loop && this.item) return this.open(this.item, 0, true);
     this.ended = true;
     if (!this.paused) {
@@ -261,7 +302,7 @@ export class RemoteAudio extends EventTarget {
   }
 
   private fail(message: string) {
-    dlog("cast error", { message });
+    dlog(`${this.transport.name} error`, { message });
     this.loading = false;
     this.stopTicking();
     this.error = { code: 4, message };
@@ -282,9 +323,9 @@ export class RemoteAudio extends EventTarget {
     this.ticker = undefined;
   }
 
-  private send(action: string, value?: number) {
-    castControl(action, value).then(
-      (r) => !r.ok && dlog("cast control failed", { action, error: r.error }),
+  private send(action: string, value?: number, item = this.item) {
+    this.transport.control(item, action, value).then(
+      (r) => !r.ok && dlog(`${this.transport.name} control failed`, { action, error: r.error }),
       () => {},
     );
   }
@@ -311,5 +352,22 @@ export function watchCastStatus(): () => void {
   return () => {
     removeEventListener("cast_status", handler);
     listener = undefined;
+  };
+}
+
+/** Where "soloist_status" reports go: set by the player (it passes on those for the track it's playing). */
+let soloistListener: ((status: SoloistStatus) => void) | undefined;
+
+export function onSoloistStatus(handler: ((status: SoloistStatus) => void) | undefined) {
+  soloistListener = handler;
+}
+
+/** Listens for Spotify Soloist's "soloist_status" reports while the plugin is loaded; returns the unregister. */
+export function watchSoloistStatus(): () => void {
+  const handler = (status: SoloistStatus) => soloistListener?.(status);
+  addEventListener("soloist_status", handler);
+  return () => {
+    removeEventListener("soloist_status", handler);
+    soloistListener = undefined;
   };
 }

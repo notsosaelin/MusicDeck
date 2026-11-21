@@ -18,7 +18,7 @@ import {
   castStart,
   castStop,
 } from "./api";
-import { RemoteAudio, onCastStatus } from "./cast";
+import { RemoteAudio, onCastStatus, onSoloistStatus, soloistTransport } from "./cast";
 import { dlog } from "./log";
 import { notify } from "./notify";
 import { EQ_BANDS } from "./eq";
@@ -264,6 +264,16 @@ export class Player {
     () => this.remote as unknown as HTMLAudioElement,
     (deck, audio, signal) => this.listen(deck, audio, signal),
   );
+  /**
+   * Spotify Soloist, playing a Spotify track for an account librespot can't get audio for: on this machine,
+   * but outside Steam's browser, so like casting (no EQ, levelling, crossfade or gapless). Per track: the
+   * player moves to it for the tracks its source hands over (stream_info's plays_itself) and back after.
+   */
+  private readonly solo = new RemoteAudio(soloistTransport);
+  private readonly soloDeck = new Deck(
+    () => this.solo as unknown as HTMLAudioElement,
+    (deck, audio, signal) => this.listen(deck, audio, signal),
+  );
   /** When paused this long, the player lets go of its elements and graph (rebuilt on play) */
   private idleRelease?: number;
   /** The Deck's own volume, put back when casting ends */
@@ -330,6 +340,13 @@ export class Player {
     // the device's stand-in isn't an element, and casting talks to it directly: listen from the start
     this.castDeck.build();
     this.remote.onVolume = (volume) => this.state.update({ volume });
+    this.soloDeck.build();
+    // its volume changed from Spotify on a phone (it's told the volume lowered under a game: undo that)
+    this.solo.onVolume = (volume) =>
+      this.onSoloist && this.state.update({ volume: Math.min(1, volume / (this.duckLevel || 1)) });
+    onSoloistStatus((status) => {
+      if (this.onSoloist && this.current?.instanceId === status.instance) this.solo.onStatus(status);
+    });
     this.stallWatch = window.setInterval(() => this.checkStall(), 2000);
   }
 
@@ -345,6 +362,16 @@ export class Player {
   /** Playing on a speaker or TV: no Web Audio, so no EQ, levelling, crossfade or gapless. */
   get casting() {
     return this.deck === this.castDeck;
+  }
+
+  /** A Spotify track playing through Spotify Soloist (see soloDeck). */
+  get onSoloist() {
+    return this.deck === this.soloDeck;
+  }
+
+  /** Not playing through Steam's browser (a speaker or TV, or Soloist): no Web Audio graph to act on. */
+  private get outside() {
+    return this.casting || this.onSoloist;
   }
 
   private get idleDeck() {
@@ -440,6 +467,7 @@ export class Player {
     if (this.casting) void this.stopCasting();
     this.releaseAudio();
     this.castDeck.release();
+    this.soloDeck.release(); // Soloist stops too
     this.state.update({ playing: false, loading: false });
   }
 
@@ -457,6 +485,7 @@ export class Player {
     window.clearTimeout(this.idleRelease);
     this.cancelFade();
     this.decks.forEach((d) => d.release());
+    if (this.onSoloist) this.soloDeck.empty();
     if (!this.casting) this.deck = this.decks[0];
     void this.ctx?.close().catch(() => {});
     this.ctx = this.preamp = this.ducker = this.analyser = undefined;
@@ -466,9 +495,9 @@ export class Player {
   /** Paused: after IDLE_RELEASE_MS still paused, let go of the elements (where it was is kept). */
   private releaseWhenIdle() {
     window.clearTimeout(this.idleRelease);
-    if (this.casting || this.destroyed) return;
+    if (this.outside || this.destroyed) return;
     this.idleRelease = window.setTimeout(() => {
-      if (this.casting || (this.deck.built && !this.audio.paused)) return;
+      if (this.outside || (this.deck.built && !this.audio.paused)) return;
       this.position.update({ current: this.heldAt });
       this.persistSession();
       dlog("released idle audio", { at: this.position.get().current });
@@ -621,6 +650,7 @@ export class Player {
     this.loadToken++;
     this.queueGeneration++;
     this.castDeck.empty();
+    this.soloDeck.empty();
     this.releaseAudio();
     this.order = [];
     this.state.update({ queue: [], index: -1, playing: false, loading: false });
@@ -665,7 +695,7 @@ export class Player {
     // paused past its stream link's life: carry on from the same second on a fresh link (hls.js
     // would otherwise retry the dead one's next piece for good)
     const item = this.current;
-    if (item && !this.casting && this.deck.expires && Date.now() / 1000 > this.deck.expires - EXPIRY_MARGIN_S) {
+    if (item && !this.outside && this.deck.expires && Date.now() / 1000 > this.deck.expires - EXPIRY_MARGIN_S) {
       const at = this.audio.currentTime || 0;
       dlog("link expired while paused", { id: item.track.id, at });
       this.state.update({ loading: true });
@@ -724,7 +754,7 @@ export class Player {
    * False when there's nothing to show: nothing played yet, or playing on a speaker or TV.
    */
   levels(into: Uint8Array): boolean {
-    if (!this.analyser || this.casting) return false;
+    if (!this.analyser || this.outside) return false;
     this.analyser.getByteFrequencyData(into as Uint8Array<ArrayBuffer>);
     return true;
   }
@@ -746,7 +776,7 @@ export class Player {
   /** Talk at the chosen speed, at its own pitch; music, and anything on a speaker or TV, as it is. */
   private applySpeed() {
     const item = this.current;
-    const talk = !!item && !this.casting && hasFeature(item.instanceId, "progress");
+    const talk = !!item && !this.outside && hasFeature(item.instanceId, "progress");
     const rate = talk ? this.state.get().speed : 1;
     for (const deck of this.decks) {
       if (!deck.built) continue;
@@ -761,6 +791,7 @@ export class Player {
     // elements made later take it from the state (newElement)
     for (const deck of this.casting ? [this.castDeck] : this.decks)
       if (deck.built || this.casting) deck.audio.volume = v;
+    if (!this.casting) this.solo.volume = v * this.duckLevel;
     this.state.update({ volume: v });
   }
 
@@ -777,6 +808,7 @@ export class Player {
     this.cancelFade();
     this.loadToken++;
     this.decks.forEach((d) => d.empty());
+    this.soloDeck.empty(); // Soloist stops: the speaker plays now
     this.remote.reset(started.data.volume);
     this.remote.loop = this.state.get().repeat === "one";
     this.castDeck.build(); // listening to the device before it says anything
@@ -807,6 +839,7 @@ export class Player {
     this.remote.detach();
     this.deck = this.decks[0];
     for (const deck of this.decks) if (deck.built) deck.audio.volume = this.localVolume;
+    this.solo.volume = this.localVolume * this.duckLevel;
     this.state.update({ castingTo: null, playing: false, loading: false, volume: this.localVolume });
   }
 
@@ -829,7 +862,7 @@ export class Player {
   cycleRepeat() {
     const modes: RepeatMode[] = ["off", "all", "one"];
     const repeat = modes[(modes.indexOf(this.state.get().repeat) + 1) % modes.length];
-    for (const deck of [...this.decks, this.castDeck]) if (deck.built) deck.audio.loop = repeat === "one";
+    for (const deck of [...this.decks, this.castDeck, this.soloDeck]) if (deck.built) deck.audio.loop = repeat === "one";
     this.state.update({ repeat });
   }
 
@@ -848,6 +881,8 @@ export class Player {
   setDuck(level: number) {
     this.duckLevel = Math.min(1, Math.max(0, level));
     if (this.ctx && this.ducker) this.ducker.gain.setTargetAtTime(this.duckLevel, this.ctx.currentTime, 0.3);
+    // Soloist plays on this machine, where the game is: lowered too, through its own volume
+    if (!this.casting) this.solo.volume = this.state.get().volume * this.duckLevel;
   }
 
   private applyLevelling() {
@@ -979,6 +1014,23 @@ export class Player {
       this.remote.open(item, startAt, autoplay);
       return;
     }
+    if (info.data.plays_itself) {
+      // Spotify through Soloist: it plays the track itself, outside Steam's browser
+      if (!this.onSoloist) {
+        this.cancelFade();
+        this.deck = this.soloDeck;
+        for (const deck of this.decks) if (deck.built) deck.empty();
+      }
+      this.solo.volume = this.state.get().volume * this.duckLevel;
+      this.solo.loop = this.state.get().repeat === "one" && !this.renderFor;
+      this.solo.open(item, startAt, autoplay);
+      return;
+    }
+    if (this.onSoloist) {
+      // back from Soloist to the browser's own decks
+      this.soloDeck.empty();
+      this.deck = this.decks[0];
+    }
     this.pendingSeek = startAt > 0 ? startAt : undefined;
     this.attach(this.deck, url, info.data.hls, startAt, token);
     this.deck.expires = info.data.expires ?? undefined;
@@ -1054,7 +1106,7 @@ export class Player {
     const next = this.upcoming();
     // while a crossfade runs, the idle deck is the one still fading out
     if (
-      this.casting ||
+      this.outside ||
       next === undefined ||
       this.preloading ||
       this.fading ||
@@ -1073,6 +1125,8 @@ export class Player {
       const info = await streamInfo(item.instanceId, item.track.id).catch(() => null);
       if (!info?.ok || queue !== this.queueGeneration || this.state.get().queue[next] !== item || idle === this.deck)
         return;
+      // Soloist's tracks aren't loaded ahead: it's given each when its turn comes
+      if (info.data.plays_itself) return;
       // an episode that resumes partway isn't loaded ahead: it starts (from there) when its turn comes
       if (info.data.start_at) return;
       idle.empty();
@@ -1088,7 +1142,7 @@ export class Player {
   /** With crossfade on, starts the next track that many seconds before this one ends. */
   private maybeCrossfade() {
     const seconds = this.playback.crossfade ?? 0;
-    if (!seconds || this.fading || this.casting || this.audio.paused) return;
+    if (!seconds || this.fading || this.outside || this.audio.paused) return;
     const duration = this.audio.duration;
     const remaining = duration - this.audio.currentTime;
     // a track barely longer than two fades would be mostly fade: let it end normally
@@ -1276,7 +1330,7 @@ export class Player {
 
   private play() {
     if (this.destroyed) return;
-    if (!this.casting) this.ensureGraph();
+    if (!this.outside) this.ensureGraph();
     if (this.ctx?.state === "suspended") this.ctx.resume();
     this.audio.play().catch((e) => {
       // AbortError just means a newer load() interrupted this one

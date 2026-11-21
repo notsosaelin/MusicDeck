@@ -40,7 +40,8 @@ from musicdeck.settings import DEFAULTS, Settings, save_json
 # Config keys never sent to the frontend; a service storing a secret under another name adds it here
 #: Browse's tile for the playlists made in MusicDeck, on a source without a Playlists tile of its own
 OUR_PLAYLISTS = "musicdeck-playlists"
-SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "secret", "cookies", "auth"}
+SECRET_KEYS = {"password", "token", "server_token", "refresh_token", "salt", "secret", "cookies", "auth",
+               "soloist_key"}
 # Marks a source restored from a backup whose sign-in has to be done again (backups hold none)
 RESTORED_SIGNED_OUT = "sign_in_again"
 # Settings the frontend may write directly (set_setting); everything else has its own endpoint
@@ -66,6 +67,12 @@ async def _result(work: Awaitable[Any]) -> dict[str, Any]:
     except Exception as e:
         decky.logger.exception("Unexpected error")
         return {"ok": False, "error": debuglog.redact(f"Unexpected error: {e}")}
+
+
+def _plays_itself(instance: Any) -> bool:
+    """A source whose tracks play outside Steam's browser (Spotify through Soloist): main.stream_info says so."""
+    plays = getattr(instance, "plays_itself", None)
+    return bool(plays and plays())
 
 
 def _when_ready(method):
@@ -253,6 +260,10 @@ class Plugin:
         instance.save_config = lambda config, sid=service["id"]: self._persist_config(sid, config)
         # a short note for the user from the source (what new albums got), shown as a toast
         instance.announce = lambda text, sid=service["id"]: spawn(decky.emit("source_note", sid, text), "source note")
+        if hasattr(instance, "soloist_status"):
+            # Spotify through Soloist: its reports on the track it plays (src/player.ts's Soloist deck)
+            instance.soloist_status = lambda status, sid=service["id"]: spawn(
+                decky.emit("soloist_status", {"instance": sid, **status}), "soloist status")
         if isinstance(instance, LocalLibrary):
             instance.devices = self._shelf
             instance.has_drive = lambda: bool(cd.audio_drives())
@@ -1039,10 +1050,19 @@ class Plugin:
         """Resolves a track before playback (and warms the cache when prefetching the next one).
         Tells the player whether to use hls.js."""
         async def work():
-            source = await self.server.resolve_stream(instance_id, track_id)
+            instance = self.instances.get(instance_id)
+            # sources that play their tracks themselves (Spotify through Soloist): the player hands them over
+            if instance and _plays_itself(instance):
+                return {"hls": False, "gain": None, "start_at": 0, "expires": None, "plays_itself": True}
+            try:
+                source = await self.server.resolve_stream(instance_id, track_id)
+            except ServiceError:
+                # Spotify switches to Soloist on being refused this account's audio (a key was given)
+                if instance and _plays_itself(instance):
+                    return {"hls": False, "gain": None, "start_at": 0, "expires": None, "plays_itself": True}
+                raise
             debuglog.debug("stream", "resolved", instance=instance_id, track=track_id, hls=source.hls,
                            local=bool(source.path), expires=source.expires)
-            instance = self.instances.get(instance_id)
             # long tracks (podcast episodes, books) start where they were left; offline, from the start
             start_at = 0
             if instance and "progress" in instance.features:
@@ -1138,6 +1158,39 @@ class Plugin:
     @_when_ready
     async def cast_stop(self) -> dict[str, Any]:
         return await _result(self.cast.disconnect())
+
+    # --- Spotify through Soloist (musicdeck/soloist.py; the player's Soloist deck) ---
+
+    def _soloist_source(self, instance_id: str) -> Any:
+        instance = self.instances.get(str(instance_id))
+        if not instance or not hasattr(instance, "soloist_load"):
+            raise ServiceError("Unknown service")
+        return instance
+
+    @_when_ready
+    async def soloist_load(self, instance_id: str, track: dict[str, Any], start: float, autoplay: bool) -> dict[str, Any]:
+        if not isinstance(track, dict) or not isinstance(track.get("id"), str) or not isinstance(start, (int, float)):
+            return {"ok": False, "error": "Bad track"}
+        duration = track.get("duration") if isinstance(track.get("duration"), (int, float)) else 0
+        async def work():
+            await self._soloist_source(instance_id).soloist_load(track["id"], float(start), bool(autoplay), float(duration))
+        return await _result(work())
+
+    @_when_ready
+    async def soloist_control(self, instance_id: str, action: str, value: Optional[float] = None) -> dict[str, Any]:
+        if action not in ("play", "pause", "seek", "stop", "volume") or (
+                action in ("seek", "volume") and not isinstance(value, (int, float))):
+            return {"ok": False, "error": "Bad control"}
+        async def work():
+            await self._soloist_source(instance_id).soloist_control(str(action), value)
+        return await _result(work())
+
+    @_when_ready
+    async def soloist_setup(self, instance_id: str) -> dict[str, Any]:
+        """How Soloist is getting on, for the source's settings: {"phase", "device", "problem", "dashboard"}."""
+        async def work():
+            return await self._soloist_source(instance_id).soloist_setup()
+        return await _result(work())
 
     # --- sign-in (OAuth pages, device codes; see services/base.py:SignIn) ---
 

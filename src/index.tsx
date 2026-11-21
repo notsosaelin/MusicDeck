@@ -27,7 +27,7 @@ import {
 import { Settings } from "./components/Settings";
 import { ServiceModal } from "./components/ServiceModal";
 import { NameModal } from "./components/NameModal";
-import { watchCastStatus } from "./cast";
+import { watchCastStatus, watchSoloistStatus } from "./cast";
 import { player } from "./player";
 import { setSleepTimer, sleepTimer } from "./sleep";
 import { syncSteam } from "./steam";
@@ -71,6 +71,7 @@ export default definePlugin(() => {
   reopenMediaCenterIfShowing();
   const unwatchGames = watchGames();
   const unwatchCast = watchCastStatus();
+  const unwatchSoloist = watchSoloistStatus();
   const unwatchLibraryEntry = watchLibraryEntry();
   // a new version on GitHub: told once, installed from Settings
   const unwatchUpdates = watchForUpdates();
@@ -151,6 +152,7 @@ export default definePlugin(() => {
       routerHook.removeRoute(PLAYER_ROUTE);
       unwatchGames();
       unwatchCast();
+      unwatchSoloist();
       unwatchLibraryEntry();
       unwatchUpdates();
       unwatchDevices();

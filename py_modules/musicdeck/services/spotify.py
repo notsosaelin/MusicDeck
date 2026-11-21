@@ -13,6 +13,9 @@ Spotify, the way Spotifast does it:
 * Audio: bin/spotify-helper (Rust, librespot) serves each track's decrypted original file (Ogg
   Vorbis) over loopback HTTP, so Steam's browser decodes it like any other source. Playback needs
   Spotify Premium, as with every librespot-based client.
+* Accounts librespot is refused audio keys for ("audio key error": newer ones) play through Spotify
+  Soloist instead (musicdeck/soloist.py), once the user has given it an API key: the first refusal
+  switches the source over ("audio": "soloist"); everything but the audio stays as it is.
 """
 import asyncio
 import base64
@@ -23,7 +26,7 @@ import re
 import secrets
 import shutil
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import urlencode
 
 import aiohttp
@@ -33,6 +36,11 @@ from .. import debuglog, models, native
 from ..cache import Cache
 from ..net import tls
 from .base import MusicService, ServiceError, SignIn, StreamSource
+from .. import soloist as soloist_mod  # after .base, which it uses
+
+# Spotify Soloist's API key (a secret: main.SECRET_KEYS), and what the helper says when librespot is refused audio
+SOLOIST_KEY = "soloist_key"
+AUDIO_KEY_ERROR = "audio key error"
 
 HELPER_NAME = "spotify-helper"
 REPLY_LIMIT = 64 * 1024 * 1024
@@ -262,6 +270,11 @@ class SpotifyService(MusicService):
         self.liked: Cache[bool] = Cache(LIKED_TTL, LIKED_KEPT)
         # what the Web API token was granted (sign-ins before following artists lack user-follow-modify)
         self.scopes: Optional[set[str]] = None
+        # Spotify Soloist, for accounts librespot can't get audio for (made when first needed), and where its
+        # reports go (set by the plugin: "soloist_status" events)
+        self.soloist: Optional[soloist_mod.Soloist] = None
+        self.soloist_status: Optional[Callable[[dict[str, Any]], None]] = None
+        self._soloist_start: Optional[asyncio.Task] = None
 
     @classmethod
     def sign_in(cls, options: dict[str, Any], runtime_dir: str) -> SignIn:
@@ -285,6 +298,21 @@ class SpotifyService(MusicService):
         merged["signed_with"] = signed_with
         merged["refresh_token"] = refresh
         merged["bitrate"] = int(merged.get("bitrate") or 320)
+        # Soloist's key: kept unless a new one is given; "" takes it away (and Soloist with it)
+        key = (merged.get(SOLOIST_KEY) or "").strip()
+        if key:
+            merged[SOLOIST_KEY] = key
+            # an account already known to need it switches as soon as a key is given (not on every save: it
+            # may have been turned off by hand)
+            if merged.get("needs_soloist") and key != ((previous or {}).get(SOLOIST_KEY) or "").strip():
+                merged["audio"] = "soloist"
+        else:
+            merged.pop(SOLOIST_KEY, None)
+            merged.pop("audio", None)
+        if merged.get("audio") not in (None, "soloist"):
+            merged.pop("audio", None)
+        # the key is never sent to the frontend; whether there is one is
+        merged["soloist_set"] = bool(key)
         return merged
 
     async def start(self) -> None:
@@ -293,12 +321,88 @@ class SpotifyService(MusicService):
         self.http = _session()
 
     async def stop(self) -> None:
+        if self._soloist_start:
+            self._soloist_start.cancel()
+        if self.soloist:
+            await self.soloist.stop()
         await self.helper.stop()
         if self.http:
             await self.http.close()
 
     def remove(self) -> None:
         shutil.rmtree(self.helper.cache_dir, ignore_errors=True)
+        shutil.rmtree(self._soloist_dir(), ignore_errors=True)
+
+    # --- Spotify Soloist (accounts librespot can't get audio for) ---
+
+    def plays_itself(self) -> bool:
+        """Its tracks play through Soloist, not the stream server (main.stream_info tells the player)."""
+        return self.config.get("audio") == "soloist" and bool(self.config.get(SOLOIST_KEY)) and soloist_mod.supported()
+
+    def _soloist_dir(self) -> str:
+        # beside the librespot folder, not in it: signing in again replaces that one, and the pairing would go
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.config.get("username") or "") or "unknown"
+        return os.path.join(self.runtime_dir, "spotify", "soloist", safe)
+
+    def _soloist(self) -> soloist_mod.Soloist:
+        if self.soloist is None:
+            self.soloist = soloist_mod.Soloist(self.runtime_dir, self._soloist_dir(), self._http, self._soloist_report)
+        self.soloist.set_key(self.config.get(SOLOIST_KEY) or "")
+        self.soloist.expected_account = self.config.get("username") or None
+        return self.soloist
+
+    def _http(self) -> aiohttp.ClientSession:
+        if not self.http:
+            raise ServiceError("Spotify isn't started")
+        return self.http
+
+    def _soloist_report(self, status: dict[str, Any]) -> None:
+        if self.soloist_status:
+            self.soloist_status(status)
+
+    def _librespot_refused(self) -> None:
+        """librespot was refused this account's audio: Soloist from now on if it can, else say how to get it."""
+        changed = not self.config.get("needs_soloist")
+        self.config["needs_soloist"] = True
+        if self.config.get(SOLOIST_KEY) and soloist_mod.supported() and self.config.get("audio") != "soloist":
+            self.config["audio"] = "soloist"
+            changed = True
+        if changed:
+            debuglog.debug("spotify", "librespot refused audio", soloist=self.plays_itself())
+            if self.save_config:
+                self.save_config(self.config)
+
+    async def soloist_load(self, track_id: str, start: float, autoplay: bool, duration: float) -> None:
+        if not SPOTIFY_ID.match(track_id or ""):
+            raise ServiceError("Bad track")
+        await self._soloist().load(track_id, float(start or 0), bool(autoplay), float(duration or 0))
+
+    async def soloist_control(self, action: str, value: Optional[float] = None) -> None:
+        if self.soloist is None and action in ("pause", "stop", "volume"):
+            if action == "volume" and value is not None:
+                self._soloist().level = max(0.0, min(1.0, float(value)))
+            return
+        await self._soloist().control(action, value)
+
+    async def soloist_setup(self) -> dict[str, Any]:
+        """For the settings: how far Soloist has got (fetching, starting, waiting to be paired, ready). Starts it
+        when there's a key, so it can be paired."""
+        if not soloist_mod.supported():
+            return {"phase": "unsupported", "device": soloist_mod.device_name(), "problem": "", "dashboard": soloist_mod.DASHBOARD}
+        if not self.config.get(SOLOIST_KEY):
+            return {"phase": "off", "device": soloist_mod.device_name(), "problem": "", "dashboard": soloist_mod.DASHBOARD}
+        s = self._soloist()
+        if s.running:
+            await s.refresh_login()
+        elif not self._soloist_start or self._soloist_start.done():
+            async def start():
+                try:
+                    await s.ensure()
+                except ServiceError:
+                    pass  # it's in its status
+            self._soloist_start = asyncio.ensure_future(start())
+            await asyncio.sleep(0.2)
+        return s.setup_status()
 
     # --- Web API ---
 
@@ -767,7 +871,16 @@ class SpotifyService(MusicService):
                                      headers=self.helper.headers()) as resp:
                 info = await resp.json(content_type=None) if resp.status == 200 else None
                 if resp.status != 200:
-                    raise ServiceError((await resp.text())[:200] or f"Spotify helper HTTP {resp.status}")
+                    text = (await resp.text())[:200]
+                    if AUDIO_KEY_ERROR in text:
+                        self._librespot_refused()
+                        if not self.plays_itself():
+                            raise ServiceError(
+                                "Spotify won't give this account's audio to MusicDeck's own player. Add a Spotify Soloist "
+                                "API key in this source's settings to play it through Spotify's own player"
+                                if soloist_mod.supported() else
+                                "Spotify won't give this account's audio to MusicDeck's own player")
+                    raise ServiceError(text or f"Spotify helper HTTP {resp.status}")
             gain = info.get("gain") if info else None
         except aiohttp.ClientError as e:
             raise ServiceError(f"Spotify helper unreachable: {e}") from e
