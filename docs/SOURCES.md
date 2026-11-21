@@ -629,7 +629,9 @@ Modelled on [Spotifast](https://github.com/crmne/spotifast).
     code 10, which also fetches a new one). Linux x86_64 and arm64, Windows x86_64.
   - Paired once through Spotify Connect: in Spotify on a phone on the same network, Devices → "MusicDeck
     (<host name>)"; the session is kept in `<data>/spotify/soloist/<username>/` (beside librespot's folder,
-    not in it: signing in again replaces that one). A pairing with another account than the source's is
+    not in it: signing in again replaces that one), in its `cache/` (Users/, client_token: Soloist keeps the
+    session with its cache, so that's never put anywhere temporary). Its WebSocket says "not logged in" for a
+    moment while it brings a stored session back: only "waiting for login" in its output means unpaired. A pairing with another account than the source's is
     refused (its output says whom it signed in as).
   - The player gives it one track at a time (`stream_info` says `plays_itself`; the player's Soloist deck,
     a `RemoteAudio` as casting's, `soloist_load`/`soloist_control`, `soloist_status` events). It plays to the

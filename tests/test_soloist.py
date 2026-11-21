@@ -360,11 +360,27 @@ async def websocket_tests(http):
         check(False, "unpaired, it says to pair it")
     except ServiceError as e:
         check("choose “MusicDeck (test)” under Devices" in str(e), "unpaired, it says how to pair it")
+    # just started with a stored session: its WebSocket says "not logged in" before it has brought it back
+    # (seen with the real one: the first track was refused as unpaired)
     s.output.clear()
     s.output.append("2026-11-20 20:32:27.789: restoring session")
-    check(s._restoring(), "\"restoring session\" (its plain output) is waited for")
+    check(not s._awaiting_pairing(), "\"restoring session\" isn't waiting to be paired")
+    s._set_phase("pairing")  # what its WebSocket's "not logged in" sets
+    check(s.setup_status()["phase"] == "starting", "and the settings say starting, not to pair it")
+
+    async def comes_back():
+        await asyncio.sleep(0.6)
+        fake.logged_in = True
+        s.output.append("2026-11-20 20:32:28.596: logged in as me")
+    asyncio.ensure_future(comes_back())
+    t = time.monotonic()
+    await s.load(A[len("spotify:track:"):], 0, True, 213.573)
+    check(s.logged_in and time.monotonic() - t >= 0.5, "a track asked for meanwhile waits for the session, and plays")
     s.output.append("2026-11-20 20:32:28.000: No session to restore")
-    check(not s._restoring(), "until it says there's none")
+    check(s._awaiting_pairing(), "\"No session to restore\" is")
+    s.logged_in = False
+    s._set_phase("pairing")
+    check(s.setup_status()["phase"] == "pairing", "and then the settings say to pair it")
 
     await s.ws.close()
     await runner.cleanup()

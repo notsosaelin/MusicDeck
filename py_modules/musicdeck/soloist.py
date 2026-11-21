@@ -281,6 +281,8 @@ class Soloist:
 
     def setup_status(self) -> dict[str, Any]:
         phase, problem = self.phase, self.problem
+        if phase == "pairing" and not self._awaiting_pairing():
+            phase = "starting"  # "not logged in" while it brings a stored session back: not a reason to pair it
         if phase == "ready" and self.other_account():
             phase, problem = "other_account", self._other_account_problem()
         return {"phase": phase, "device": self.name, "problem": problem, "dashboard": DASHBOARD}
@@ -346,6 +348,8 @@ class Soloist:
         self.output.clear()
         self.proc = await asyncio.create_subprocess_exec(
             exe, "--device-name", self.name, "--data-dir", self.data_dir,
+            # its signed-in session lives in its cache folder (Users/<name>-user, client_token), not with its
+            # data: kept in the account's folder, never somewhere temporary, or it'd have to be paired again
             "--cache-dir", os.path.join(self.data_dir, "cache"), "--cache-size", "300",
             "--initial-volume", str(max(0, min(100, volume))), "--ws", "127.0.0.1:0",
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -390,6 +394,10 @@ class Soloist:
             signed = re.search(r"logged in as (\S+)", text)
             if signed:
                 self.account = signed.group(1)
+                self.logged_in = True
+                self._set_phase("ready")
+                self.login_changed.set()
+            elif "waiting for login" in text.lower():
                 self.login_changed.set()
             if " E [" in text or "error" in text.lower():
                 debuglog.debug("soloist", "said", line=text[-300:])
@@ -428,10 +436,11 @@ class Soloist:
             debuglog.debug("soloist", "websocket failed", error=repr(e))
 
     async def _wait_login(self, seconds: float) -> None:
-        """Until it says it's signed in, or that it has no session to bring back (it's then waiting for Connect)."""
+        """Until it says it's signed in, or that it's waiting for Spotify Connect (no session to bring back). Its
+        WebSocket says "not logged in" while it's still bringing a stored session back, so that alone isn't it."""
         deadline = time.monotonic() + seconds
         while self.running and not self.logged_in:
-            if self.logged_in is False and not self._restoring():
+            if self._awaiting_pairing():
                 return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -453,13 +462,11 @@ class Soloist:
             except asyncio.TimeoutError:
                 pass
 
-    def _restoring(self) -> bool:
-        """It's still bringing back a stored session (it said so, and hasn't said it has none)."""
-        # "restoring session" (or "Restoring session from store" with -v); then "logged in as", or
-        # "No session to restore" / "waiting for login"
+    def _awaiting_pairing(self) -> bool:
+        """It has said it has no session and waits for Spotify Connect: "No session to restore" (with -v), "waiting
+        for login — connect to ... from your Spotify app". (A stored session: "restoring session", "logged in as".)"""
         lines = [line.lower() for line in self.output]
-        restoring = any("restoring session" in line for line in lines)
-        return restoring and not any("no session to restore" in line or "waiting for login" in line for line in lines)
+        return any("no session to restore" in line or "waiting for login" in line for line in lines)
 
     def _set_phase(self, phase: str, problem: str = "") -> None:
         self.phase, self.problem = phase, problem
@@ -628,6 +635,8 @@ class Soloist:
 
     async def _play(self, uri: str, start: float, generation: int) -> None:
         await self.ensure()
+        if not self.logged_in:
+            await self._wait_login(LOGIN_SECONDS)  # started a moment ago, still bringing its session back
         if not self.logged_in:
             raise ServiceError(f"Pair Spotify Soloist first: in Spotify on your phone, choose “{self.name}” under Devices")
         if self.other_account():
