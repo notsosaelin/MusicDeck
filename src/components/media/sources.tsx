@@ -99,10 +99,6 @@ export const SourcePager: FC<{
     if (settleMs) settle.current = window.setTimeout(() => onChoose(id), settleMs);
     else onChoose(id);
   };
-  const step = (by: number) => {
-    const from = Math.max(0, places.findIndex((p) => p.id === lit));
-    choose(places[(from + by + places.length) % places.length].id);
-  };
 
   // drawn: the sources looked at lately (the newest last); ready: those settled; shown: the one in sight
   const [drawn, setDrawn] = useState<string[]>([at]);
@@ -113,24 +109,36 @@ export const SourcePager: FC<{
     if (ready.has(at)) setShown(at); // one kept: at once
   }, [at]);
   const top = useRef<HTMLDivElement>(null);
-  // L2/R2 pressed from in the page: the controller goes with it, onto the next one's first thing (left in the one
-  // going, it'd be dropped as that hides, and Steam puts it back up on the tabs)
-  const carry = useRef(false);
+  const dots = useRef(new Map<string, HTMLElement>());
+  const firstThing = (box: ParentNode | null | undefined) =>
+    box?.querySelector<HTMLElement>(".mc-row, .mc-card, .mc-tile") ?? null;
+  // L2/R2 (from the page or the dots): the controller goes at once onto the dot of the source it switches to. The dots
+  // never hide, so it's never left in a page that's about to (Steam then drops it up onto the L1/R1 tabs: the fault
+  // this is here for), and left/right on the dots go on from where the switch went. `carry`: switched from the page,
+  // so once that source shows, the controller goes on down onto its first thing, if it's still on that dot.
+  const carry = useRef<string | null>(null);
+  const shownOnce = useRef(false);
   useLayoutEffect(() => {
-    if (!carry.current) return;
-    const first = top.current?.querySelector<HTMLElement>(".mc-in-sight .mc-row, .mc-in-sight .mc-card, .mc-in-sight .mc-tile");
-    if (!first) return; // not drawn yet: settled() takes it there
-    carry.current = false;
-    first.focus({ preventScroll: true });
+    const doc = top.current?.ownerDocument;
+    const active = doc?.activeElement as HTMLElement | null | undefined;
+    if (carry.current === shown && active && active === dots.current.get(shown)) {
+      carry.current = null;
+      firstThing(top.current?.querySelector(".mc-in-sight"))?.focus({ preventScroll: true });
+    } else if (active && top.current?.contains(active) && active.closest(".mc-browse-body:not(.mc-in-sight)")) {
+      // anything else that left it in a page now out of sight: onto the lit dot before Steam drops it
+      dots.current.get(shown)?.focus({ preventScroll: true });
+    }
   }, [shown]);
   const settled = (id: string, el: HTMLElement) => {
     setReady((r) => new Set(r).add(id));
     if (id !== at) return;
     setShown(id);
-    // the controller was in the one going (L2/R2 from its page): onto the first thing of this one; on the dots, stays
+    if (shownOnce.current) return;
+    shownOnce.current = true;
+    // the tab just opened (Steam puts the controller in its content): onto the first thing once there's one
     const active = el.ownerDocument.activeElement as HTMLElement | null;
     if (!active?.closest(".mc-sources") && !(active && el.contains(active)))
-      window.setTimeout(() => el.querySelector<HTMLElement>(".mc-row, .mc-card, .mc-tile")?.focus({ preventScroll: true }), 0);
+      window.setTimeout(() => firstThing(el)?.focus({ preventScroll: true }), 0);
   };
 
   // the page at its very top when it swaps, and held there (a scroll undone before it's drawn) until the user moves
@@ -164,13 +172,20 @@ export const SourcePager: FC<{
   const dot = (p: Place) => (
     <Focusable
       key={p.id}
+      ref={(el: HTMLElement | null) => {
+        if (el) dots.current.set(p.id, el);
+        else dots.current.delete(p.id);
+      }}
       className={p.id === lit ? "mc-dot mc-on" : "mc-dot"}
       noFocusRing
       // pressable, so Steam makes it a stop for the controller (it skips a Focusable that only has onClick); landing on
       // it is choosing it all the same
       onActivate={() => choose(p.id)}
       preferredFocus={p.id === lit}
-      onGamepadFocus={() => choose(p.id)}
+      onGamepadFocus={() => {
+        if (carry.current !== p.id) carry.current = null; // moved along the dots: staying on them
+        choose(p.id);
+      }}
       onClick={() => choose(p.id)}
     >
       <span />
@@ -185,9 +200,16 @@ export const SourcePager: FC<{
       onButtonDown={(e: any) => {
         const button = e?.detail?.button;
         if (button !== L2 && button !== R2) return;
-        const active = top.current?.ownerDocument.activeElement;
-        carry.current = !!active && !!top.current?.contains(active) && !active.closest(".mc-sources");
-        step(button === R2 ? 1 : -1);
+        e?.stopPropagation?.(); // this switch only: nothing above acts on the same press
+        if (places.length < 2) return;
+        const active = top.current?.ownerDocument.activeElement as HTMLElement | null | undefined;
+        const fromPage = !!active && !!top.current?.contains(active) && !active.closest(".mc-sources");
+        const from = Math.max(0, places.findIndex((p) => p.id === lit));
+        const to = places[(from + (button === R2 ? 1 : -1) + places.length) % places.length].id;
+        // pressed again before the last one showed: still carried down once it does
+        carry.current = fromPage || carry.current ? to : null;
+        choose(to);
+        dots.current.get(to)?.focus({ preventScroll: true });
       }}
     >
       {(places.length > 1 || leading !== undefined) && (
