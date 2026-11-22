@@ -21,7 +21,8 @@ type RemoteItem = { instanceId: string; track: Track };
 export interface RemoteTransport {
   /** for the log */
   name: string;
-  load(item: RemoteItem, startAt: number, autoplay: boolean, volume: number): Promise<Result<null>>;
+  /** blocked: it can't play anything until something about it is put right (see soloistLoad) */
+  load(item: RemoteItem, startAt: number, autoplay: boolean, volume: number): Promise<Result<null> & { blocked?: boolean }>;
   control(item: RemoteItem | undefined, action: string, value?: number): Promise<Result<null>>;
   /** how long reports that disagree with what was just asked for are put down to it catching up */
   catchUpMs: number;
@@ -68,7 +69,8 @@ export class RemoteAudio extends EventTarget {
   loop = false;
   duration = NaN;
   readyState = 0;
-  error: { code: number; message: string } | null = null;
+  /** blocked: not this track's fault; the next would fail too (soloistLoad) */
+  error: { code: number; message: string; blocked?: boolean } | null = null;
   // set by the player on its decks; meaningless here
   crossOrigin: string | null = null;
   preload = "";
@@ -148,7 +150,7 @@ export class RemoteAudio extends EventTarget {
       .then((r) => {
         if (generation !== this.generation) return;
         this.loading = false;
-        if (!r.ok) return this.fail(r.error);
+        if (!r.ok) return this.fail(r.error, !!r.blocked);
         // played or paused while the track was on its way
         if (this.paused === autoplay) this.send(this.paused ? "pause" : "play");
       })
@@ -161,8 +163,9 @@ export class RemoteAudio extends EventTarget {
       this.paused = false;
       this.fire("play");
       if (!this.loading) {
-        // a track that played to its end starts again, as an element does
+        // a track that played to its end starts again, as an element does; one that failed to load tries again
         if (this.ended) this.open(this.item, 0, true);
+        else if (this.error) this.open(this.item, this.base, true);
         else {
           this.expect({ playing: true });
           this.send("play");
@@ -301,11 +304,12 @@ export class RemoteAudio extends EventTarget {
     this.fire("ended");
   }
 
-  private fail(message: string) {
-    dlog(`${this.transport.name} error`, { message });
+  private fail(message: string, blocked = false) {
+    dlog(`${this.transport.name} error`, { message, blocked });
     this.loading = false;
+    this.paused = true; // nothing is playing: Play asks again (see play)
     this.stopTicking();
-    this.error = { code: 4, message };
+    this.error = { code: 4, message, blocked };
     this.fire("error");
   }
 

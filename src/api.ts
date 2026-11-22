@@ -768,6 +768,8 @@ export interface CastStatus {
   error?: string;
   volume?: number | null;
   gone?: string;
+  /** Spotify Soloist: paired at last, after refusing a track for want of it (the player plays it now) */
+  paired?: boolean;
 }
 
 export const castDevices = callable<[], Result<CastDevice[]>>("cast_devices");
@@ -795,7 +797,8 @@ export interface SoloistSetup {
   /** where API keys are made */
   dashboard: string;
 }
-export const soloistLoad = callable<[id: string, track: Track, start: number, autoplay: boolean], Result<null>>(
+/** blocked: the error is about Soloist (not paired, no key...), not the track, so the next track would fail too */
+export const soloistLoad = callable<[id: string, track: Track, start: number, autoplay: boolean], Result<null> & { blocked?: boolean }>(
   "soloist_load",
 );
 export const soloistControl = callable<[id: string, action: string, value?: number], Result<null>>(

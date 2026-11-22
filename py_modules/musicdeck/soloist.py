@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import time
 from typing import Any, Callable, Optional
@@ -55,7 +56,9 @@ START_SECONDS = 20
 LOGIN_SECONDS = 10
 PLAY_SECONDS = 10
 # another track coming on this close to the end of ours means ours ended (autoplay, or queued on the phone)
-END_MARGIN = 6.0
+END_MARGIN = 6
+# after a track starts, this long for its volume to settle on the player's (see Soloist.hold_volume_until)
+VOLUME_HOLD_SECONDS = 3.0
 OUTPUT_KEPT = 200
 
 _install_lock = asyncio.Lock()
@@ -220,10 +223,53 @@ def _environment() -> dict[str, str]:
     return env
 
 
+def _parent_death_hook() -> Optional[Callable[[], None]]:
+    """Linux: what the started Soloist runs first so the system ends it when this backend goes. Decky kills a
+    plugin that's slow to stop (5 s), so stop() isn't always reached; left running, the old Soloist holds its data
+    folder and the next one can't start ("cannot lock data directory"). Looked up here, not in the child."""
+    if native.WINDOWS:
+        return None
+    try:
+        import ctypes
+        prctl = ctypes.CDLL(None, use_errno=True).prctl
+    except Exception:  # not there: _end_leftover still clears one up next time
+        return None
+
+    def hook() -> None:
+        try:
+            prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+        except Exception:
+            pass
+    return hook
+
+
+def _is_our_soloist(pid: int, data_dir: str) -> bool:
+    """Process `pid` is a Soloist (a pid in an old file may be some other program's by now)."""
+    if native.WINDOWS:
+        import subprocess
+        try:
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                                 timeout=10, **native.NO_WINDOW).stdout.decode("utf-8", "replace").lower()
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return '"soloist.exe"' in out
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            args = f.read().split(b"\0")
+    except OSError:
+        return False
+    return bool(args) and os.path.basename(args[0]) == b"soloist" and os.fsencode(data_dir) in args
+
+
 def device_name() -> str:
     """What it's called in Spotify's Devices list."""
     host = (socket.gethostname() or "").split(".")[0].strip()
     return f"MusicDeck ({host})" if host else "MusicDeck"
+
+
+class TrackFailed(ServiceError):
+    """This track wouldn't play; every other ServiceError here is about Soloist itself (not paired, not
+    running, no key...), so the next track would fail the same way and the player stops instead of skipping."""
 
 
 class Soloist:
@@ -254,6 +300,8 @@ class Soloist:
         self.expected_account: Optional[str] = None
         self.active = False
         self.login_changed = asyncio.Event()
+        # a track was refused for want of pairing: once it's paired, the player is told, and plays it on
+        self.refused_unpaired = False
         # what it's playing, as it says
         self.current: Optional[str] = None
         self.state = "idle"
@@ -261,6 +309,9 @@ class Soloist:
         self.pos_at_ms = 0.0
         self.speed = 0.0
         self.volume: Optional[int] = None
+        # until then, a volume it reports isn't someone turning it: becoming Spotify's active device, it takes the
+        # volume Spotify keeps for it (whatever a phone left it at), over --initial-volume and the player's own
+        self.hold_volume_until = 0.0
         # what the player asked for: the track (URI), its length, where it's cued (not started yet)
         self.want: Optional[str] = None
         self.duration = 0.0
@@ -313,6 +364,7 @@ class Soloist:
                 exe = await install(self.runtime_dir, self.http(), force=self.expired, builds=self.builds)
                 self.expired = False
                 self._set_phase("starting")
+                await self._end_leftover()
                 await self._store_key(exe)
                 port = await self._spawn(exe)
                 await self._connect(port)
@@ -322,6 +374,29 @@ class Soloist:
                 raise
         # a stored session comes back within a moment; without one it waits for Spotify Connect
         await self._wait_login(LOGIN_SECONDS)
+
+    async def _end_leftover(self) -> None:
+        """A Soloist still running on this data folder from before (the backend killed before it could stop it,
+        or another copy of MusicDeck): ended, or this one can't start."""
+        try:
+            with open(os.path.join(self.data_dir, "soloist.pid"), encoding="utf-8") as f:
+                pid = int(f.read().strip())
+        except (OSError, ValueError):
+            return
+        if pid <= 0 or pid == os.getpid() or not _is_our_soloist(pid, self.data_dir):
+            return
+        debuglog.debug("soloist", "ending one left running", pid=pid)
+        for sig, seconds in ((signal.SIGTERM, 5.0), (getattr(signal, "SIGKILL", signal.SIGTERM), 3.0)):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                return
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.2)
+                if not _is_our_soloist(pid, self.data_dir):
+                    return
+        raise ServiceError("An earlier Spotify Soloist is still running and won't stop")
 
     async def _store_key(self, exe: str) -> None:
         os.makedirs(self.data_dir, exist_ok=True)
@@ -353,7 +428,8 @@ class Soloist:
             "--cache-dir", os.path.join(self.data_dir, "cache"), "--cache-size", "300",
             "--initial-volume", str(max(0, min(100, volume))), "--ws", "127.0.0.1:0",
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env=_environment(), **native.NO_WINDOW)
+            env=_environment(), **native.NO_WINDOW,
+            **({"preexec_fn": hook} if (hook := _parent_death_hook()) else {}))
         self._spawn_task(self._follow(self.proc))
         debuglog.debug("soloist", "started", pid=self.proc.pid)
         deadline = time.monotonic() + START_SECONDS
@@ -397,6 +473,7 @@ class Soloist:
                 self.logged_in = True
                 self._set_phase("ready")
                 self.login_changed.set()
+                self._paired_now()
             elif "waiting for login" in text.lower():
                 self.login_changed.set()
             if " E [" in text or "error" in text.lower():
@@ -517,6 +594,8 @@ class Soloist:
             self.active = bool(m.get("is_active"))
             self._set_phase("ready" if self.logged_in else "pairing")
             self.login_changed.set()
+            if self.logged_in:
+                self._paired_now()
             return
         if kind == "error":
             debuglog.debug("soloist", "error", message=str(m.get("message"))[:300])
@@ -534,6 +613,11 @@ class Soloist:
             self._position(m["position"])
         if isinstance(m.get("volume"), (int, float)):
             self.volume = int(m["volume"])
+            wanted = round(self.level * 100)
+            if time.monotonic() < self.hold_volume_until and abs(self.volume - wanted) > 1:
+                debuglog.debug("soloist", "volume put back", said=self.volume, wanted=wanted)
+                self.volume = wanted
+                self._spawn_task(self._quietly("set_volume", volume=wanted))
         if kind == "device_changed":
             debuglog.debug("soloist", "device changed", message=json.dumps(m)[:300])
         self._report(volume_only=kind == "volume_changed")
@@ -597,8 +681,16 @@ class Soloist:
                 status.update({"state": "paused", "position": self.last_ours})
             else:
                 status.update({"state": state, "position": self.last_ours})
+        if list(status) == ["volume"] and self.last_sent is not None and self.last_sent.get("volume") == status["volume"]:
+            return  # its answer to a volume the player set: nothing new
         if status:
             self._send_status(status)
+
+    def _paired_now(self) -> None:
+        if self.refused_unpaired:
+            self.refused_unpaired = False
+            debuglog.debug("soloist", "paired; the player plays on")
+            self._send_status({"paired": True})
 
     def _send_status(self, status: dict[str, Any]) -> None:
         # it sends two or three messages per change (state, playback state, position): pass on what's new
@@ -638,6 +730,7 @@ class Soloist:
         if not self.logged_in:
             await self._wait_login(LOGIN_SECONDS)  # started a moment ago, still bringing its session back
         if not self.logged_in:
+            self.refused_unpaired = True
             raise ServiceError(f"Pair Spotify Soloist first: in Spotify on your phone, choose “{self.name}” under Devices")
         if self.other_account():
             raise ServiceError(self._other_account_problem())
@@ -646,6 +739,7 @@ class Soloist:
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self.waiting.setdefault(uri, []).append(future)
         self.current = None
+        self.hold_volume_until = time.monotonic() + PLAY_SECONDS + VOLUME_HOLD_SECONDS
         if not self.active:
             await self.send("activate")
         await self.send("play", uri=uri)
@@ -654,7 +748,7 @@ class Soloist:
         except asyncio.TimeoutError:
             if generation == self.generation:
                 self.want, self.ours = None, False
-                raise ServiceError("Spotify Soloist couldn't play this track") from None
+                raise TrackFailed("Spotify Soloist couldn't play this track") from None
             return
         finally:
             futures = self.waiting.get(uri)
@@ -662,6 +756,9 @@ class Soloist:
                 futures.remove(future)
         if generation == self.generation and start > 0.5:
             await self.send("seek", position_ms=int(start * 1000))
+        # the player's volume, once it's playing (see hold_volume_until)
+        self.hold_volume_until = time.monotonic() + VOLUME_HOLD_SECONDS
+        await self._quietly("set_volume", volume=round(self.level * 100))
 
     async def control(self, action: str, value: Optional[float] = None) -> None:
         """play, pause, stop, seek (seconds) or volume (0..1)."""

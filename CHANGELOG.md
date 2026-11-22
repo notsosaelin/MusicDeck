@@ -11,7 +11,10 @@ What changed in each version, newest first. Every build put on a device has its 
   Soloist from Spotify, switches the source over by itself the first time Spotify refuses it, and shows what's left
   to do (choosing "MusicDeck (this device)" once under Devices in Spotify on your phone). Library, search, playlists
   and lyrics work as before; songs played through Soloist skip the equalizer, volume levelling and crossfade, and
-  can't be cast. Accounts that play now carry on as they are. Tested on Windows; Linux (the Deck) not yet.
+  can't be cast. Accounts that play now carry on as they are. Until Soloist is paired, playing stops on the song
+  (rather than skipping through the queue) and carries on by itself once you've chosen it on your phone. Tested on
+  Windows and Linux (Bazzite on a ROG Ally X).
+- **Bandcamp**: a home view Bandcamp sends nothing for says so instead of failing with an internal error.
 
 ## 0.43.0
 

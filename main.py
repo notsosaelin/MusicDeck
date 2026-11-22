@@ -17,7 +17,7 @@ import decky
 from musicdeck import backup, burn, cd, cdimage, debuglog, library, lyrics, migrate, models, native, stats
 from musicdeck.background import cancel_all, spawn
 from musicdeck.audio_output import OutputWatcher
-from musicdeck import firewall, peers as peermod, updates, version
+from musicdeck import firewall, peers as peermod, soloist, updates, version
 from musicdeck.cast import CastManager
 from musicdeck.lastfm import Lastfm, LastfmError
 from musicdeck.listenbrainz import ListenBrainz
@@ -1172,9 +1172,21 @@ class Plugin:
         if not isinstance(track, dict) or not isinstance(track.get("id"), str) or not isinstance(start, (int, float)):
             return {"ok": False, "error": "Bad track"}
         duration = track.get("duration") if isinstance(track.get("duration"), (int, float)) else 0
+        blocked = False
+
         async def work():
-            await self._soloist_source(instance_id).soloist_load(track["id"], float(start), bool(autoplay), float(duration))
-        return await _result(work())
+            nonlocal blocked
+            try:
+                await self._soloist_source(instance_id).soloist_load(track["id"], float(start), bool(autoplay), float(duration))
+            except soloist.TrackFailed:
+                raise
+            except ServiceError:
+                blocked = True  # about Soloist, not this track: the player stops rather than skip the queue
+                raise
+        result = await _result(work())
+        if blocked:
+            result["blocked"] = True
+        return result
 
     @_when_ready
     async def soloist_control(self, instance_id: str, action: str, value: Optional[float] = None) -> dict[str, Any]:

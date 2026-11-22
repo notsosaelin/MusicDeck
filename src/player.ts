@@ -322,6 +322,8 @@ export class Player {
   private livePausedAt = 0;
   /** Recovery attempts for the current track; one fresh re-resolve before giving up */
   private recoveries = 0;
+  /** The track playback stopped on because what plays it can't yet (halt): source/id */
+  private halted: string | null = null;
   private stallWatch?: number;
   /** Sleep timer "end of track": pause when the current track finishes instead of moving on */
   stopAfterCurrent = false;
@@ -345,7 +347,17 @@ export class Player {
     this.solo.onVolume = (volume) =>
       this.onSoloist && this.state.update({ volume: Math.min(1, volume / (this.duckLevel || 1)) });
     onSoloistStatus((status) => {
-      if (this.onSoloist && this.current?.instanceId === status.instance) this.solo.onStatus(status);
+      if (!this.onSoloist || this.current?.instanceId !== status.instance) return;
+      if (status.paired) {
+        // the track it stopped on for want of pairing plays now, without another press
+        if (this.halted && this.halted === `${this.current.instanceId}/${this.current.track.id}`) {
+          this.halted = null;
+          dlog("soloist paired: playing on", { id: this.current.track.id });
+          void this.solo.play();
+        }
+        return;
+      }
+      this.solo.onStatus(status);
     });
     this.stallWatch = window.setInterval(() => this.checkStall(), 2000);
   }
@@ -445,6 +457,7 @@ export class Player {
         // report an error that isn't about the new track; acting on it skipped good songs. With HLS
         // attached, hls.js reports real failures itself, with proper fatal flags.
         if (deck.switching || deck.hls || err?.code === MediaError.MEDIA_ERR_ABORTED) return;
+        if ((err as { blocked?: boolean } | null)?.blocked) return this.halt(err!.message);
         this.recover(`media error ${err?.code ?? ""} ${err?.message ?? ""}`.trim());
       },
       { signal },
@@ -1412,6 +1425,17 @@ export class Player {
       this.lastProgress = { time: t, at: Date.now() };
       this.recover("stalled");
     }
+  }
+
+  /**
+   * What plays the track can't play anything yet (Spotify Soloist not paired, say): retrying or skipping on
+   * would only fail through the queue, so stop here and say what's needed. Play again once it's put right.
+   */
+  private halt(message: string) {
+    dlog("halted", { message, id: this.current?.track.id });
+    this.halted = this.current ? `${this.current.instanceId}/${this.current.track.id}` : null;
+    this.state.update({ loading: false, playing: false });
+    notify("Couldn't play", message, this.current);
   }
 
   private onError(reason?: string) {

@@ -208,7 +208,9 @@ class BandcampService(LocalLikes, MusicService):
         sections = [models.section(f"Top {name.lower()}", albums)
                     for (_, name), albums in zip(picks, results) if isinstance(albums, list) and albums]
         if not sections:
-            raise next(r for r in results if isinstance(r, Exception))  # type: ignore[misc]
+            # every genre empty without an error (not raised: next() on nothing is a StopIteration)
+            raise next((r for r in results if isinstance(r, Exception)),
+                       ServiceError("Bandcamp didn't have anything to show; try again in a moment"))
         if isinstance(shows, list) and shows:
             sections.insert(1, models.section("Bandcamp Radio", [models.collection("radio", "list", "All shows",
                                                                                     "Bandcamp Radio")],

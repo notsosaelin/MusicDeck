@@ -252,15 +252,22 @@ async def websocket_tests(http):
     check(await until(lambda: s.logged_in is True), "it says it's signed in")
     check(s.setup_status()["phase"] == "ready", "ready")
 
+    # Spotify keeps a volume for the device (a phone left it at 100): becoming active, it takes that one
+    await s.control("volume", 0.3)
+    fake.volume = 100
     await s.load(A[len("spotify:track:"):], 0, True, 213.573)
     check(fake.sent("play")[-1].get("uri") == A, "the track is played by its URI")
+    check(await until(lambda: fake.sent("set_volume") and fake.sent("set_volume")[-1]["volume"] == 30
+                      and reports and reports[-1].get("volume") == 0.3),
+          "the player's volume is put back once it plays, over the one Spotify kept")
+    check(not any(r.get("volume") == 1.0 for r in reports), "and Spotify's isn't reported as the volume turned up")
     check(await until(lambda: any(r.get("state") == "playing" for r in reports)), "it reports playing")
     first = next(r for r in reports if "state" in r)
     check(first["state"] == "buffering" and first["position"] < 1,
           "the first report is the new track's (not the one before's state and position)")
     n = len(reports)
     await asyncio.sleep(0.3)
-    check(len(reports) == n, "no repeats: its several messages per change make one report")
+    check(len(reports) == n, f"no repeats: its several messages per change make one report")
 
     await s.control("seek", 100)
     check(await until(lambda: fake.sent("seek") and fake.sent("seek")[-1]["position_ms"] == 100000), "seek, in milliseconds")
@@ -327,6 +334,7 @@ async def websocket_tests(http):
         check(False, "a track that doesn't play is an error")
     except ServiceError as e:
         check("couldn't play" in str(e), "a track that doesn't play is an error, in a moment")
+        check(isinstance(e, soloist.TrackFailed), "about the track: the player moves on to the next")
     finally:
         soloist.PLAY_SECONDS = old
     try:
@@ -360,6 +368,8 @@ async def websocket_tests(http):
         check(False, "unpaired, it says to pair it")
     except ServiceError as e:
         check("choose “MusicDeck (test)” under Devices" in str(e), "unpaired, it says how to pair it")
+        check(not isinstance(e, soloist.TrackFailed), "about Soloist, not the track: the player stops, not skips")
+    check(not any(r.get("paired") for r in reports), "no word of pairing yet")
     # just started with a stored session: its WebSocket says "not logged in" before it has brought it back
     # (seen with the real one: the first track was refused as unpaired)
     s.output.clear()
@@ -376,6 +386,8 @@ async def websocket_tests(http):
     t = time.monotonic()
     await s.load(A[len("spotify:track:"):], 0, True, 213.573)
     check(s.logged_in and time.monotonic() - t >= 0.5, "a track asked for meanwhile waits for the session, and plays")
+    check(sum(1 for r in reports if r.get("paired")) == 1,
+          "paired after refusing a track: the player is told once, and plays it on")
     s.output.append("2026-11-20 20:32:28.000: No session to restore")
     check(s._awaiting_pairing(), "\"No session to restore\" is")
     s.logged_in = False
@@ -384,6 +396,23 @@ async def websocket_tests(http):
 
     await s.ws.close()
     await runner.cleanup()
+
+    # a Soloist left running on its data folder (the backend killed before it stopped it) is ended; a pid file
+    # naming some other program by now leaves that alone
+    other = await asyncio.create_subprocess_exec(sys.executable, "-c", "import time; time.sleep(30)")
+    try:
+        with open(os.path.join(s.data_dir, "soloist.pid"), "w") as f:
+            f.write(str(other.pid))
+        check(not soloist._is_our_soloist(other.pid, s.data_dir), "another program isn't taken for Soloist")
+        await s._end_leftover()
+        check(other.returncode is None, "and isn't ended")
+    finally:
+        other.kill()
+        await other.wait()
+    with open(os.path.join(s.data_dir, "soloist.pid"), "w") as f:
+        f.write("not a pid")
+    await s._end_leftover()
+    check(True, "a pid file that doesn't name a process is passed over")
 
 
 # --- the Spotify source switching over ---

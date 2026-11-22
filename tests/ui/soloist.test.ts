@@ -135,6 +135,35 @@ describe("Spotify through Soloist", () => {
     assert.ok(sent("soloist_load").length >= 1);
     assert.equal(player.state.get().playing, false);
   });
+
+  test("not paired yet: it stops on the track instead of failing through the queue, and plays it once paired", async () => {
+    backend.soloist_load = async () => ({ ok: false, error: "Pair Spotify Soloist first", blocked: true });
+    player.playList("sp", ["a", "b", "c"].map(track));
+    await settle(300);
+    assert.equal(sent("soloist_load").length, 1, "asked once: no retry, no skipping");
+    assert.equal(player.current?.track.id, "a", "still on the first track");
+    assert.equal(player.state.get().playing, false);
+    backend.soloist_load = async () => ({ ok: true, data: null });
+    status({ paired: true });
+    await settle(50);
+    assert.equal(sent("soloist_load").length, 2, "paired: the same track is asked for again");
+    assert.equal(sent("soloist_load")[1][1].id, "a");
+    assert.equal(player.current?.track.id, "a");
+    status({ paired: true });
+    await settle(50);
+    assert.equal(sent("soloist_load").length, 2, "only the track it stopped on is played on");
+  });
+
+  test("after it stopped, Play asks for the track again", async () => {
+    backend.soloist_load = async () => ({ ok: false, error: "Pair Spotify Soloist first", blocked: true });
+    player.playList("sp", ["a", "b"].map(track));
+    await settle(300);
+    backend.soloist_load = async () => ({ ok: true, data: null });
+    player.toggle();
+    await settle(50);
+    assert.equal(sent("soloist_load").length, 2);
+    assert.equal(sent("soloist_load")[1][1].id, "a");
+  });
 });
 
 // the player keeps a timer going (its stall watch): let the test process end
