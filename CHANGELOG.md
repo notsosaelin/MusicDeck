@@ -3,7 +3,7 @@
 What changed in each version, newest first. Every build put on a device has its own number
 (see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#versions-and-releasing)).
 
-## Unreleased
+## 0.44.0
 
 - **Spotify for newer accounts**: accounts Spotify refuses to give MusicDeck's own player audio for ("audio key
   error") play through Spotify Soloist, Spotify's own player, once you've made a Soloist API key
@@ -15,6 +15,9 @@ What changed in each version, newest first. Every build put on a device has its 
   (rather than skipping through the queue) and carries on by itself once you've chosen it on your phone. Tested on
   Windows and Linux (Bazzite on a ROG Ally X).
 - **Bandcamp**: a home view Bandcamp sends nothing for says so instead of failing with an internal error.
+- **Big Picture, Browse**: L2/R2 to change source keeps the controller in Browse: it goes onto the new source's dot at
+  once, then down onto its first row when it shows. It used to be dropped up onto the L1/R1 tabs when the source
+  before was taken away, and from the dots the next left/right went on from the wrong one.
 
 ## 0.43.0
 

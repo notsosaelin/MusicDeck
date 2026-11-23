@@ -218,6 +218,14 @@ TIDAL, Plex) shows a QR code instead: scan it, sign in or approve on your phone,
 their own TV-style codes (spotify.com/pair, link.tidal.com); Qobuz's phone comes back to the Deck over your home
 network, so it has to be on the same Wi-Fi.
 
+**Spotify accounts that won't play** ("audio key error", seen with some newer accounts): make a Spotify Soloist API
+key at developer.spotify.com/dashboard/soloist and paste it in the Spotify source's settings. MusicDeck fetches
+Soloist (Spotify's own player) from Spotify and switches the source over to it. Then, in Spotify on your phone, on
+the same Wi-Fi, choose **MusicDeck (your device's name)** under Devices once. Until you do, playing stops on the
+song and tells you so; once paired it plays on by itself. Your library, search and lyrics work as before; songs
+played through Soloist skip the equalizer, volume levelling and crossfade, and can't be cast. The key is kept like
+the tokens below.
+
 **Where those tokens live.** In MusicDeck's settings file, which only your user account can read (mode 600, in a private folder),
 and not encrypted: SteamOS's game mode has no system keyring to lock them with, and a key kept beside them
 would protect nothing. Anything running as your user, or someone signed in to your Deck (SSH included), can
